@@ -164,16 +164,19 @@ looks, never what it measures or does.
 
 The console exports its own state for Prometheus, cached for 30 seconds:
 
-- **backup schedule health:** `cm_backup_health_code` (0 ok, 1 late, 2 stale, 3 never), `cm_backup_due` and the
-  last-success, last-failure and next-due timestamps
-- **runs:** `cm_run_*`
-- **repositories, tiers and spindles:** `cm_repo_bytes`, `cm_tier_free_bytes`, `cm_tier_mounted`,
-  `cm_spindle_busy`, `cm_rest_endpoint_up`
-- **NAS RAID:** `cm_nas_raid_*`
-- **hygiene:** `cm_hygiene_items`
-- **GPU and temperatures from the node collectors:** `cm_gpu_*`, `cm_system_temperature_celsius`
-- **per-source health:** `cm_source_ok{source=…}`. A failing source drops its own series and never the whole
+- **backup schedule health:** `noctyx_backup_health_code` (0 ok, 1 late, 2 stale, 3 never), `noctyx_backup_due`
+  and the last-success, last-failure and next-due timestamps
+- **runs:** `noctyx_run_*`
+- **repositories, tiers and spindles:** `noctyx_repo_bytes`, `noctyx_tier_free_bytes`, `noctyx_tier_mounted`,
+  `noctyx_spindle_busy`, `noctyx_rest_endpoint_up`
+- **NAS RAID:** `noctyx_nas_raid_*`
+- **hygiene:** `noctyx_hygiene_items`
+- **GPU and temperatures from the node collectors:** `noctyx_gpu_*`, `noctyx_system_temperature_celsius`
+- **per-source health:** `noctyx_source_ok{source=…}`. A failing source drops its own series and never the whole
   scrape.
+
+Every metric Noctyx makes starts with `paths.metric_prefix` (default `noctyx`), in the console's `/metrics`, the
+mirror's, the node collectors' and the alert rules alike; a site that kept older dashboards sets its old prefix.
 
 `noctyx tool install-alerting` adds this scrape job (named after `prom_job_console`, default `noctyx`) to
 `/etc/prometheus/prometheus.yml`, along with the alert rules and Alertmanager:

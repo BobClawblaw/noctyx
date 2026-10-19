@@ -33,7 +33,7 @@ if ! grep -q "job_name: @PROM_JOB_CONSOLE@$" "$PY"; then
     tls_config:
       ca_file: /etc/prometheus/@UNIT_PREFIX@-ca.crt
     static_configs:
-      - targets: ['127.0.0.1:20996']
+      - targets: ['127.0.0.1:@UI_PORT@']
 EOJ
 fi
 promtool check config "$PY" >/dev/null
@@ -51,7 +51,7 @@ if [[ -r $CH ]]; then
 import sys
 p, url, tok = sys.argv[1:4]
 s = open(p).read().replace("  receiver: console\n", "  receiver: all\n")
-s += ("- name: all\n  webhook_configs:\n  - url: https://127.0.0.1:20996/api/v1/alert-hook\n    send_resolved: true\n"
+s += ("- name: all\n  webhook_configs:\n  - url: https://127.0.0.1:@UI_PORT@/api/v1/alert-hook\n    send_resolved: true\n"
       "    http_config:\n      tls_config:\n        ca_file: @TLS@/ca.crt\n"
       f"  - url: {url}\n    send_resolved: true\n")
 if tok:
@@ -64,7 +64,7 @@ EOP
 import sys
 p, host, frm, user, pw, to = sys.argv[1:7]
 s = open(p).read().replace("  receiver: console\n", "  receiver: all\n")
-s += ("- name: all\n  webhook_configs:\n  - url: https://127.0.0.1:20996/api/v1/alert-hook\n    send_resolved: true\n"
+s += ("- name: all\n  webhook_configs:\n  - url: https://127.0.0.1:@UI_PORT@/api/v1/alert-hook\n    send_resolved: true\n"
       "    http_config:\n      tls_config:\n        ca_file: @TLS@/ca.crt\n"
       f"  email_configs:\n  - to: {to}\n    from: {frm}\n    smarthost: {host}\n    send_resolved: true\n")
 if user:

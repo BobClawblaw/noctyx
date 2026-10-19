@@ -179,7 +179,7 @@ def hosts(cfg_, only_enabled=True):
 def backup_hosts(cfg_):
     """Hosts Noctyx backs up: enabled, with a repo, not backup:false
     (a monitored-only host like the Mac has metrics but no repo)."""
-    return [h for h in hosts(cfg_) if h.get("backup", True) is not False and h.get("repo") and h["repo"] != "windows-class"]
+    return [h for h in hosts(cfg_) if h.get("backup", True) is not False and h.get("repo") and h.get("address")]
 
 
 def host_by_name(cfg_, name):
@@ -598,7 +598,7 @@ def cmd_prune(a):
         h = host_by_name(c, a.host)
         repos, host_flag = [h["repo"]], ["--host", a.host]
     else:
-        repos, host_flag = [x["id"] for x in c["repositories"] if x["id"] != "windows-class"], []
+        repos, host_flag = [x["id"] for x in c["repositories"]], []
     ok = 0
     for repo in repos:
         if not os.path.isdir(f"{repo_dir(c, repo)}"):
@@ -671,7 +671,7 @@ def cmd_hygiene(a):
     Results land in hygiene.json for the UI and one audit line per host.
     """
     c = cfg()
-    targets = [host_by_name(c, a.host)] if a.host else [h for h in hosts(c) if h.get("os") != "macos" and h.get("repo") != "windows-class"]
+    targets = [host_by_name(c, a.host)] if a.host else [h for h in hosts(c) if h.get("os") != "macos" and h.get("address")]
     try:
         report = json.loads(HYGIENE_FILE.read_text())
     except Exception:
@@ -807,7 +807,7 @@ def reboot_plan(c, name):
     B, W = plan["blockers"], plan["warnings"]
     if h.get("os") == "macos":
         B.append("macOS host: monitored only, Noctyx does not reboot it")
-    if h.get("repo") == "windows-class" or not h.get("address"):
+    if not h.get("address"):
         B.append("no reachable address / not a managed Linux host")
     if B:
         return plan
@@ -1450,8 +1450,6 @@ def last_success(c):
     commits a snapshot at the end of a run, so existence == success."""
     out, errors = {}, []
     for repo in c["repositories"]:
-        if repo["id"] == "windows-class":
-            continue
         try:
             snaps = local_repo_snapshots(c, repo["id"])
         except Exception as e:
@@ -1499,10 +1497,16 @@ def _write_block(key, value, lines=False):
     """Rewrite ONLY one top-level block of the site config ("schedule", "retention",
     "backup_policy"). The rest of the file is hand-written (comments, aligned
     columns) and must survive byte-for-byte, so no json.dump of the whole config.
-    A missing block is inserted before "schedule". Verified by re-parsing before
+    A missing block is inserted before "schedule", or at the end. Verified by re-parsing before
     the atomic replace; owner/mode preserved (the UI runs as root)."""
     text = open(CFG_PATH).read()
     if f'"{key}": {{' not in text:
+        if '"schedule": {' not in text:            # no schedule block: last, before the closing brace
+            end = text.rstrip().rindex("}")
+            body = text[:end].rstrip()
+            new = (body + ("," if not body.endswith(("{", ",")) else "") + f'\n  "{key}": '
+                   + _dump_compact_leaves(value, 2) + "\n" + text[end:])
+            return _replace_cfg(new, key, value)
         at = text.index('"schedule": {')
         ls = text.rfind("\n", 0, at) + 1
         new = text[:ls] + text[ls:at] + f'"{key}": ' + _dump_compact_leaves(value, at - ls) + ",\n\n" + text[ls:]
@@ -1634,7 +1638,7 @@ _DANGEROUS = {"/", "/*", "/**", "*", "**", "/.", "!"}
 
 def policy_hosts(c):
     """Hosts the policy applies to: backed up, Linux, real."""
-    return [h for h in hosts(c) if h.get("os") != "macos" and h.get("repo") not in (None, "windows-class")]
+    return [h for h in hosts(c) if h.get("os") != "macos" and h.get("repo") and h.get("address")]
 
 
 def validate_policy(pol, c=None):
@@ -1918,7 +1922,7 @@ def hf_skip(c):
 def hf_sources(c):
     ex = set(hf_cfg(c)["exclude_hosts"])
     return [h for h in c["hosts"] if h.get("enabled", True) is not False and h.get("address")
-            and h.get("repo") != "windows-class" and h["name"] not in ex]
+            and h["name"] not in ex]
 
 
 def _run_on(c, h, cmd, stdin=None, timeout=600):
@@ -2277,6 +2281,12 @@ def _toml(sections):
     return "\n".join(out) + "\n"
 
 
+def health_timeout(s):
+    """How long a slot's new deployment may take to answer before the switch rolls back (health_timeout_s).
+    Its unit's start timeout is this plus 5 minutes, so systemd never gives up first."""
+    return int(s.get("health_timeout_s", 1800))
+
+
 def _unit_text(rec, slot, s, env):
     d, user = rec["dir"], rec["user"]
     envl = "".join(f"Environment={shlex.quote(f'{k}={v}')}\n" for k, v in env.items())
@@ -2288,7 +2298,7 @@ def _unit_text(rec, slot, s, env):
                 f"[Service]\nType=oneshot\nRemainAfterExit=yes\nUser={user}\nWorkingDirectory={d}\n"
                 f"Environment=HOME={rec['home']}\nEnvironment=PATH={rec['home']}/.local/bin:/usr/local/bin:/usr/bin:/bin\n"
                 f"{envl}ExecStart={d}/start.sh\nExecStop={d}/{rec.get('stop') or 'stop.sh'}\n"
-                f"TimeoutStartSec={int(s.get('health_timeout_s', 3600))}\nTimeoutStopSec=300\n\n"
+                f"TimeoutStartSec={health_timeout(s) + 300}\nTimeoutStopSec=300\n\n"
                 f"[Install]\nWantedBy=multi-user.target\n")
     if rec["kind"] == "spark":
         return (f"# Noctyx recipe deployment: {rec['recipe']}@{rec['sha'][:12]} on slot {slot}. Written by\n"
@@ -2298,7 +2308,7 @@ def _unit_text(rec, slot, s, env):
                 f"[Service]\nType=oneshot\nRemainAfterExit=yes\nUser={user}\nWorkingDirectory={d}\n"
                 f"Environment=HOME={rec['home']}\nEnvironment=PATH={rec['home']}/.local/bin:/usr/local/bin:/usr/bin:/bin\n"
                 f"{envl}ExecStart=/usr/bin/python3 -m spark up\nExecStop=/usr/bin/python3 -m spark down\n"
-                f"TimeoutStartSec={int(s.get('health_timeout_s', 3600))}\nTimeoutStopSec=300\n\n"
+                f"TimeoutStartSec={health_timeout(s) + 300}\nTimeoutStopSec=300\n\n"
                 f"[Install]\nWantedBy=multi-user.target\n")
     return (f"# Noctyx recipe deployment: {rec['recipe']}@{rec['sha'][:12]} on slot {slot}. Written by\n"
             f"# `noctyx recipe-deploy`; rewritten on every switch, so do not edit by hand.\n"
@@ -2460,7 +2470,7 @@ def _switch(c, slot, frm, to, wait_lock=0):
     stop = list(dict.fromkeys([*(s.get("conflicts") or []), f"{P['recipe_unit_prefix']}-{slot}.service"] + ([frm["unit"]] if frm else [])))
     downs = [x for x in {(frm or {}).get("spark_dir"), (frm or {}).get("dir") if (frm or {}).get("kind") == "spark" else None} if x]
     sdowns = [(frm or {})["dir"]] if (frm or {}).get("kind") == "script" else []
-    ht = int(s.get("health_timeout_s", 1800))
+    ht = health_timeout(s)
     lines = [f"""set -uo pipefail
 cd /
 x() {{ echo "+ $*"; "$@"; }}
@@ -2766,8 +2776,22 @@ def cmd_recipe_catalog(a):
 
 # ── recipe discovery: public recipe repos that fit this cluster, fastest / newest ──
 DISCOVER_FILE = STATE_DIR / "recipe-discover.json"
-DISCOVER_QUERIES = ["tensorfold recipe", "dgx-sparks tensorfold", "2x-dgx-sparks", "dual dgx spark tensorfold",
-                    "rtx-5090 tensorfold", "rtx 5090 recipe", "m5 ultra tensorfold", "mlx m5 ultra recipe"]
+DISCOVER_BASE = ["tensorfold recipe"]
+DISCOVER_HW = {"gb10": ["dgx-sparks tensorfold", "2x-dgx-sparks", "dual dgx spark tensorfold"],
+               "rtx5090": ["rtx-5090 tensorfold", "rtx 5090 recipe"],
+               "mac": ["m5 ultra tensorfold", "mlx m5 ultra recipe"]}
+
+
+def discover_queries(c, hws):
+    """recipes.discover_queries replaces the list; otherwise the base ones plus some per GPU on this site."""
+    q = (c.get("recipes") or {}).get("discover_queries")
+    if q:
+        return list(q)
+    out = list(DISCOVER_BASE)
+    for k in sorted(hws):
+        lbl = GPU_LABEL.get(k, k).lower().replace("(", "").replace(")", "")
+        out += DISCOVER_HW.get(k, [f"{k} tensorfold", f"{lbl} recipe"])
+    return list(dict.fromkeys(out))
 LEADERBOARD = "https://tensorfold.dev/api/benchmarks/v1/results"
 _UA = {"User-Agent": "curl/8.5.0 noctyx-recipe-discover", "Accept": "application/json"}
 
@@ -2791,28 +2815,61 @@ def _raw(full, branch, path):
         return None
 
 
+# hardware a recipe can be built for: (key, label, pattern). First match wins, so specific before general.
+GPU_KINDS = [
+    ("gb10", "DGX Spark (GB10)", r"\bgb10\b|dgx[- ]?sparks?|\bsparks?\b"),
+    ("rtx-pro-6000", "RTX PRO 6000", r"rtx[- ]?pro[- ]?6000|pro[- ]?6000[- ]?blackwell"),
+    ("rtx5090", "RTX 5090", r"5090"),
+    ("rtx5080", "RTX 5080", r"5080"),
+    ("rtx4090", "RTX 4090", r"4090"),
+    ("rtx3090", "RTX 3090", r"3090"),
+    ("h200", "H200", r"\bh200\b"), ("h100", "H100", r"\bh100\b"), ("b200", "B200", r"\bb200\b"),
+    ("a100", "A100", r"\ba100\b"), ("l40s", "L40S", r"\bl40s\b"),
+    ("mac", "Apple silicon", r"\bm[345][- ]?(ultra|max|pro)\b|apple[- ]?(silicon|m[1-9])|mac[- ]?studio|\bmlx\b|\bmetal\b"),
+]
+GPU_LABEL = {k: lbl for k, lbl, _ in GPU_KINDS}
+
+
+def hw_key(text):
+    """The GPU a text names (a repo name, a README, nvidia-smi's model): a GPU_KINDS key, or None."""
+    t = (text or "").lower().replace("_", "-")
+    not_gb10 = re.search(r"jetson|\bthor\b|apache[- ]spark|pyspark|spark[- ](sql|streaming|cluster|job)", t)
+    for k, _, pat in GPU_KINDS:
+        if k == "gb10" and not_gb10:
+            continue
+        if re.search(pat, t):
+            return k
+    if re.search(r"sm[- =\"]*120\b", t):                # Blackwell consumer silicon, no model named
+        return "rtx5090"
+    return None
+
+
 def _hw_class(text):
-    """What a recipe is built for, from its name, description and recipe.toml: (class, units)."""
+    """What a recipe is built for, from its name, description and recipe.toml: (key or "other", units)."""
     t = text.lower().replace("_", "-")
     n = None
-    m = re.search(r"\b([1-8])x[- ]?(?:nvidia[- ])?(?:dgx[- ])?(?:spark|gb10)|\btp[= -]?([2-8])\b", t)
+    m = re.search(r"\b([1-8])x[- ]?(?:nvidia[- ])?(?:dgx[- ])?(?:spark|gb10|rtx|h100|h200|b200|a100|l40s)|\btp[= -]?([2-8])\b", t)
     if m:
         n = int(m.group(1) or m.group(2))
-    elif re.search(r"\b(dual|two)[- ](?:nvidia[- ])?(?:dgx[- ])?sparks?\b", t):
-        n = 2
-    elif re.search(r"\b(three)[- ](?:dgx[- ])?sparks?", t):
-        n = 3
-    elif re.search(r"\b(four)[- ](?:dgx[- ])?sparks?", t):
-        n = 4
-    if re.search(r"\bm[345][- ]?(ultra|max|pro)\b|apple[- ]silicon|mac[- ]studio", t) and not re.search(r"spark|gb10", t):
-        return "mac", 1
-    if re.search(r"spark|gb10", t) and not re.search(r"jetson|thor", t):
-        return "gb10", n or 1
-    if re.search(r"5090", t) or (re.search(r"sm[_ =\"-]*120\b", t) and not re.search(r"pro[- ]?[0-9]{4}|4090|3090", t)):
-        return "rtx5090", 1
-    if re.search(r"\bmlx\b|metal", t):
-        return "mac", 1
-    return "other", n or 1
+    else:
+        for w, k in (("dual|two", 2), ("three", 3), ("four", 4)):
+            if re.search(rf"\b({w})[- ](?:nvidia[- ])?(?:dgx[- ])?(?:sparks?|gpus?|nodes?)\b", t):
+                n = k
+                break
+    return hw_key(t) or "other", n or 1
+
+
+def slot_hw(c, name, s):
+    """(GPU key, devices) of a slot: its "hw" / "gpus" in the config, else the GPU its head node reports
+    (the console's facts) and 2 for a head + worker pair."""
+    key = s.get("hw")
+    if not key:
+        try:
+            facts = json.loads((pathlib.Path(P["console_state"]) / "facts.json").read_text())
+            key = hw_key(" ".join(map(str, (facts.get(s.get("head")) or {}).get("gpu") or [])))
+        except (OSError, ValueError):
+            key = None
+    return key or hw_key(name), int(s.get("gpus") or (2 if s.get("worker") else 1))
 
 
 def _speed_sources(c):
@@ -2865,24 +2922,18 @@ def _speed_sources(c):
 
 
 def _hw_match(cls, units, hw):
-    h = (hw or "").lower()
-    if cls == "gb10":
-        return "gb10" in h or "spark" in h
-    if cls == "rtx5090":
-        return "5090" in h
-    if cls == "mac":
-        return "apple" in h or re.search(r"\bm[345]\b", h) is not None
-    return False
+    return hw_key(hw) == cls
 
 
 def recipe_discover(c, limit=80):
     rc_ = recipes_cfg(c)
     slots = rc_["slots"]
-    pairs = [n for n, s in slots.items() if s.get("worker")]
-    singles = {n for n, s in slots.items() if not s.get("worker")}
+    shw = {n: slot_hw(c, n, s) for n, s in slots.items()}           # slot -> (gpu key, devices)
+    macs = {h["name"] for h in c.get("hosts", []) if h.get("os") == "macos"}
+    queries = discover_queries(c, {k for k, _ in shw.values() if k} | ({"mac"} if macs else set()))
     owners = sorted({m.group(1) for v in rc_["catalog"].values() for m in [re.search(r"github\.com/([\w.-]+)/", v.get("repo", ""))] if m})
     seen = {}
-    for q in DISCOVER_QUERIES + [f"user:{o}" for o in owners]:
+    for q in queries + [f"user:{o}" for o in owners]:
         try:
             for it in _gh_search(q):
                 seen.setdefault(it["full_name"], it)
@@ -2891,9 +2942,10 @@ def recipe_discover(c, limit=80):
         time.sleep(6.5)                      # unauthenticated search: 10 requests a minute
     have = {re.sub(r"(\.git)?/*$", "", v.get("repo", "")).lower(): k for k, v in rc_["catalog"].items()}
     speeds = _speed_sources(c)
-    items = []
+    items, n_here, n_away = [], 0, 0
+    site_hw = {k for k, _ in shw.values() if k} | ({"mac"} if macs else set())
     for full, it in sorted(seen.items(), key=lambda kv: kv[1].get("pushed_at") or "", reverse=True):
-        if it.get("archived") or len(items) >= limit:
+        if it.get("archived") or n_here >= limit:
             continue
         br = it.get("default_branch") or "main"
         toml_ = _raw(full, br, "recipe.toml") or ""
@@ -2907,26 +2959,31 @@ def recipe_discover(c, limit=80):
             cls, units = _hw_class(toml_[:4000])
         if cls == "other":
             continue
+        here = cls in site_hw
+        if not here and n_away >= limit // 4:      # other hardware: a few for context, never crowding this site's out
+            continue
+        n_here, n_away = n_here + here, n_away + (not here)
         has_spark = bool(toml_) and _raw(full, br, "spark/__main__.py") is not None
         has_sys = bool(toml_) and not has_spark and _raw(full, br, "setup.sh") is not None and _raw(full, br, "serve.sh") is not None
         has_script = not (has_spark or has_sys) and _raw(full, br, "start.sh") is not None and _raw(full, br, "stop.sh") is not None
         kind = "spark" if has_spark else "systemd" if has_sys else "script" if has_script else None
         models = re.findall(r'^\s*(?:repo|converted_repo|published_repo)\s*=\s*"([\w.-]+/[\w.-]+)"', toml_, re.M)
         fits, why = [], None
-        if cls == "gb10":
-            if units == 2 and kind in ("spark", "script"):
-                fits = pairs
-            elif units > 2:
-                n_gb10 = sum(2 for s_ in slots.values() if s_.get("worker"))
-                why = f"needs {units} Sparks: Noctyx's slots are pairs" + (f" (this site has {n_gb10} in pairs)" if units <= n_gb10 else "")
-            elif units == 1:
-                why = "one Spark: no single-GB10 slot (both pairs are TP=2)"
-        elif cls == "rtx5090" and kind == "systemd":
-            fits = [n for n in singles if n == "rtx5090"]
-        elif cls == "mac":
-            why = "Apple silicon: the Mac is monitored only, not a deploy slot"
-        if not fits and not why:
+        same = {n: g for n, (k, g) in shw.items() if k == cls}       # this site's slots with that GPU
+        lbl = GPU_LABEL.get(cls, cls)
+        if kind is None:
             why = "no spark/, setup.sh + serve.sh or start.sh + stop.sh: needs an adapter"
+        elif cls == "mac" and not same:
+            why = "Apple silicon: recipes deploy as systemd units, so a macOS host can be monitored, not a slot"
+        elif not same:
+            why = f"no {lbl} slot on this site"
+        else:
+            # setup.sh + serve.sh is one machine; spark and start.sh recipes span as many as they say
+            want = 1 if kind == "systemd" else units
+            fits = sorted(n for n, g in same.items() if g == want)
+            if not fits:
+                slots_ = ", ".join(f"{n} ({g}×)" for n, g in sorted(same.items()))
+                why = f"needs {want}× {lbl}; this site's {lbl} slots: {slots_}"
         sp = [s for k in [full.lower(), *[m.lower() for m in models]] for s in speeds.get(k, [])
               if _hw_match(cls, units, s.get("hw")) or s["source"].startswith("harness")]
         best = max(sp, key=lambda s: s.get("tps") or 0) if sp else None
@@ -2941,7 +2998,8 @@ def recipe_discover(c, limit=80):
                       "pushed_at": it.get("pushed_at"), "fork": it.get("fork"), "hw": cls, "units": units, "kind": kind,
                       "models": models[:3], "slots": fits, "why": why, "speed": best, "claimed_tps": claim,
                       "in_catalog": have.get(f"https://github.com/{full}".lower())})
-    return {"ts": time.time(), "items": items, "queries": DISCOVER_QUERIES, "owners": owners}
+    return {"ts": time.time(), "items": items, "queries": queries, "owners": owners,
+            "slots": {n: {"hw": k, "label": GPU_LABEL.get(k, k), "gpus": g} for n, (k, g) in shw.items()}}
 
 
 def discover_rank(x, sort):
@@ -2950,6 +3008,8 @@ def discover_rank(x, sort):
     sp = (x.get("speed") or {}).get("tps")
     if sort == "newest":
         return (0, x.get("pushed_at") or "")
+    if sort == "stars":
+        return (x.get("stars") or 0, x.get("pushed_at") or "")
     return ((2, sp) if sp else (1, x.get("claimed_tps")) if x.get("claimed_tps") else (0, 0), x.get("pushed_at") or "")
 
 
@@ -3151,6 +3211,12 @@ HEAD_UNITS = ("console.service", "directory.service", "hf-mirror.service", "tick
               "hygiene.service", "hygiene.timer")
 
 
+def tick_minutes(c):
+    """How often the tick timer fires (schedule.tick_minutes): a divisor of 60, so *:0/N stays even."""
+    m = int((c.get("schedule") or {}).get("tick_minutes", 15))
+    return min((d for d in (1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, 60) if d >= m), default=60)
+
+
 def site_values(c):
     """Template values that come from the site config rather than paths.py (units, tools, the restore image)."""
     hc = hf_cfg(c)
@@ -3161,7 +3227,7 @@ def site_values(c):
             "CONSOLE_AUTH": "0" if s.get("console_auth", True) is False else "1",
             "REPO_ROOT": s.get("repo_root") or "/", "HEAD_ADDR": s.get("address") or "",
             "HEAD_HOST": head.get("name") or "", "RESTIC_VERSION": str(c.get("restic_version") or "0.19.1"),
-            "REST_PORT": str(s.get("rest_port", 20998)), "TLS_CERT": s.get("tls", {}).get("cert", ""),
+            "REST_PORT": str(s.get("rest_port", 20998)), "TICK_MINUTES": str(tick_minutes(c)), "TLS_CERT": s.get("tls", {}).get("cert", ""),
             "TLS_KEY": s.get("tls", {}).get("key", ""), "NAS_REPO_ROOT": (s.get("nas_ssh") or {}).get("repo_root", "")}
 
 
@@ -3423,7 +3489,7 @@ def _sched_state():
 
 def _sched_plan(c, state):
     sch = c.get("schedule") or {}
-    slack = int(sch.get("tick_minutes", 15)) * 60
+    slack = tick_minutes(c) * 60
     retry = parse_duration(sch.get("retry_after", "1h"))
     last, errors = last_success(c)
     # a repo we could not read (NAS down/hung: the 2026-09-27 outage) says
@@ -3517,7 +3583,7 @@ def main():
     pr.add_argument("--forget", action="append", metavar="ID",
                     help="forget these snapshot ids instead of applying the policy (repeatable)")
     hy = sub.add_parser("hygiene", help="host housekeeping report; --fix auto|manual|ID,ID applies fixes")
-    hy.add_argument("--host"); hy.add_argument("--fix")
+    hy.add_argument("--host"); hy.add_argument("--fix", help="auto (safe fixes) | manual | all (also restarts failed services) | ID,ID")
     rs = sub.add_parser("restore", help="restore a path from a snapshot to staging (NAS), the host, or in place")
     rs.add_argument("--host", required=True); rs.add_argument("--snapshot", default="latest")
     rs.add_argument("--path", required=True); rs.add_argument("--to", choices=["staging", "host"], default="staging")
@@ -3527,7 +3593,8 @@ def main():
     pp = sub.add_parser("probe"); pp.add_argument("--host")
     i = sub.add_parser("install-agent"); i.add_argument("--host"); i.add_argument("--profile", default="system")
     i.add_argument("--with-client-timer", action="store_true")
-    d = sub.add_parser("directory"); d.add_argument("--regen", action="store_true")
+    d = sub.add_parser("directory", help="regenerate what the directory service and the recovery media read")
+    d.add_argument("--regen", action="store_true", help="(the default; accepted for older scripts)")
     t = sub.add_parser("tick", help="run scheduled backups that are due (timer); --dry-run shows the plan")
     t.add_argument("--dry-run", action="store_true")
     ss = sub.add_parser("schedule-set", help="change how often a profile is snapshotted")
@@ -3568,7 +3635,7 @@ def main():
     rcat.add_argument("--name", required=True); g2 = rcat.add_mutually_exclusive_group(required=True)
     g2.add_argument("--json"); g2.add_argument("--remove", action="store_true")
     rdi = sub.add_parser("recipe-discover", help="search GitHub for recipes that fit this cluster; rank by measured speed or recency")
-    rdi.add_argument("--sort", choices=["fastest", "newest"], default="fastest")
+    rdi.add_argument("--sort", choices=["fastest", "newest", "stars"], default="fastest")
     us_ = sub.add_parser("user", help="console accounts: add | del | passwd | role | token | list")
     us_.add_argument("op", choices=["add", "del", "passwd", "role", "token", "list"]); us_.add_argument("--name")
     us_.add_argument("--revoke", action="store_true", help="token: remove the user's API token")

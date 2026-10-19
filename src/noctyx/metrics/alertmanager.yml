@@ -13,7 +13,7 @@ route:
 receivers:
 - name: console
   webhook_configs:
-  - url: https://127.0.0.1:20996/api/v1/alert-hook
+  - url: https://127.0.0.1:@UI_PORT@/api/v1/alert-hook
     send_resolved: true
     http_config:
       tls_config:

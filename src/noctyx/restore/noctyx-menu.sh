@@ -138,7 +138,7 @@ run_engine(){   # run_engine [--dry-run]
   clear
   local tpl; tpl=$(host_field 5)
   if [[ $tpl == gpt-esp-boot-lvm ]]; then
-    msg "$HOST is the head node (LVM). This menu's engine does not rebuild it.\n\nUse docs/runbooks/rebuild-head-node.md (noctyx-restore-head.sh) from the shell."
+    msg "$HOST is the head node (LVM). This menu's engine does not rebuild it.\n\nFrom the shell: noctyx-restore-head.sh on this stick (--help), and the Restore guide's head-node section."
     return
   fi
   echo "noctyx-restore.sh --server $SERVER --host $HOST --snapshot $SNAP --disk $DISK $*"

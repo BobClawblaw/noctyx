@@ -87,7 +87,7 @@ launchctl bootout system /Library/LaunchDaemons/@LAUNCHD_PREFIX@.textfile.plist 
 sleep 3
 code=$(curl -s -o /dev/null -w '%{http_code}' --cacert @TLS@/ca.crt "https://$ADDR:9100/metrics" || true)
 n=$(curl -s --cacert @TLS@/ca.crt -u "prometheus:$(cat "$PASS")" "https://$ADDR:9100/metrics" | grep -c '^node_' || true)
-g=$(curl -s --cacert @TLS@/ca.crt -u "prometheus:$(cat "$PASS")" "https://$ADDR:9100/metrics" | grep -c '^cm_gpu' || true)
+g=$(curl -s --cacert @TLS@/ca.crt -u "prometheus:$(cat "$PASS")" "https://$ADDR:9100/metrics" | grep -c '^@METRIC_PREFIX@_gpu' || true)
 echo "   anonymous: HTTP $code (want 401) · authenticated: $n node_* series · gpu series: $g"
 # Prometheus target list: llm-discover owns it (pins named hosts to their wired IP, rewrites on change)
 "${NX_PY:-python3}" -m noctyx.metrics.llm_discover >/dev/null 2>&1 || true

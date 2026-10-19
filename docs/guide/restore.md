@@ -180,7 +180,7 @@ sudo bash /mnt/noctyx-restore.sh --server 192.0.2.10 --host gpu-01     # finds k
 
 ```bash
 sudo noctyx tool make-restore-usb --usb /dev/sdX3              # an existing FAT partition
-sudo noctyx tool make-restore-usb --usb /dev/sdX3 --dry-run    # list what would be copied
+sudo noctyx tool make-restore-usb --dry-run    # list what would be copied (nothing written or downloaded)
 ```
 
 The partition must be FAT. Both forms need `--usb`.
@@ -243,15 +243,8 @@ Paths that the profile excludes are **not** restored: separate mounts under `/mn
 `/snap` and the apt lists. They come back from their own disks or their own backups. The script creates
 empty mount points for them.
 
-The script is a template: `@HEAD_HOST@` and the node paths are filled in per site. There is no
-`noctyx tool` entry for it, and the stick does not carry it. Render a copy while the head node is healthy,
-and keep it on the stick's `NOCTYX` partition:
-
-```bash
-sudo python3 -c 'import sys, pathlib; from noctyx import orchestrator as o
-sys.stdout.write(o.render_site(o.cfg(), (o.NX_HOME / "restore" / "noctyx-restore-head.sh").read_text()))' \
-  > noctyx-restore-head.sh
-```
+The stick carries a copy rendered for this site: `noctyx-restore-head.sh` on its `NOCTYX` partition, next
+to `noctyx-restore.sh` (`--help` prints its usage).
 
 In the rescue system, write the repository location (the endpoint credential is in the URL) and run the
 script:

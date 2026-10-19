@@ -14,7 +14,7 @@
 #
 # NOT restored here, by the backup profile's design (exclusions-common.conf):
 # /storage, /mnt/*, /var/lib/docker, /snap, apt lists. Those come from their own
-# disks or their own backups — see the head-node rebuild runbook.
+# disks or their own backups — see the Restore guide (docs/guide/restore.md).
 set -Eeuo pipefail
 trap 'echo "CM-RESTORE-HEAD: FAILED at line $LINENO: $BASH_COMMAND" >&2' ERR
 
@@ -26,6 +26,7 @@ while [[ $# -gt 0 ]]; do case $1 in
   --disk) DISK=$2; shift 2;; --repo-file) REPOF=$2; shift 2;; --key) KEY=$2; shift 2;;
   --ca) CA=$2; shift 2;; --host) HOST=$2; shift 2;; --snapshot) SNAP=$2; shift 2;;
   --yes) YES=yes; shift;; --rehearsal) REHEARSAL=yes; shift;;
+  -h|--help) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 0;;
   *) die "unknown argument $1";; esac; done
 [[ -b $DISK && -r $REPOF && -r $KEY && -r $CA ]] || die "need --disk <block dev> --repo-file --key --ca"
 for t in restic sfdisk pvcreate vgcfgrestore vgchange mkfs.ext4 mkfs.vfat python3 chroot blkid; do

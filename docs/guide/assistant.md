@@ -23,7 +23,7 @@ sudo noctyx assistant-set --json '{
 |---|---|---|
 | `enabled` | Use the assistant at all. Off unless set to `true`: nothing is sent to an LLM until you turn it on. | `true` / `false` |
 | `url` | OpenAI-compatible base URL, ending in `/v1`. Noctyx calls `<url>/chat/completions`. | `http(s)://host:port/v1`. Empty means discovered endpoints only. |
-| `model` | Served model id to ask for. If empty, requests carry no model id. | Letters, digits and `. _ : / @ + -`, up to 128 characters |
+| `model` | Served model id to ask for. If empty, the first model the endpoint lists at `/v1/models`. | Letters, digits and `. _ : / @ + -`, up to 128 characters |
 | `timeout_seconds` | Per-request timeout | 5..600, default 60 |
 | `fallback` | When `url` does not answer (or is unset), try every other LLM server Noctyx discovered serving (vLLM, SGLang, llama.cpp, MTPLX, TensorFold) | default `true` |
 | `key_host` | Name of a key file in the `llm_keys` directory (`/etc/noctyx/llm-keys`). The key itself never passes through the command. | CLI only; `""` clears it |
@@ -56,7 +56,7 @@ Admins change the same settings under **Configuration › Assistant LLM** (`/con
 
 The console state dir is `paths.console_state`, `/var/lib/noctyx-console` by default. All three are also available
 over the API: `GET /api/v1/alerts` (with triage), `POST /api/v1/explain` with
-`{"kind": "hygiene", "host": "...", "id": "..."}`, and `GET /api/v1/digest[?refresh=1]`.
+`{"kind": "hygiene", "host": "...", "id": "..."}`, and `GET /api/v1/digest[?refresh=1]` (a refresh writes a new brief, so it needs an operator).
 
 How requests are made:
 
@@ -103,6 +103,6 @@ Use an `https://` URL if the endpoint is off the trusted network.
 No snapshot contents, passwords or repository keys are sent. Host names, model names and alert text are, and a
 hygiene finding's detail can include paths on that host.
 
-The API key goes as a bearer token to the configured endpoint. With `fallback` on, a discovered server gets its own
-key file `<llm_keys>/<host>` if one exists, else the assistant key. Turn `fallback` off to keep the key and the data
-on a single endpoint.
+The API key goes as a bearer token to the configured endpoint. The assistant key only ever goes to that
+endpoint. With `fallback` on, a discovered server gets its own key file `<llm_keys>/<host>` if one exists, else
+no key. Turn `fallback` off to keep the data on a single endpoint.

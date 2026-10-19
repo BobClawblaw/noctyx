@@ -169,7 +169,7 @@ def hf_summary(c):
     run = subprocess.run(["systemctl", "list-units", "--no-legend", "--plain", f"{UNIT}-hf-harvest-*"],
                          capture_output=True, text=True).stdout.split()
     return {**hc, "status": st, "sources": [h["name"] for h in c["hosts"] if h.get("enabled", True) is not False
-                                            and h.get("address") and h.get("repo") != "windows-class"],
+                                            and h.get("address")],
             "endpoint": f"http://{c['server']['address']}:{hc['port']}",
             "service": subprocess.run(["systemctl", "is-active", P["mirror_unit"]], capture_output=True,
                                       text=True).stdout.strip(),
@@ -587,10 +587,10 @@ def capacity():
 
 
 def growth_forecast(days=7):
-    """Used-bytes trend of the NAS tier from Prometheus (cm_tier_used_bytes),
+    """Used-bytes trend of the NAS tier from Prometheus (noctyx_tier_used_bytes),
     least squares over `days`; None until there is >= 2 h of history."""
     try:
-        res = _pr('max(cm_tier_used_bytes{tier=~"nas.*"})', minutes=days * 1440, step=1800)
+        res = _pr('max(noctyx_tier_used_bytes{tier=~"nas.*"})', minutes=days * 1440, step=1800)
         pts = [(float(t), float(v)) for r in res for t, v in r["values"]]
     except Exception:
         return None
@@ -800,18 +800,18 @@ FLEET_Q = {   # instant, all hosts at once: one query per number on the tiles
     "net_tx": f'sum by(host)(rate(node_network_transmit_bytes_total{{{_NET},host!=""}}[1m])) * 8',
     "net_rx": f'sum by(host)(rate(node_network_receive_bytes_total{{{_NET},host!=""}}[1m])) * 8',
     "disk_io": f'sum by(host)(rate(node_disk_read_bytes_total{{{_DSK},host!=""}}[1m]) + rate(node_disk_written_bytes_total{{{_DSK},host!=""}}[1m]))',
-    "gpu_util": 'max by(host)(cm_gpu_utilization_percent{host!=""})',
-    "gpu_temp": 'max by(host)(cm_gpu_temperature_celsius{host!=""})',
-    "gpu_power": 'sum by(host)(cm_gpu_power_watts{host!=""})',
+    "gpu_util": 'max by(host)(noctyx_gpu_utilization_percent{host!=""})',
+    "gpu_temp": 'max by(host)(noctyx_gpu_temperature_celsius{host!=""})',
+    "gpu_power": 'sum by(host)(noctyx_gpu_power_watts{host!=""})',
     # CPU/SoC: AMD k10temp Tctl / Intel package, else the ACPI zones (GB10), else macmon (Mac)
-    "sys_temp": 'max by(host)(node_hwmon_temp_celsius{host!=""} * on(host,instance,chip,sensor) group_left() node_hwmon_sensor_label{label=~"Tctl|Tdie|Package id 0",host!=""}) or max by(host)(node_thermal_zone_temp{host!=""}) or max by(host)(cm_system_temperature_celsius{host!=""})',
+    "sys_temp": 'max by(host)(node_hwmon_temp_celsius{host!=""} * on(host,instance,chip,sensor) group_left() node_hwmon_sensor_label{label=~"Tctl|Tdie|Package id 0",host!=""}) or max by(host)(node_thermal_zone_temp{host!=""}) or max by(host)(noctyx_system_temperature_celsius{host!=""})',
     "nvme_temp": 'max by(host)(node_hwmon_temp_celsius{chip=~"nvme.*",host!=""})',
     # macOS: the sealed system volume at / is tiny; the data volume is what fills up
     "root_pct": '(100 * (1 - node_filesystem_avail_bytes{mountpoint="/System/Volumes/Data",host!=""} / node_filesystem_size_bytes{mountpoint="/System/Volumes/Data",host!=""})) or (100 * (1 - node_filesystem_avail_bytes{mountpoint="/",host!=""} / node_filesystem_size_bytes{mountpoint="/",host!=""}))',
     "load1": 'node_load1{host!=""}',
     "failed_units": 'count by(host)(node_systemd_unit_state{state="failed",host!=""} == 1)',
     "reboot": 'max by(host)(node_reboot_required{host!=""})',
-    "containers": 'count by(host)(cm_container_running{host!=""})',
+    "containers": 'count by(host)(noctyx_container_running{host!=""})',
     "up": 'max by(host)(up{host!=""})',
     # the fast fabric (25 Gb/s+ links: the 200G ConnectX ports carrying tensor-parallel traffic)
     "fabric_tx": 'sum by(host)(rate(node_network_transmit_bytes_total{host!=""}[1m]) and on(host,device) (node_network_speed_bytes > 3e9)) * 8',
@@ -821,10 +821,10 @@ FLEET_SERIES = {   # 1-hour, fleet-wide, for the Cluster panel's charts
     "tokens": 'sum by(model_name)(rate(vllm:generation_tokens_total[1m]))',
     "requests": 'sum(vllm:num_requests_running) or vector(0)',
     "waiting": 'sum(vllm:num_requests_waiting) or vector(0)',
-    "gpu_power": 'sum(cm_gpu_power_watts)',
+    "gpu_power": 'sum(noctyx_gpu_power_watts)',
     "net_tx": f'sum(rate(node_network_transmit_bytes_total{{{_NET}}}[1m])) * 8',
     "net_rx": f'sum(rate(node_network_receive_bytes_total{{{_NET}}}[1m])) * 8',
-    "gpu_temp_max": 'max(cm_gpu_temperature_celsius)',
+    "gpu_temp_max": 'max(noctyx_gpu_temperature_celsius)',
 }
 
 
@@ -867,22 +867,22 @@ def fleet_extras():
         errors.append(f"roster: {str(e)[:80]}")
     try:
         out["infra"] = {
-            "gpu_wh_24h": one("sum(avg_over_time(cm_gpu_power_watts[24h])) * 24"),
-            "gpu_wh_1h": one("sum(avg_over_time(cm_gpu_power_watts[1h]))"),
+            "gpu_wh_24h": one("sum(avg_over_time(noctyx_gpu_power_watts[24h])) * 24"),
+            "gpu_wh_1h": one("sum(avg_over_time(noctyx_gpu_power_watts[1h]))"),
             "tokens_24h": one("sum(increase(vllm:generation_tokens_total[24h]))"),
             "requests_24h": one("sum(increase(vllm:request_success_total[24h]))"),
             "exporters_up": one(f'count(up{{job=~"{P["prom_job_nodes"]}|node"}} == 1)'),
             "exporters_total": one(f'count(up{{job=~"{P["prom_job_nodes"]}|node"}})'),
             "llm_up": one('count(up{job="llm"} == 1)'), "llm_total": one('count(up{job="llm"})'),
-            "rest_up": one("max(cm_rest_endpoint_up)"),
-            "nas_free": one('max(cm_tier_free_bytes{tier=~"nas.*"})'),
-            "nas_used": one('max(cm_tier_used_bytes{tier=~"nas.*"})'),
+            "rest_up": one("max(noctyx_rest_endpoint_up)"),
+            "nas_free": one('max(noctyx_tier_free_bytes{tier=~"nas.*"})'),
+            "nas_used": one('max(noctyx_tier_used_bytes{tier=~"nas.*"})'),
             "raid": [{"array": r["metric"].get("array"), "level": r["metric"].get("level"),
-                      "active": _num(r["value"][1])} for r in _pq("cm_nas_raid_members_active")],
-            "raid_total": {r["metric"].get("array"): _num(r["value"][1]) for r in _pq("cm_nas_raid_members_total")},
-            "raid_sync": {r["metric"].get("array"): _num(r["value"][1]) for r in _pq("cm_nas_raid_sync_percent")},
+                      "active": _num(r["value"][1])} for r in _pq("noctyx_nas_raid_members_active")],
+            "raid_total": {r["metric"].get("array"): _num(r["value"][1]) for r in _pq("noctyx_nas_raid_members_total")},
+            "raid_sync": {r["metric"].get("array"): _num(r["value"][1]) for r in _pq("noctyx_nas_raid_sync_percent")},
             "alerts": len(alerts_view().get("active") or []),
-            "backups_ok": one("count(cm_backup_health_code == 0)"), "backups_total": one("count(cm_backup_health_code)"),
+            "backups_ok": one("count(noctyx_backup_health_code == 0)"), "backups_total": one("count(noctyx_backup_health_code)"),
         }
     except Exception as e:
         errors.append(f"infra: {str(e)[:80]}")
@@ -986,13 +986,22 @@ def _prom(path, **params):
     return d["data"]["result"]
 
 
+_MP = re.compile(r"\bnoctyx_(?=[a-z])")
+
+
+def mp(text):
+    """Noctyx's metric names (noctyx_…) in the site's prefix (paths.metric_prefix): what /metrics emits and
+    what the console queries Prometheus for, so a site keeps its series and dashboards."""
+    return text if P["metric_prefix"] == "noctyx" else _MP.sub(P["metric_prefix"] + "_", text)
+
+
 def _pq(q):
-    return _prom("query", query=q)
+    return _prom("query", query=mp(q))
 
 
 def _pr(q, minutes=60, step=60):
     now = time.time()
-    return _prom("query_range", query=q, start=now - minutes * 60, end=now, step=step)
+    return _prom("query_range", query=mp(q), start=now - minutes * 60, end=now, step=step)
 
 
 def _num(v):
@@ -1093,13 +1102,13 @@ def host_metrics(host, tab):
                         "serial": (v.get("info") or {}).get("serial"), **{k: x for k, x in v.items() if k != "info"}}
                        for d, v in sorted(nv.items())]
     elif tab == "gpu":
-        out["info"] = [r["metric"] for r in _pq(f"cm_gpu_info{{{H}}}")]
+        out["info"] = [r["metric"] for r in _pq(f"noctyx_gpu_info{{{H}}}")]
         out["series"] = {k: _series(_pr(f"{m}{{{H}}}", 60, 30), "gpu") for k, m in (
-            ("util", "cm_gpu_utilization_percent"), ("temp", "cm_gpu_temperature_celsius"),
-            ("power", "cm_gpu_power_watts"), ("clock", "cm_gpu_sm_clock_mhz"))}
-        out["mem_used"] = {r["metric"].get("gpu"): _num(r["value"][1]) for r in _pq(f"cm_gpu_memory_used_bytes{{{H}}}")}
-        out["mem_total"] = {r["metric"].get("gpu"): _num(r["value"][1]) for r in _pq(f"cm_gpu_memory_total_bytes{{{H}}}")}
-        out["proc_mem"] = next((_num(r["value"][1]) for r in _pq(f"cm_gpu_process_memory_bytes{{{H}}}")), None)
+            ("util", "noctyx_gpu_utilization_percent"), ("temp", "noctyx_gpu_temperature_celsius"),
+            ("power", "noctyx_gpu_power_watts"), ("clock", "noctyx_gpu_sm_clock_mhz"))}
+        out["mem_used"] = {r["metric"].get("gpu"): _num(r["value"][1]) for r in _pq(f"noctyx_gpu_memory_used_bytes{{{H}}}")}
+        out["mem_total"] = {r["metric"].get("gpu"): _num(r["value"][1]) for r in _pq(f"noctyx_gpu_memory_total_bytes{{{H}}}")}
+        out["proc_mem"] = next((_num(r["value"][1]) for r in _pq(f"noctyx_gpu_process_memory_bytes{{{H}}}")), None)
     elif tab == "llm":
         out["series"] = {k: _series(_pr(_host_q(LLM_Q[k], host), 60, 30), "model_name")
                          for k in ("gen_tps", "prompt_tps", "running", "waiting", "kv_pct", "ttft_p50", "ttft_p95", "e2e_p50", "itl_p50", "prefix_hit",
@@ -1117,10 +1126,10 @@ def host_metrics(host, tab):
         out["time_offset_s"] = one(f"node_timex_offset_seconds{{{H}}}")
         out["time_synced"] = one(f"node_timex_sync_status{{{H}}}")
         out["boot_ts"] = one(f"node_boot_time_seconds{{{H}}}")
-        out["textfile_age_s"] = one(f"time() - cm_textfile_last_run_timestamp_seconds{{{H}}}")
+        out["textfile_age_s"] = one(f"time() - noctyx_textfile_last_run_timestamp_seconds{{{H}}}")
         out["exporter_up"] = one(f"max(up{{{H}}})")
         out["containers"] = sorted(({"name": r["metric"].get("name"), "image": r["metric"].get("image")}
-                                    for r in _pq(f"cm_container_running{{{H}}}")), key=lambda x: x["name"] or "")
+                                    for r in _pq(f"noctyx_container_running{{{H}}}")), key=lambda x: x["name"] or "")
     else:
         raise ValueError("unknown tab")
     return out
@@ -1399,6 +1408,23 @@ def _api_key(host):
         return None
 
 
+_MODELS = {}
+
+
+def _served_model(url, hdr):
+    """The first model an OpenAI-compatible endpoint lists (cached 10 minutes), or None."""
+    hit = _MODELS.get(url)
+    if hit and hit[0] > time.time() - 600:
+        return hit[1]
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url.rstrip("/") + "/models", headers=hdr), timeout=10) as r:
+            m = next((x.get("id") for x in json.loads(r.read()).get("data", []) if x.get("id")), None)
+    except Exception:
+        m = None
+    _MODELS[url] = (time.time(), m)
+    return m
+
+
 def assistant_ask(user, max_tokens=350, system=SYSTEM_PROMPT):
     """-> (text, model) or (None, reason). Tries the preferred endpoint, then fallbacks."""
     a = assistant_cfg()
@@ -1410,9 +1436,12 @@ def assistant_ask(user, max_tokens=350, system=SYSTEM_PROMPT):
                 "chat_template_kwargs": {"enable_thinking": False},
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
         hdr = {"Content-Type": "application/json"}
-        key = _api_key(host) or _api_key(a.get("key_host"))
-        if key and (host or url == a.get("url")):
+        # the assistant's key goes to the assistant's own url only; a discovered server gets its own key file
+        key = _api_key(a.get("key_host")) if url == a.get("url") else _api_key(host)
+        if key:
             hdr["Authorization"] = f"Bearer {key}"
+        if not model:                    # "empty = the endpoint's first": what /v1/models lists first
+            model = body["model"] = _served_model(url, hdr)
         try:
             req = urllib.request.Request(url.rstrip("/") + "/chat/completions", data=json.dumps(body).encode(), headers=hdr)
             with urllib.request.urlopen(req, timeout=int(a.get("timeout_seconds", 60))) as r:
@@ -1555,7 +1584,7 @@ def nas_raid():
 
 def metrics_text():
     """Prometheus exposition of Noctyx state. Each source is isolated:
-    one failing source drops its series and flips cm_source_ok, never the
+    one failing source drops its series and flips noctyx_source_ok, never the
     whole scrape."""
     if time.time() - _METRICS_CACHE["ts"] < 30:
         return _METRICS_CACHE["text"]
@@ -1563,54 +1592,54 @@ def metrics_text():
     def src(name, fn):
         try:
             fn()
-            out.append(f'cm_source_ok{_lbl(source=name)} 1')
+            out.append(f'noctyx_source_ok{_lbl(source=name)} 1')
         except Exception as e:
             out.append(f'# {name}: {str(e)[:100]}')
-            out.append(f'cm_source_ok{_lbl(source=name)} 0')
+            out.append(f'noctyx_source_ok{_lbl(source=name)} 0')
 
     def schedule():
         sc = schedule_summary()
-        out.append("# HELP cm_backup_health_code 0 ok, 1 late, 2 stale, 3 never (vs the schedule).")
-        out.append("# TYPE cm_backup_health_code gauge")
+        out.append("# HELP noctyx_backup_health_code 0 ok, 1 late, 2 stale, 3 never (vs the schedule).")
+        out.append("# TYPE noctyx_backup_health_code gauge")
         for r in sc["rows"]:
             if not r.get("enabled"):
                 continue
             l = _lbl(host=r["host"], profile=r["profile"])
-            out.append(f"cm_backup_health_code{l} {HEALTH_CODE.get(r.get('health'), 3)}")
-            out.append(f"cm_backup_due{l} {int(bool(r.get('due')))}")
-            out.append(f"cm_backup_interval_seconds{l} {r['every']}")
+            out.append(f"noctyx_backup_health_code{l} {HEALTH_CODE.get(r.get('health'), 3)}")
+            out.append(f"noctyx_backup_due{l} {int(bool(r.get('due')))}")
+            out.append(f"noctyx_backup_interval_seconds{l} {r['every']}")
             if r.get("last_ts"):
-                out.append(f"cm_backup_last_success_timestamp_seconds{l} {r['last_ts']}")
+                out.append(f"noctyx_backup_last_success_timestamp_seconds{l} {r['last_ts']}")
             if r.get("next_ts") and r["next_ts"] != float("inf"):
-                out.append(f"cm_backup_next_due_timestamp_seconds{l} {r['next_ts']}")
+                out.append(f"noctyx_backup_next_due_timestamp_seconds{l} {r['next_ts']}")
             if r.get("failed_at"):
-                out.append(f"cm_backup_last_failure_timestamp_seconds{l} {r['failed_at']}")
+                out.append(f"noctyx_backup_last_failure_timestamp_seconds{l} {r['failed_at']}")
         t = sc.get("tick") or {}
-        out.append(f"cm_tick_timer_active {int(t.get('timer') == 'active')}")
-        out.append(f"cm_tick_running {int(bool(t.get('running')))}")
+        out.append(f"noctyx_tick_timer_active {int(t.get('timer') == 'active')}")
+        out.append(f"noctyx_tick_running {int(bool(t.get('running')))}")
         h = (sc.get("spindle") or {}).get("holder") or {}
-        out.append(f"cm_spindle_busy{_lbl(spindle=(sc.get('spindle') or {}).get('name'))} {int(bool(h))}")
+        out.append(f"noctyx_spindle_busy{_lbl(spindle=(sc.get('spindle') or {}).get('name'))} {int(bool(h))}")
 
     def snapshots():
         sn = snapshot_summary()
         for host, d in sn.get("hosts", {}).items():
             for prof, v in d.get("profiles", {}).items():
-                out.append(f"cm_snapshots_total{_lbl(host=host, profile=prof)} {v['count']}")
-            out.append(f"cm_snapshot_listing_stale{_lbl(host=host)} {int(bool(d.get('stale')))}")
+                out.append(f"noctyx_snapshots_total{_lbl(host=host, profile=prof)} {v['count']}")
+            out.append(f"noctyx_snapshot_listing_stale{_lbl(host=host)} {int(bool(d.get('stale')))}")
         for repo in sn.get("errors", {}):
-            out.append(f"cm_repo_unreadable{_lbl(repo=repo)} 1")
+            out.append(f"noctyx_repo_unreadable{_lbl(repo=repo)} 1")
 
     def storage():
         for t in capacity():
             l = _lbl(tier=t["tier"])
-            out.append(f"cm_tier_mounted{l} {int(t['mounted'])}")
-            out.append(f"cm_tier_free_bytes{l} {t['free_gb'] * 1e9:.0f}")
-            out.append(f"cm_tier_used_bytes{l} {t['used_gb'] * 1e9:.0f}")
+            out.append(f"noctyx_tier_mounted{l} {int(t['mounted'])}")
+            out.append(f"noctyx_tier_free_bytes{l} {t['free_gb'] * 1e9:.0f}")
+            out.append(f"noctyx_tier_used_bytes{l} {t['used_gb'] * 1e9:.0f}")
             for repo, gb in (t.get("repos_gb") or {}).items():
-                out.append(f"cm_repo_bytes{_lbl(repo=repo)} {gb * 1e9:.0f}")
+                out.append(f"noctyx_repo_bytes{_lbl(repo=repo)} {gb * 1e9:.0f}")
 
     def endpoint():
-        out.append(f"cm_rest_endpoint_up{_lbl(url=CM.rest_url(CM.cfg()))} {int(CM.rest_up(CM.cfg()))}")
+        out.append(f"noctyx_rest_endpoint_up{_lbl(url=CM.rest_url(CM.cfg()))} {int(CM.rest_up(CM.cfg()))}")
 
     def raid():
         d = nas_raid()
@@ -1618,11 +1647,11 @@ def metrics_text():
             raise RuntimeError((d or {}).get("error", "no mdstat"))
         for a in d["arrays"]:
             l = _lbl(array=a["array"], level=a["level"])
-            out.append(f"cm_nas_raid_members_total{l} {a['total']}")
-            out.append(f"cm_nas_raid_members_active{l} {a['active']}")
-            out.append(f"cm_nas_raid_syncing{l} {int(a['sync_pct'] is not None)}")
+            out.append(f"noctyx_nas_raid_members_total{l} {a['total']}")
+            out.append(f"noctyx_nas_raid_members_active{l} {a['active']}")
+            out.append(f"noctyx_nas_raid_syncing{l} {int(a['sync_pct'] is not None)}")
             if a["sync_pct"] is not None:
-                out.append(f"cm_nas_raid_sync_percent{l} {a['sync_pct']}")
+                out.append(f"noctyx_nas_raid_sync_percent{l} {a['sync_pct']}")
 
     def jobs():
         seen = set()
@@ -1632,26 +1661,26 @@ def metrics_text():
                 continue
             seen.add(k)
             l = _lbl(cmd=r["cmd"], host=r.get("host") or "")
-            out.append(f"cm_run_running{l} {int(r['state'] == 'running')}")
-            out.append(f"cm_run_died{l} {int(r['state'] == 'died')}")
+            out.append(f"noctyx_run_running{l} {int(r['state'] == 'running')}")
+            out.append(f"noctyx_run_died{l} {int(r['state'] == 'died')}")
             if r.get("rc") is not None:
-                out.append(f"cm_run_last_rc{l} {r['rc']}")
+                out.append(f"noctyx_run_last_rc{l} {r['rc']}")
             if r.get("started_ts"):
-                out.append(f"cm_run_last_start_timestamp_seconds{l} {r['started_ts']}")
+                out.append(f"noctyx_run_last_start_timestamp_seconds{l} {r['started_ts']}")
 
     def hygiene():
         rep = hygiene_report()
         for host, d in (rep.get("hosts") or {}).items():
             items = [i for i in d.get("items", []) if not i.get("fixed")]
             for sev in ("warning", "info"):
-                out.append(f"cm_hygiene_items{_lbl(host=host, severity=sev)} {sum(1 for i in items if i['severity'] == sev)}")
-            out.append(f"cm_hygiene_report_timestamp_seconds{_lbl(host=host)} {d.get('ts', 0)}")
+                out.append(f"noctyx_hygiene_items{_lbl(host=host, severity=sev)} {sum(1 for i in items if i['severity'] == sev)}")
+            out.append(f"noctyx_hygiene_report_timestamp_seconds{_lbl(host=host)} {d.get('ts', 0)}")
 
     for name, fn in (("schedule", schedule), ("snapshots", snapshots), ("storage", storage),
                      ("endpoint", endpoint), ("nas_raid", raid), ("runs", jobs), ("hygiene", hygiene)):
         src(name, fn)
-    out.append(f"cm_metrics_generated_timestamp_seconds {now}")
-    text = "\n".join(out) + "\n"
+    out.append(f"noctyx_metrics_generated_timestamp_seconds {now}")
+    text = mp("\n".join(out) + "\n")
     _METRICS_CACHE.update(ts=now, text=text)
     return text
 
@@ -3045,16 +3074,17 @@ function dragify(el,grip){
  });
 }
 
-async function fetchJSON(u){const r=await fetch(u,{headers:{'Accept':'application/json'}});
+async function fetchJSON(u,auth){const h={'Accept':'application/json'};if(auth)h.Authorization='Bearer '+(localStorage.getItem(LS_TOK)||'');
+ const r=await fetch(u,{headers:h});
  buildCheck(r);
  if(r.status==401&&ME&&ME.mode=='accounts'){location.href='/login?next='+encodeURIComponent(location.pathname+location.hash);throw new Error('sign in')}
  if(!r.ok)throw new Error(u+' -> '+r.status);return r.json()}
 /* the server stamps every response with its build; a page from an older build reloads itself once
    (otherwise a tab left open across a UI restart keeps running stale code with no hint) */
 function buildCheck(r){const b=r.headers.get('X-CM-Build');if(!b||b==BUILD)return;
- let last='';try{last=sessionStorage.getItem('cm_reloaded_for')||''}catch(e){}
+ let last='';try{last=sessionStorage.getItem('noctyx_reloaded_for')||''}catch(e){}
  if(last==b)return;                                   /* already reloaded for this build: don't loop */
- try{sessionStorage.setItem('cm_reloaded_for',b)}catch(e){}
+ try{sessionStorage.setItem('noctyx_reloaded_for',b)}catch(e){}
  location.reload()}
 
 async function tick(p){
@@ -3881,7 +3911,7 @@ function rBrief(d){
  return `<div style="font:12.5px/1.55 var(--sans);white-space:pre-wrap">${esc(d.text)}</div>
   <div class=mut style="font:10.5px var(--mono);margin-top:8px">written ${esc(agoS(d.ts))} by ${esc(d.model||'the assistant')} from live data · <button class=lnk onclick="refreshBrief()">refresh</button>${d.stale_error?' · <span class=warn>refresh failed: '+esc(d.stale_error)+'</span>':''}</div>`}
 async function refreshBrief(){const p=PANELS.find(x=>x.id=='brief');const b=$('b-brief');if(b)b.classList.add('stale');
- try{p._data=await fetchJSON('/api/v1/digest?refresh=1');repaint('brief',p._data)}catch(e){if(b)b.classList.remove('stale')}}
+ try{p._data=await fetchJSON('/api/v1/digest?refresh=1',true);repaint('brief',p._data)}catch(e){if(b)b.classList.remove('stale')}}
 async function explainItem(host,id,btn){btn.disabled=true;btn.textContent='asking…';
  const tok=localStorage.getItem(LS_TOK)||'';
  try{const r=await fetch('/api/v1/explain',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok},body:JSON.stringify({kind:'hygiene',host,id})});
@@ -3954,7 +3984,7 @@ function wireActions(){const t=$('token');
 /* ── reboot: plan → confirm → job. The orchestrator re-checks every blocker; a head-node reboot
    takes this server down, so the page shows a banner, waits for it to answer again, re-adopts jobs. ── */
 let RB=null;
-function rbEligible(n){const h=((OVR&&OVR.hosts)||[]).find(x=>x.name==n);return !!h&&!h.monitored_only&&h.repo!='windows-class'}
+function rbEligible(n){const h=((OVR&&OVR.hosts)||[]).find(x=>x.name==n);return !!h&&!h.monitored_only}
 function rbBtn(n,cls){return `<button class="${cls||'act'}" data-h="${esc(n)}" onclick="rebootHost(this.dataset.h,this)">reboot…</button>`}
 async function rebootHost(n,btn){
  if(btn){btn.disabled=true;btn.textContent='checking…'}
@@ -4294,6 +4324,8 @@ class H(BaseHTTPRequestHandler):
                 return self._json({"host": host, "allowed": False, "blockers": [f"plan failed: {e}"[:200]],
                                    "warnings": [], "impact": []})
         if p == "/api/v1/digest":
+            if q.get("refresh") == "1" and not self._allowed("operate"):     # a new brief costs GPU time
+                return self._deny("operate")
             try:
                 return self._json(digest(force=q.get("refresh") == "1"))
             except Exception as e:

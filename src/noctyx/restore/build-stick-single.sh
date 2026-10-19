@@ -158,10 +158,10 @@ write_stick(){
 @STICK_LABEL@ RECOVERY
 1. Boot this stick. Grub: "Try or Install Ubuntu Server" -> at the first
    installer screen choose "Try Ubuntu" (live session) - NOT install.
-2. sudo mkdir -p /run/nx-keys /run/nx-creds
-3. lsblk -f | grep @STICK_LABEL@   -> sudo mount <that-partition> /mnt
-4. sudo cp /mnt/nx-keys/* /run/nx-keys/ ; sudo cp /mnt/nx-creds/* /run/nx-creds/
-5. sudo bash /mnt/noctyx-restore.sh --server @HEAD_ADDR@ --host NAME
+2. lsblk -f | grep @STICK_LABEL@   -> sudo mount <that-partition> /mnt
+3. sudo bash /mnt/noctyx-restore.sh --server @HEAD_ADDR@ --host NAME
+   (it finds the keys and logins in /mnt/keys and /mnt/creds by itself)
+   The head node itself: sudo bash /mnt/noctyx-restore-head.sh --help
 EOF
     $SUDO umount /mnt/nx-esp
   fi
@@ -253,10 +253,10 @@ if [[ -n $FINISH ]]; then
 @STICK_LABEL@ RECOVERY
 1. Boot this stick. Grub: "Try or Install Ubuntu Server" -> at the first
    installer screen choose "Try Ubuntu" (live session) - NOT install.
-2. sudo mkdir -p /run/nx-keys /run/nx-creds
-3. lsblk -f | grep @STICK_LABEL@   -> sudo mount <that-partition> /mnt
-4. sudo cp /mnt/nx-keys/* /run/nx-keys/ ; sudo cp /mnt/nx-creds/* /run/nx-creds/
-5. sudo bash /mnt/noctyx-restore.sh --server @HEAD_ADDR@ --host NAME
+2. lsblk -f | grep @STICK_LABEL@   -> sudo mount <that-partition> /mnt
+3. sudo bash /mnt/noctyx-restore.sh --server @HEAD_ADDR@ --host NAME
+   (it finds the keys and logins in /mnt/keys and /mnt/creds by itself)
+   The head node itself: sudo bash /mnt/noctyx-restore-head.sh --help
 EOF
     $SUDO umount /mnt/nx-esp
   fi

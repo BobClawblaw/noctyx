@@ -100,7 +100,7 @@ is simply still due on the next tick.
 | `defaults.<profile>` | `every` (a number plus `s` `m` `h` `d` or `w`) and an optional `window` `HH:MM-HH:MM`, which may wrap midnight |
 | `hosts.<host>.<profile>` | merged over the default; `null` disables that profile on that host |
 | `retry_after` | after a failed attempt, wait this long before trying again (default `1h`) |
-| `tick_minutes` | slack, so a backup due a few minutes before the next tick still runs now (default 15) |
+| `tick_minutes` | how often the tick timer fires (a divisor of 60; re-run `install-head --apply`), and the slack, so a backup due a few minutes before the next tick still runs now (default 15) |
 
 The rules:
 

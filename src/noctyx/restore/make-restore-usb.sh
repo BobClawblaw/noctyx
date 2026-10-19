@@ -7,7 +7,7 @@
 # + a bootstrap) so the rescue box needs exactly one curl|bash at 3 a.m.
 #
 #   make-restore-usb.sh --usb /dev/sdX1        # partition must be FAT (label @STICK_LABEL@)
-#   make-restore-usb.sh --dry-run              # show what would be copied
+#   make-restore-usb.sh --dry-run [--usb DEV]  # show what would be copied (nothing written or downloaded)
 #
 # After this: boot target -> "Try Ubuntu" -> ensure network ->
 #   curl -sk https://<head>:20999/api/v1/restore-script -o /tmp/noctyx-restore.sh
@@ -25,8 +25,8 @@ while [[ $# -gt 0 ]]; do case $1 in
   --usb) USB=$2; shift 2;; --dry-run) DRY=1; shift;;
   *) echo "usage: $0 --usb /dev/sdX1 | --dry-run" >&2; exit 1;;
 esac; done
-[[ -n $USB ]] || { echo "usage: $0 --usb /dev/sdX1" >&2; exit 1; }
-[[ -b $USB ]] || { echo "$USB is not a block device" >&2; exit 1; }
+[[ -n $USB || -n $DRY ]] || { echo "usage: $0 --usb /dev/sdX1" >&2; exit 1; }
+[[ -n $DRY || -b $USB ]] || { echo "$USB is not a block device" >&2; exit 1; }
 
 run(){ if [[ -n $DRY ]]; then echo "DRY: $*"; else "$@"; fi; }
 [[ -n $DRY ]] || {
@@ -44,6 +44,8 @@ for k in @REPO_KEYS@/*.key;      do put 600 "$k" keys keys/$(basename "$k"); don
 for p in @REPO_CREDS@/*.pass;    do put 600 "$p" creds creds/$(basename "$p"); done
 run install -m 700 "$HERE/noctyx-restore.sh" $MNT/noctyx-restore.sh
 run install -m 700 "$HERE/noctyx-menu.sh" $MNT/noctyx-menu.sh
+# the head node's own rebuild (GPT + ESP + /boot + LVM): rendered for this site like the rest
+run install -m 700 "$HERE/noctyx-restore-head.sh" $MNT/noctyx-restore-head.sh
 # the stick's fallback server when UDP discovery gets no answer
 [[ -n $DRY ]] || printf 'DEFAULT_SERVER=%s
 ' "$SRV" > $MNT/stick.conf
@@ -52,6 +54,7 @@ run install -m 700 "$HERE/noctyx-menu.sh" $MNT/noctyx-menu.sh
 RV=@RESTIC_VERSION@
 RC=@ISO_DIR@/restic-$RV; mkdir -p "$RC"
 for a in arm64 amd64; do
+  if [[ -n $DRY ]]; then echo "DRY: restic $RV for $a (downloaded and checksum-checked unless cached in $RC)"; continue; fi
   if [[ ! -x $RC/restic-$a ]]; then
     f=restic_${RV}_linux_${a}.bz2; base=https://github.com/restic/restic/releases/download/v$RV
     curl -fsSL -o "$RC/SHA256SUMS" "$base/SHA256SUMS"
@@ -69,9 +72,9 @@ echo "payload present:"; ls -la $MNT
 echo
 echo "USB ready. Boot the sick box from the UBUNTU INSTALLER stick, pick 'Try Ubuntu',"
 echo "then (mount this stick too if auto-mount didn't): "
-echo "  sudo mkdir -p /run/nx-keys /run/nx-creds /run/nx-usb"
+echo "  sudo mkdir -p /run/nx-usb"
 echo "  sudo mount /dev/sdXN /run/nx-usb    # the @STICK_LABEL@ partition: lsblk -f | grep @STICK_LABEL@ (p3 on a self-booting stick)"
-echo "  sudo cp /run/nx-usb/keys/* /run/nx-keys/ ; sudo cp /run/nx-usb/creds/* /run/nx-creds/"
-echo "  sudo bash /run/nx-usb/noctyx-restore.sh --server $SRV --host NAME"
+echo "  sudo bash /run/nx-usb/noctyx-restore.sh --server $SRV --host NAME   # finds keys/ and creds/ beside itself"
+echo "  (the head node: sudo bash /run/nx-usb/noctyx-restore-head.sh --help)"
 echo "Keys on a stick = acceptable blast radius (repo keys decrypt backups that the"
 echo "same stick + server can re-copy); keep the stick IN the drawer when not restoring."

@@ -15,7 +15,7 @@
 #                     make-restore-usb.sh)
 #
 # Usage (the normal path is two commands):
-#   sudo build-stick.sh - --stage            # p1.img + esp.img under @ISO_DIR@/stage-dual (~9 GB, once)
+#   sudo build-stick.sh - --stage            # p1.img + esp.img under @ISO_DIR@/stage-@STICK_LABEL@ (~9 GB, once)
 #   sudo build-stick.sh /dev/sdX --build     # gated: dd p1, GPT, ESP, mkfs p3, payload, full verify
 # Then prove it boots without a machine:  noctyx tool vm-boot-test --arch arm64 --media /dev/sdX
 # (and --arch amd64). Both entries are VM-verified.

@@ -33,7 +33,7 @@ fixed port. Slots live in the site config under `recipes.slots`:
 | `worker` | Second host of a TP pair. Used for the plan, status and discovery fit. The recipe reaches the worker through its own settings (`cluster`, `script_env`). | none |
 | `port` | Port the deployment serves on. Health is checked here. Required. | |
 | `lock` | GPU lock file on the head. `~` means the slot user's home. | `paths.gpu_lock` = `/var/lock/noctyx-gpu.lock` |
-| `health_timeout_s` | How long a start may take before it counts as failed. | 1800 for the health wait; 3600 for the unit's `TimeoutStartSec` |
+| `health_timeout_s` | How long a start may take before it counts as failed. | `1800`; the unit's `TimeoutStartSec` is this plus 300 |
 | `settle_s` | Pause between the stop and the start. | 5 |
 | `gpu_idle_check` | After the stop, wait up to 120 s for `nvidia-smi` to show no compute processes. Refuse if the GPU stays busy. | off |
 | `conflicts` | Other systemd units on the head to disable before the start, for example a server that ran before Noctyx. | `[]` |
@@ -185,27 +185,31 @@ and the prepare step can tell whether the two share a weights cache.
 
 ```sh
 sudo noctyx recipe-discover                  # --sort fastest (default)
-sudo noctyx recipe-discover --sort newest
+sudo noctyx recipe-discover --sort newest      # or --sort stars
 ```
 
-- **Search.** It runs unauthenticated GitHub repository searches: a fixed set of queries for TensorFold, DGX Spark,
-  RTX 5090 and M5 Ultra recipes, plus `user:<owner>` for each GitHub owner already in the catalog. The searches are
-  spaced 6.5 s apart to stay under GitHub's limit. No token is used. Archived repos are skipped, and at most 80
-  results are kept.
-- **Classify.** The hardware comes from the repo name, then its description, then `recipe.toml`: `gb10` with a count
-  of units, `rtx5090`, `mac` or `other`. `other` results are dropped. The kind comes from the files on the default
-  branch: `recipe.toml` with `spark/__main__.py` means `spark`, `recipe.toml` with `setup.sh` and `serve.sh` means
+- **Search.** It runs unauthenticated GitHub repository searches: `tensorfold recipe` plus a few queries for each
+  kind of GPU this site's slots have (and Apple silicon when a host has `"os": "macos"`), plus `user:<owner>` for
+  each GitHub owner already in the catalog. `recipes.discover_queries` replaces the whole list. The searches are
+  spaced 6.5 s apart to stay under GitHub's limit. No token is used. Archived repos are skipped. Up to 80 results
+  for this site's hardware are kept, plus up to 20 for other hardware as context.
+- **Classify.** The hardware comes from the repo name, then its description, then `recipe.toml`: DGX Spark (`gb10`),
+  RTX PRO 6000, RTX 5090/5080/4090/3090, H200, H100, B200, A100, L40S or Apple silicon, with a count of units
+  (`2x`, `tp=2`, `dual`, …). Anything else is dropped. The kind comes from the files on the default branch:
+  `recipe.toml` with `spark/__main__.py` means `spark`, `recipe.toml` with `setup.sh` and `serve.sh` means
   `systemd`, and `start.sh` with `stop.sh` means `script`.
-- **Fit.** A result fits these slots:
-  - **Two-unit GB10 recipe** (`spark` or `script`): every slot that has a `worker`.
-  - **RTX 5090 `systemd` recipe:** only a single-host slot that is named `rtx5090`.
-  - Anything else is listed with the reason it does not fit. Recipes for Apple silicon never fit.
+- **Slot hardware.** Each slot's GPU is its `hw` key (e.g. `"hw": "rtx5090"`), or else what its head node's GPU
+  reports (the console's facts), or else its name. Its size is `gpus`, or 2 for a slot with a `worker`, else 1.
+- **Fit.** A result fits every slot with the same GPU and the right size: a `systemd` recipe needs a one-GPU
+  slot; `spark` and `script` recipes need as many as they name. Anything else is listed with the reason, e.g.
+  "needs 4× DGX Spark (GB10); this site's DGX Spark (GB10) slots: spark-a (2×)". Every kind deploys as a systemd
+  unit, so a macOS host can be monitored but is not a slot.
 - **Speed.** A **measured** speed comes from the recipe harness ledger (`<harness_dir>/stats/*.json`, matched to
   repos through the targets' GitHub links) or from the tensorfold.dev leaderboard (matched by the repo or the model
   ids in its `recipe.toml`, on the same hardware). Without one, the first `tok/s` figure in the README counts as a
   **claim**. Claims are unverified and are often an aggregate over many streams.
 - **Ranking.** `fastest` puts measured speeds first, then claims, then unknown, newest first among equals. `newest`
-  sorts by the last push.
+  sorts by the last push, `stars` by GitHub stars.
 
 Results are saved to `/etc/noctyx/state/recipe-discover.json` for the console. Discovery adds nothing to the
 catalog and deploys nothing. The nightly run (`noctyx nightly`) runs it every day.

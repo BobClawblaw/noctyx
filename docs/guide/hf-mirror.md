@@ -44,7 +44,7 @@ huggingface.co.
 | `/api/{models,datasets,spaces}/{repo}`, `…/revision/{rev}`, `…/tree/{rev}[/path]` | Proxied. If huggingface.co is unreachable, returns a 5xx, or answers 401/403/404 (offline, gated without a token, deleted), and the store has the repo, the mirror answers from the store. |
 | Anything else | Streamed through to huggingface.co unchanged. Redirects to its CDN are passed on. |
 | `/` or `/cm-status` | JSON: store path, request counters, store totals, time of the last harvest |
-| `/metrics` | Prometheus: `cm_hfmirror_requests_total{result=hit\|miss\|fallback\|errors}`, `cm_hfmirror_bytes_total{result=hit\|miss}` |
+| `/metrics` | Prometheus: `noctyx_hfmirror_requests_total{result=hit\|miss\|fallback\|errors}`, `noctyx_hfmirror_bytes_total{result=hit\|miss}` (prefix: `paths.metric_prefix`) |
 
 Every response carries an `X-CM-Mirror` header: `hit` (from the store), `miss` (passed through), `fallback`
 (answered from the store because upstream failed) or `none`.

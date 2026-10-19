@@ -284,7 +284,7 @@ class H(BaseHTTPRequestHandler):
         count("fallback")
         return self.json(200, {"_id": repo, "id": repo, "modelId": repo, "sha": commit, "lastModified": mt,
                                "private": False, "disabled": False, "gated": False, "tags": [], "downloads": 0,
-                               "likes": 0, "cardData": {}, "siblings": sib, "cm_mirror": "offline-fallback"}, commit)
+                               "likes": 0, "cardData": {}, "siblings": sib, "noctyx_mirror": "offline-fallback"}, commit)
 
     # ── plumbing ──
     def proxy(self):
@@ -339,12 +339,13 @@ class H(BaseHTTPRequestHandler):
     def metrics(self):
         with SLOCK:
             s = dict(STATS)
-        lines = ["# TYPE cm_hfmirror_requests_total counter"]
-        lines += [f'cm_hfmirror_requests_total{{result="{k}"}} {s[k]}' for k in ("hit", "miss", "fallback", "errors")]
-        lines += ["# TYPE cm_hfmirror_bytes_total counter",
-                  f'cm_hfmirror_bytes_total{{result="hit"}} {s["hit_bytes"]}',
-                  f'cm_hfmirror_bytes_total{{result="miss"}} {s["miss_bytes"]}']
-        b = ("\n".join(lines) + "\n").encode()
+        pfx = os.environ.get("NOCTYX_PATH_METRIC_PREFIX") or "noctyx"
+        lines = ["# TYPE noctyx_hfmirror_requests_total counter"]
+        lines += [f'noctyx_hfmirror_requests_total{{result="{k}"}} {s[k]}' for k in ("hit", "miss", "fallback", "errors")]
+        lines += ["# TYPE noctyx_hfmirror_bytes_total counter",
+                  f'noctyx_hfmirror_bytes_total{{result="hit"}} {s["hit_bytes"]}',
+                  f'noctyx_hfmirror_bytes_total{{result="miss"}} {s["miss_bytes"]}']
+        b = ("\n".join(lines) + "\n").replace("noctyx_", pfx + "_").encode()
         self.send_response(200); self.send_header("Content-Type", "text/plain; version=0.0.4")
         self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
 

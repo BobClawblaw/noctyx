@@ -160,3 +160,16 @@ def test_setup_templates_render_fully(site_config):
     assert not re.findall(r"@[A-Z_]+@", unit + nas)
     assert "--private-repos" in unit and "--append-only" in unit and "--listen 0.0.0.0:20998" in unit
     assert "REPO_ROOT=/volume1/backups/noctyx" in nas
+
+
+def test_write_block_without_a_schedule_block(tmp_path, monkeypatch):
+    import json
+    from noctyx import orchestrator as o
+    f = tmp_path / "site.json"
+    f.write_text('{\n  "server": {"address": "192.0.2.10"},\n  "hosts": []\n}\n')
+    monkeypatch.setattr(o, "CFG_PATH", str(f))
+    o._write_block("retention", {"keep_daily": 7})
+    d = json.loads(f.read_text())
+    assert d["retention"] == {"keep_daily": 7} and d["server"]["address"] == "192.0.2.10"
+    o._write_block("retention", {"keep_daily": 9})                # and replacing it in place
+    assert json.loads(f.read_text())["retention"] == {"keep_daily": 9}

@@ -20,7 +20,7 @@ Related pages: [install](install.md) · [accounts](accounts.md) · [console](con
 | `console-set` | `console` |
 | `recipe-catalog` | `recipes.catalog` |
 
-A block that is missing is inserted just before `"schedule": {`, so keep a `schedule` block in the file. Every
+A block that is missing is inserted just before `"schedule": {`, or last in the file when there is none. Every
 rewrite is re-parsed before an atomic replace, keeps the file's owner and mode, and is written to the audit log.
 
 ## Top level
@@ -111,7 +111,7 @@ which then replaces the common one. The example's `description` and `exclusions`
 
 | Key | Meaning | Default |
 |---|---|---|
-| `tick_minutes` | grace period when judging "late". The timer itself fires every 15 minutes | `15` |
+| `tick_minutes` | how often the tick timer fires (rounded up to a divisor of 60; `install-head --apply` after changing it), and the grace period when judging "late" | `15` |
 | `retry_after` | wait after a failed attempt | `"1h"` |
 | `defaults` | `{profile: {"every": "24h", "window": "01:00-07:00"}}` for every host | `{}` |
 | `hosts` | `{host: {profile: {...} or null}}`: a host's overrides. `null` disables that profile there | `{}` |
@@ -218,7 +218,7 @@ sudo noctyx assistant-set --json '{"enabled": true, "url": "http://192.0.2.21:80
 | `worker` | second host of a TP pair | none |
 | `port` | port the model serves on | **required** |
 | `lock` | GPU lock file on the head | `paths.gpu_lock` |
-| `health_timeout_s` | how long a new deployment has to answer `/health` and `/v1/models` | `1800` (the unit's start timeout defaults to `3600`) |
+| `health_timeout_s` | how long a new deployment has to answer `/health` and `/v1/models` | `1800` (the unit's start timeout is this plus 300) |
 | `settle_s` | pause between stop and start | `5` |
 | `gpu_idle_check` | after stopping, wait until `nvidia-smi` shows no compute process | `false` |
 | `conflicts` | other systemd units stopped before a switch | `[]` |
@@ -301,6 +301,7 @@ noctyx paths     # {"config": ..., every effective path}
 | `prom_node_targets`, `prom_llm_targets` | `/etc/prometheus/noctyx-targets.json`, `/etc/prometheus/llm-targets.json` | Prometheus file_sd |
 | `prom_job_console`, `prom_job_nodes` | `noctyx`, `noctyx-nodes` | Prometheus job names |
 | `textfile_name`, `textfile_unit` | `noctyx.prom`, `noctyx-node-textfile` | node collector |
+| `metric_prefix` | `noctyx` | the start of every metric name Noctyx makes |
 | `launchd_prefix` | `dev.noctyx` | launchd labels on Macs |
 | `agent_bin`, `dumps_bin` | `/usr/local/bin/noctyx-agent`, `/usr/local/bin/noctyx-dumps` | on every node |
 | `node_etc`, `node_lib` | `/etc/noctyx`, `/var/lib/noctyx` | on every node |
