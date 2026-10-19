@@ -2128,6 +2128,13 @@ tr.ed td{background:var(--bg-2);padding:8px}
 .cfg .ret{font:12px var(--sans)}
 .cfg input.asin,.cfg input[type=password],.cfg #as-pick{background:var(--bg-0);border:1px solid var(--line);color:var(--fg);border-radius:var(--radius-sm);font:12px var(--mono);padding:4px 6px;width:100%;box-sizing:border-box;max-width:520px}
 .cfg input[type=password]{width:240px}
+input.sw{appearance:none;-webkit-appearance:none;width:36px;height:20px;border-radius:10px;background:var(--bg-3);border:1px solid var(--line);position:relative;cursor:pointer;vertical-align:middle;margin:4px 0;transition:background .15s}
+input.sw::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--fg-dim);transition:left .15s,background .15s}
+input.sw:checked{background:var(--accent);border-color:var(--accent)} input.sw:checked::after{left:18px;background:var(--accent-ink)}
+.cfg .cfgbar{position:sticky;top:0;z-index:6;background:var(--bg-1);padding:8px 0;margin:-4px 0 6px;border-bottom:1px solid var(--line-soft)}
+.cfg .gnote{margin:-2px 0 6px;font:11.5px var(--sans);color:var(--fg-faint)}
+.cfg .setrow{grid-template-columns:170px minmax(0,1fr);max-width:980px} .cfg .setrow textarea{width:100%}
+.cfg .setrow input[type=number]{margin:0 6px 0 0}
 .cfgt{width:100%} .cfgt td{vertical-align:top;padding:6px 8px 6px 0} .cfgt td:last-child{min-width:200px;width:24%}
 .cfgt td{white-space:normal} .cfgt .dbs{line-height:1.9}
 .rslots{display:grid;grid-template-columns:repeat(auto-fit,minmax(380px,1fr));gap:12px;margin-bottom:12px}
@@ -3374,23 +3381,22 @@ function rConfig(d){
   <button class=act onclick="cfgRun('policyApply',{},'apply')" title="push the saved policy to every host again and rescan databases">re-apply</button>
   <button class=act onclick="cfgRun('dumpsNow',{},'dump')" title="dump every enabled database now, without a backup">dump databases now</button>
   <button class=lnk onclick="CFGDIRTY=false;tick(PANELS.find(x=>x.id=='config'))">discard / reload</button></div>
- <div class=cfgsec id=sec-backups><h4>All hosts</h4>
-  <label class=tog><input type=checkbox id=cf-dv${P.docker_volumes?' checked':''} onchange="cfgDirty()"> back up Docker volumes <span class=mut>(/var/lib/docker/volumes — image layers and container filesystems stay excluded)</span></label>
-  <label class=tog><input type=checkbox id=cf-db${P.db_dumps?' checked':''} onchange="cfgDirty()"> dump databases before each <b>system</b> backup <span class=mut>(postgres, mariadb/mysql, redis/valkey SAVE, sqlite — found automatically, into __NODE_LIB__/dumps)</span></label>
-  <div class=cfgcols>
-   <div><div class=k>extra exclude patterns <span class=mut>one per line · restic syntax · <code>!pattern</code> re-includes something the baseline excludes</span></div>
-    <textarea id=cf-ex rows=4 oninput="cfgDirty()" placeholder="/root/scratch/**&#10;!/var/cache/apt/archives">${esc((P.exclude||[]).join('\n'))}</textarea></div>
-   <div><div class=k>extra SQLite files to copy safely <span class=mut>(gitea, grafana are automatic)</span></div>
-    <textarea id=cf-sq rows=4 oninput="cfgDirty()" placeholder="/opt/app/data/app.db">${esc((P.sqlite||[]).join('\n'))}</textarea></div>
-  </div></div>
+ <div class=cfgsec id=sec-backups><h4>All hosts</h4><p class=gnote>What every host's backup covers, unless a host below says otherwise.</p>
+  <div class=setrow><label>Docker volumes</label><div><input type=checkbox class=sw id=cf-dv${P.docker_volumes?' checked':''} onchange="cfgDirty()"></div>
+   <div class=hint>Back up /var/lib/docker/volumes. Image layers and container filesystems stay excluded: they are rebuilt, not restored.</div></div>
+  <div class=setrow><label>Database dumps</label><div><input type=checkbox class=sw id=cf-db${P.db_dumps?' checked':''} onchange="cfgDirty()"></div>
+   <div class=hint>Before each <b>system</b> backup, dump every database found (postgres, mariadb/mysql, redis/valkey SAVE, sqlite) into __NODE_LIB__/dumps, so the snapshot holds a consistent copy.</div></div>
+  <div class=setrow><label>Extra excludes</label><textarea id=cf-ex rows=3 oninput="cfgDirty()" placeholder="/root/scratch/**&#10;!/var/cache/apt/archives">${esc((P.exclude||[]).join('\n'))}</textarea>
+   <div class=hint>One restic pattern per line, on every host. <code>!pattern</code> re-includes something the baseline excludes.</div></div>
+  <div class=setrow><label>Extra SQLite files</label><textarea id=cf-sq rows=2 oninput="cfgDirty()" placeholder="/opt/app/data/app.db">${esc((P.sqlite||[]).join('\n'))}</textarea>
+   <div class=hint>Copied safely (online backup API) before each backup. Gitea's and Grafana's are found automatically.</div></div></div>
  <div class=cfgsec><h4>Per host</h4>
   <table class=cfgt><tr><th>host</th><th>docker volumes</th><th>db dumps</th><th>databases <span class=mut>(untick to skip)</span></th><th>extra excludes</th></tr>${rows}</table>
   ${(d.not_covered||[]).length?`<div class=hint>not backed up by Noctyx: ${esc(d.not_covered.join(', '))} (no restic profile; see the site config)</div>`:''}</div>
- <div class=cfgsec><h4>Retention <span class=mut>— snapshots kept per host and profile; applied by the monthly prune</span></h4>
-  <label class=ret>daily <input id=cf-rd type=number min=0 max=999 value="${esc(R.daily??'')}" oninput="cfgDirty()"></label>
-  <label class=ret>weekly <input id=cf-rw type=number min=0 max=999 value="${esc(R.weekly??'')}" oninput="cfgDirty()"></label>
-  <label class=ret>monthly <input id=cf-rm type=number min=0 max=999 value="${esc(R.monthly??'')}" oninput="cfgDirty()"></label>
-  <span class=mut style="font-size:11px">schedules: <a class=lnk href="/#panel=schedule">Schedule panel</a></span></div>
+ <div class=cfgsec id=sec-retention><h4>Retention</h4><p class=gnote>Snapshots kept per host and profile. The monthly prune applies it, gated by a repository check; the weekly run is a dry run you can read in Runs.</p>
+  <div class=setrow><label>Daily</label><div><input id=cf-rd type=number min=0 max=999 value="${esc(R.daily??'')}" oninput="cfgDirty()"></div><div class=hint>The newest snapshot of each of this many days.</div></div>
+  <div class=setrow><label>Weekly</label><div><input id=cf-rw type=number min=0 max=999 value="${esc(R.weekly??'')}" oninput="cfgDirty()"></div><div class=hint>Then one a week for this many weeks.</div></div>
+  <div class=setrow><label>Monthly</label><div><input id=cf-rm type=number min=0 max=999 value="${esc(R.monthly??'')}" oninput="cfgDirty()"></div><div class=hint>Then one a month for this many months. How often backups run: the <a class=lnk href="/#panel=schedule">Schedule panel</a>.</div></div></div>
  ${hfSection(d.hf||{})}
  ${asSection(d.assistant||{})}
  <div class=cfgsec><details><summary>baseline exclusions — always applied (exclusions-common.conf; a profile with its own list in the site's etc dir uses that instead)</summary>
@@ -3402,33 +3408,28 @@ function hfSection(F){
  const hosts=(F.sources||[]).map(n=>{const h=HS[n]||{};
   const last=h.error?`<span class=bad title="${esc(h.error)}">failed</span>`:h.ts?`${esc(agoS(h.ts))} · +${h.new_blobs||0} files (${esc(fmtBytes(h.new_bytes||0))})${h.bad_hash?` · <span class=bad>${h.bad_hash} bad hash</span>`:''}`:'<span class=mut>never</span>';
   return `<label class=dbc title="harvest model files from ${esc(n)}"><input type=checkbox data-hfhost="${esc(n)}"${ex.has(n)?'':' checked'} onchange="cfgDirty()"><b>${esc(n)}</b> <span class=mut>${last}</span></label>`}).join('');
- return `<div class=cfgsec id=sec-mirror><h4>Hugging Face model mirror <span class=mut>— one copy of every model on the cluster, on __NAS__; hosts download from it instead of huggingface.co</span></h4>
-  <div class=hfline>endpoint <code>HF_ENDPOINT=${esc(F.endpoint||'')}</code> · server <b class="${F.service=='active'?'ok':'bad'}">${esc(F.service||'?')}</b>
-   · store <b>${T.repos??0}</b> repos, <b>${T.blobs??0}</b> files, <b>${esc(fmtBytes(T.bytes||0))}</b>${S.ts?` · harvested ${esc(agoS(S.ts))}`:''}
-   ${F.harvesting?' · <span class=warn>harvest running</span>':''}
-   <button class=act onclick="cfgRun('hfHarvest',{},'harvest')" title="copy new model files from the hosts now (yields to backups)">harvest now</button></div>
-  <label class=tog><input type=checkbox id=cf-hf${F.harvest?' checked':''} onchange="cfgDirty()"> harvest nightly after the backups <span class=mut>(only files the store lacks; checksum-verified; pauses in the backup window)</span></label>
-  <div class=k style="margin-top:6px">harvest from <span class=mut>(untick a host to leave its caches out)</span></div><div class=dbs>${hosts}</div>
-  <label class=ret>bandwidth limit <input id=cf-hfbw type=number min=0 max=10000 value="${esc(F.bwlimit_mb??0)}" oninput="cfgDirty()"> MB/s per copy <span class=mut>(0 = none)</span></label>
-  <div class=hint>Use it: <code>export HF_ENDPOINT=${esc(F.endpoint||'')}</code> (or <code>-e HF_ENDPOINT=…</code> on a container). Files the store has at that commit come from __NAS__; anything else passes through to huggingface.co. If huggingface.co is unreachable, the store's copy is served.</div></div>`}
+ return `<div class=cfgsec id=sec-mirror><h4>Hugging Face model mirror</h4><p class=gnote>One copy of every model on the cluster, on __NAS__. Hosts download from it instead of huggingface.co; anything it lacks passes through, and when huggingface.co is unreachable the stored copy is served.</p>
+  <div class=setrow><label>Status</label><div class=hfline>server <b class="${F.service=='active'?'ok':'bad'}">${esc(F.service||'?')}</b> · store <b>${T.repos??0}</b> repos, <b>${T.blobs??0}</b> files, <b>${esc(fmtBytes(T.bytes||0))}</b>${S.ts?` · harvested ${esc(agoS(S.ts))}`:''}${F.harvesting?' · <span class=warn>harvest running</span>':''}
+   <button class=act onclick="cfgRun('hfHarvest',{},'harvest')" title="copy new model files from the hosts now (yields to backups)">harvest now</button></div></div>
+  <div class=setrow><label>Endpoint</label><div><code>HF_ENDPOINT=${esc(F.endpoint||'')}</code></div><div class=hint>Per process: <code>export HF_ENDPOINT=…</code>; a container: <code>-e HF_ENDPOINT=…</code>. Recipe deploys use it by themselves.</div></div>
+  <div class=setrow><label>Nightly harvest</label><div><input type=checkbox class=sw id=cf-hf${F.harvest?' checked':''} onchange="cfgDirty()"></div><div class=hint>After the backups: copies only files the store lacks, checks each against its hash, pauses in the backup window.</div></div>
+  <div class=setrow><label>Harvest from</label><div class=dbs>${hosts}</div><div class=hint>Untick a host to leave its caches out.</div></div>
+  <div class=setrow><label>Bandwidth limit</label><div><input id=cf-hfbw type=number min=0 max=10000 value="${esc(F.bwlimit_mb??0)}" oninput="cfgDirty()"> MB/s</div><div class=hint>Per copy; 0 = no limit.</div></div></div>`}
 function asSection(A){
  const eps=(A.endpoints||[]).map((e,i)=>`<option value="${i}">${esc(e.host)} · ${esc(e.model||'?')} · ${esc(e.engine||'')} — ${esc(e.url)}</option>`).join('');
- return `<div class=cfgsec id=sec-assistant><h4>Assistant LLM <span class=mut>— the model Noctyx asks to explain findings, triage alerts and write the morning brief (text only; it never runs anything)</span></h4>
-  <label class=tog><input type=checkbox id=as-on${A.enabled!==false?' checked':''} onchange="cfgDirty()"> use the assistant</label>
-  <div class=cfgcols>
-   <div><div class=k>endpoint <span class=mut>OpenAI-compatible base URL, ending in /v1</span></div>
-    <input id=as-url class=asin value="${esc(A.url||'')}" placeholder="http://host:port/v1" oninput="cfgDirty()">
-    ${eps?`<div class=k style="margin-top:6px">or pick one Noctyx sees serving</div><select id=as-pick onchange="asPick(this.value)"><option value="">—</option>${eps}</select>`:''}</div>
-   <div><div class=k>model <span class=mut>the served model id; empty = the endpoint's first</span></div>
-    <input id=as-model class=asin value="${esc(A.model||'')}" placeholder="(as served)" oninput="cfgDirty()" list=as-models><datalist id=as-models></datalist>
-    <label class=ret style="display:block;margin-top:6px">timeout <input id=as-to type=number min=5 max=600 value="${esc(A.timeout_seconds??60)}" oninput="cfgDirty()"> s</label></div>
-  </div>
-  <label class=tog><input type=checkbox id=as-fb${A.fallback!==false?' checked':''} onchange="cfgDirty()"> fall back to any other serving model when this one does not answer</label>
-  <div class=hfline>API key <b class="${A.has_key?'ok':'mut'}">${A.has_key?'set':'none'}</b>
-   <input id=as-key type=password autocomplete=off placeholder="new key (stored root-only, never shown)" style="width:240px">
-   <button class=act onclick="asKey(false)">set key</button>${A.has_key?'<button class=lnk onclick="asKey(true)">clear key</button>':''}</div>
-  <div class=hfline><button class=act onclick="asTest()" title="one short request with the values above, before saving">test</button>
-   <button class=act onclick="asSave()">save assistant</button> <span id=as-res class=mut></span></div></div>`}
+ return `<div class=cfgsec id=sec-assistant><h4>Assistant LLM</h4><p class=gnote>The model Noctyx asks to explain findings, triage alerts and write the morning brief. Text only: it never runs anything.</p>
+  <div class=setrow><label>Use the assistant</label><div><input type=checkbox class=sw id=as-on${A.enabled!==false?' checked':''} onchange="cfgDirty()"></div></div>
+  <div class=setrow><label>Endpoint</label><div><input id=as-url class=asin value="${esc(A.url||'')}" placeholder="http://host:port/v1" oninput="cfgDirty()">
+    ${eps?`<select id=as-pick onchange="asPick(this.value)" style="margin-top:6px"><option value="">or pick one Noctyx sees serving…</option>${eps}</select>`:''}</div>
+   <div class=hint>An OpenAI-compatible base URL, ending in /v1.</div></div>
+  <div class=setrow><label>Model</label><div><input id=as-model class=asin value="${esc(A.model||'')}" placeholder="(as served)" oninput="cfgDirty()" list=as-models><datalist id=as-models></datalist></div><div class=hint>The served model id; empty = the endpoint's first. <b>Test</b> lists what it serves.</div></div>
+  <div class=setrow><label>Timeout</label><div><input id=as-to type=number min=5 max=600 value="${esc(A.timeout_seconds??60)}" oninput="cfgDirty()"> s</div></div>
+  <div class=setrow><label>Fallback</label><div><input type=checkbox class=sw id=as-fb${A.fallback!==false?' checked':''} onchange="cfgDirty()"></div><div class=hint>When this one does not answer, ask any other model Noctyx sees serving.</div></div>
+  <div class=setrow><label>API key</label><div class=hfline><b class="${A.has_key?'ok':'mut'}">${A.has_key?'set':'none'}</b>
+   <input id=as-key type=password autocomplete=off placeholder="new key">
+   <button class=act onclick="asKey(false)">set key</button>${A.has_key?'<button class=lnk onclick="asKey(true)">clear key</button>':''}</div><div class=hint>Stored root-only on the head node; never shown or logged.</div></div>
+  <div class=setrow><label></label><div class=hfline><button class=act onclick="asTest()" title="one short request with the values above, before saving">test</button>
+   <button class=act onclick="asSave()">save assistant</button> <span id=as-res class=mut></span></div></div></div>`}
 function asPick(i){const A=(PANELS.find(x=>x.id=='config')._data||{}).assistant||{},e=(A.endpoints||[])[i];if(!e)return;
  $('as-url').value=e.url;$('as-model').value=e.model||'';cfgDirty()}
 function asVals(){return {enabled:$('as-on').checked,url:$('as-url').value.trim(),model:$('as-model').value.trim(),
