@@ -2,8 +2,8 @@
 
 This page covers who may use the Noctyx console and what each person may do. Access works in one of three modes:
 open, accounts or token. In accounts mode each person signs in with a local account that has one of three roles.
-Sessions are signed cookies, every sign-in and every action goes to the audit log, and a bearer token lets
-scripts reach the action API.
+Sessions are signed cookies, every sign-in and every action goes to the audit log, and scripts use a per-user API
+token that carries its user's role.
 
 Related pages: [install](install.md) · [console tour](console.md) · [site config](site-config.md#server).
 
@@ -16,7 +16,7 @@ reaches the console through its unit):
 | Mode | When | Looking | Acting |
 |---|---|---|---|
 | **open** | `server.console_auth: false` | anyone | anyone. Signing in is optional: it stores your display settings in your account and puts your name in the audit log |
-| **accounts** | `console_auth` on (the default) and at least one user | signed-in users only (otherwise redirected to `/login`) | by role, below. The bearer token also works |
+| **accounts** | `console_auth` on (the default) and at least one user | signed-in users only (otherwise redirected to `/login`) | by role, below; scripts use a user's API token |
 | **token** | `console_auth` on and no users yet | anyone | only requests that carry the bearer token |
 
 `noctyx user list` prints the current mode. The header shows **open access** in open mode, and your name, role
@@ -28,8 +28,8 @@ and **sign out** when you are signed in.
 
 | Role | May |
 |---|---|
-| `viewer` | see every page and panel, browse snapshots and download files from them. Changes nothing |
-| `operator` | also run jobs: backups, verifies, copy, prune dry run, probes, restores to staging or a fresh directory on the host, hygiene fixes, database dumps, HF harvest, recipe deploy/prepare/stop/start/rollback, recipe discovery, assistant **test**, LLM explanations |
+| `viewer` | see every page and panel and browse snapshots. Changes nothing, and cannot download files from snapshots (they can hold keys and databases) |
+| `operator` | also download files and directories from snapshots, and run jobs: backups, verifies, copy, prune dry run, probes, restores to staging or a fresh directory on the host, hygiene fixes, database dumps, HF harvest, recipe deploy/prepare/stop/start/rollback, recipe discovery, assistant **test**, LLM explanations |
 | `admin` | also change configuration and reboot hosts: the actions in `ADMIN_ACTIONS` below, plus setting or clearing the assistant's API key |
 
 Admin-only actions (`ADMIN_ACTIONS` in `console.py`): `setPolicy` (backup policy, retention, mirror settings),
@@ -79,8 +79,8 @@ sudo noctyx user list
   ```
 
 - **Lockout.** After 5 failed sign-ins from one IP address, that address waits 30 seconds, then 60, 120 and so
-  on, up to 1 hour, before it may try again. A successful sign-in clears the count. The counter is kept in memory,
-  so restarting the console resets it.
+  on, up to 1 hour, before it may try again. A successful sign-in clears the count. The counts are kept in
+  `<console_state>/login-fails.json`, so restarting the console does not reset them.
 - POST requests whose `Origin` header names another site are refused.
 
 ## Display settings per user
@@ -118,14 +118,22 @@ noctyx status                              # the last 8 lines, formatted
 
 The console's **Jobs / Audit** panel shows the most recent lines (`/api/v1/audit?n=N`, at most 200).
 
-## API token for scripts
+## API tokens for scripts
 
-The console makes a random bearer token at `<ui_token>` (default `/etc/noctyx/ui-token`, 0600) the first time it
-starts. A request that carries it may do anything an admin may do, in both token and accounts modes. Treat it
-like a root password.
+**Accounts mode.** Give the script its own user with the least role it needs, then issue that user a token:
 
 ```bash
-TOKEN=$(sudo cat /etc/noctyx/ui-token)
+sudo noctyx user add --name backup-bot --role operator
+sudo noctyx user token --name backup-bot          # printed once; only its hash is stored
+sudo noctyx user token --name backup-bot --revoke
+```
+
+A request with `Authorization: Bearer nx_backup-bot_...` acts as `backup-bot`, with that user's role as it is
+now: change the role and the token follows, delete the user and the token stops working. Issuing a new token
+replaces the old one. The audit log names the user. `noctyx user list` shows who has a token.
+
+```bash
+TOKEN=nx_backup-bot_...                            # from `noctyx user token`
 curl --cacert /etc/noctyx/tls/ca.crt -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"action": "backupHost", "params": {"host": "gpu-01"}}' \
@@ -133,12 +141,17 @@ curl --cacert /etc/noctyx/tls/ca.crt -H "Authorization: Bearer $TOKEN" \
 curl --cacert /etc/noctyx/tls/ca.crt -H "Authorization: Bearer $TOKEN" https://head-01:20996/api/v1/job/<job id>
 ```
 
-The action names and their parameters are in the `ACTIONS` table in `src/noctyx/console.py`. In token mode the
-console's **Console** panel has a field for pasting the token, which it keeps in that browser. To rotate the
-token, delete the file and restart the console:
+The action names and their parameters are in the `ACTIONS` table in `src/noctyx/console.py`.
+
+**Token mode** (no users yet). The console makes one random site token at `<ui_token>` (default
+`/etc/noctyx/ui-token`, 0600) the first time it starts; a request that carries it may do anything. The
+console's **Console** panel has a field for pasting it, which it keeps in that browser. Download links ask
+the console for a 60-second ticket bound to that one file first, since a link cannot carry the token. To
+rotate it, delete the file and restart the console:
 
 ```bash
 sudo rm /etc/noctyx/ui-token && sudo systemctl restart noctyx-console
 ```
 
-There is one token per site. Per-user tokens do not exist.
+Once the first user exists the site token is **no longer accepted**: it would act as admin whatever its
+holder's role. Move scripts to user tokens before adding users.

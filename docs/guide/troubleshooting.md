@@ -133,12 +133,12 @@ The console works in one of three modes:
   renders. Anyone on the network can look and act.
 - **token:** no accounts exist. Viewing is open, and actions need `Authorization: Bearer <token>`, where
   the token is in `/etc/noctyx/ui-token`.
-- **accounts:** you sign in, and your role decides what you may do. A bearer token still works for
-  scripts.
+- **accounts:** you sign in, and your role decides what you may do. Scripts use a user's API token
+  (`noctyx user token`); the site token in `/etc/noctyx/ui-token` is no longer accepted.
 
 | Response | Meaning | What to do |
 |---|---|---|
-| 401 `sign in first` | accounts mode, no session | sign in |
+| 401 `sign in first` | accounts mode, no session (or a script still sending the old site token) | sign in; give scripts a user token: `sudo noctyx user token --name <bot>` |
 | 401 `bad token` | token mode, a missing or wrong bearer token | use the token from `/etc/noctyx/ui-token` |
 | 401 `wrong name or password` | | after 5 failures from one address, sign-ins from there are locked for 30 s, doubling up to 1 h (429 `too many failed sign-ins from here: wait a little`) |
 | 403 `<role> may not do this (needs operator\|admin)` | your role is too low. Viewers only look; operators run jobs. The admin-only actions are the policy, schedule, assistant, console defaults, recipe catalog, reboot, NAS endpoint and policy apply | ask an admin: `sudo noctyx user role --name <you> --role operator` |

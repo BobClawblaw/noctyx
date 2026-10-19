@@ -3013,7 +3013,8 @@ def cmd_user(a):
         if a.op == "list":
             us = ac.users()
             for n, u in sorted(us.items()):
-                print(f"{n:<20} {u['role']:<9} created {datetime.datetime.fromtimestamp(u.get('created', 0)).date()}")
+                print(f"{n:<20} {u['role']:<9} created {datetime.datetime.fromtimestamp(u.get('created', 0)).date()}"
+                      + (f"  api token since {datetime.datetime.fromtimestamp(u['token_created']).date()}" if u.get("token_sha256") else ""))
             print(f"{len(us)} user(s); console mode: "
                   + ("accounts (sign-in required)" if us and cfg()["server"].get("console_auth", True) is not False
                      else "open access (sign-in optional)" if cfg()["server"].get("console_auth", True) is False
@@ -3032,6 +3033,17 @@ def cmd_user(a):
             ac.set_role(a.name, a.role)
         elif a.op == "del":
             ac.delete(a.name)
+        elif a.op == "token":
+            if a.revoke:
+                had = ac.revoke_token(a.name)
+                audit("user-token-revoke", name=a.name)
+                print(f"api token of {a.name}: {'revoked' if had else 'there was none'}")
+                return
+            tok = ac.make_token(a.name)
+            audit("user-token", name=a.name)       # never the token itself
+            print(f"api token for {a.name} (shown once; any earlier one stops working):\n{tok}\n"
+                  f"use it as:  Authorization: Bearer <token>   (acts as {a.name}, with {a.name}'s role)", file=sys.stderr)
+            return
     except ValueError as e:
         sys.exit(str(e))
     audit(f"user-{a.op}", name=a.name, role=a.role if a.op in ("add", "role") else None)
@@ -3331,8 +3343,9 @@ def main():
     g2.add_argument("--json"); g2.add_argument("--remove", action="store_true")
     rdi = sub.add_parser("recipe-discover", help="search GitHub for recipes that fit this cluster; rank by measured speed or recency")
     rdi.add_argument("--sort", choices=["fastest", "newest"], default="fastest")
-    us_ = sub.add_parser("user", help="console accounts: add | del | passwd | role | list")
-    us_.add_argument("op", choices=["add", "del", "passwd", "role", "list"]); us_.add_argument("--name")
+    us_ = sub.add_parser("user", help="console accounts: add | del | passwd | role | token | list")
+    us_.add_argument("op", choices=["add", "del", "passwd", "role", "token", "list"]); us_.add_argument("--name")
+    us_.add_argument("--revoke", action="store_true", help="token: remove the user's API token")
     us_.add_argument("--role", choices=["viewer", "operator", "admin"], default="viewer")
     us_.add_argument("--password-stdin", action="store_true", help="read the password as one line on stdin")
     css = sub.add_parser("console-set", help="the console's display defaults (JSON: mode, theme, tunit, custom)")

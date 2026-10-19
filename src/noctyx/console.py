@@ -24,7 +24,8 @@ already publishes; POST whitelisted actions, tokened unless NOCTYX_CONSOLE_AUTH=
   GET  /api/v1/snapshots/<h>  every snapshot of a host with per-run stats (files new/changed, data added)
   GET  /api/v1/browse/<h>/<snap>?path=/dir   directory listing inside a snapshot
   GET  /api/v1/find/<h>?q=<glob>[&snapshot=] find files across (or in) snapshots
-  GET  /api/v1/download/<h>/<snap>?path=/f[&dir=1]  the file's bytes (or a tar of the dir)
+  GET  /api/v1/download/<h>/<snap>?path=/f[&dir=1][&t=ticket]  the file's bytes (or a tar of the dir); operator
+  POST /api/v1/download-ticket {host,snapshot,path,dir}  a 60 s signed ticket for one download (token mode)
   GET  /api/v1/growth         used-space trend on the NAS -> GB/day, days until full
   GET  /metrics               Noctyx's own Prometheus metrics (backup health, RAID, endpoint…)
   GET  /api/v1/alerts         active alerts (Alertmanager) + recent alert history (+ assistant triage)
@@ -220,18 +221,48 @@ def console_mode():
 ADMIN_ACTIONS = {"setPolicy", "setSchedule", "setAssistant", "setConsoleDefaults", "recipeCatalog",
                  "reboot", "rebootFinish", "nasRest", "policyApply"}
 NEED_RANK = {"view": 0, "operate": 1, "admin": 2}
-_LOGIN_FAILS = {}            # ip -> (failures, locked_until)
+_LOGIN_FAILS = None          # ip -> [failures, locked_until]; kept on disk so a restart does not reset it
+_LOGIN_LOCK = threading.Lock()
+
+
+def _fails():
+    global _LOGIN_FAILS
+    if _LOGIN_FAILS is None:
+        try:
+            raw = json.loads((pathlib.Path(P["console_state"]) / "login-fails.json").read_text())
+            _LOGIN_FAILS = {ip: v for ip, v in raw.items() if v[1] > time.time() - 86400}
+        except (OSError, ValueError, TypeError, IndexError):
+            _LOGIN_FAILS = {}
+    return _LOGIN_FAILS
+
+
+def _fails_save():
+    f = pathlib.Path(P["console_state"]) / "login-fails.json"
+    try:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        tmp = f.with_suffix(".tmp")
+        tmp.write_text(json.dumps(_LOGIN_FAILS))
+        os.replace(tmp, f)
+    except OSError:
+        pass
 
 
 def _login_locked(ip):
-    n, until = _LOGIN_FAILS.get(ip, (0, 0))
-    return until > time.time()
+    with _LOGIN_LOCK:
+        return _fails().get(ip, (0, 0))[1] > time.time()
 
 
 def _login_failed(ip):
-    n, _ = _LOGIN_FAILS.get(ip, (0, 0))
-    n += 1
-    _LOGIN_FAILS[ip] = (n, time.time() + (min(3600, 30 * 2 ** (n - 5)) if n >= 5 else 0))
+    with _LOGIN_LOCK:
+        n = _fails().get(ip, (0, 0))[0] + 1
+        _LOGIN_FAILS[ip] = [n, time.time() + (min(3600, 30 * 2 ** (n - 5)) if n >= 5 else 0)]
+        _fails_save()
+
+
+def _login_ok(ip):
+    with _LOGIN_LOCK:
+        if _fails().pop(ip, None) is not None:
+            _fails_save()
 
 
 def token() -> str:
@@ -3579,6 +3610,15 @@ function asPick(i){const A=(PANELS.find(x=>x.id=='config')._data||{}).assistant|
  $('as-url').value=e.url;$('as-model').value=e.model||'';cfgDirty()}
 function asVals(){return {enabled:$('as-on').checked,url:$('as-url').value.trim(),model:$('as-model').value.trim(),
  timeout_seconds:Number($('as-to').value)||60,fallback:$('as-fb').checked}}
+/* downloads need an operator. Signed in (or open access): the link just works. Token mode: a browser
+   link cannot carry the bearer token, so ask for a 60 s signed ticket and follow the link with it. */
+function dlGo(ev,a){
+ if(!ME||ME.mode!='token')return true;
+ ev.preventDefault();const tok=localStorage.getItem(LS_TOK)||'';
+ fetch('/api/v1/download-ticket',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok},
+  body:JSON.stringify({host:a.dataset.h,snapshot:a.dataset.s,path:a.dataset.p,dir:!!a.dataset.d})})
+  .then(r=>r.json().then(j=>{if(r.ok&&j.t)location.href=a.href+'&t='+encodeURIComponent(j.t);else alert('download refused: '+(j.error||r.status)+(tok?'':' (set the token first)'))}));
+ return false}
 async function asPost(path,body){const tok=localStorage.getItem(LS_TOK)||'';
  const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok},body:JSON.stringify(body)});
  return r.json().catch(()=>({error:'bad response'}))}
@@ -3752,7 +3792,7 @@ function rBrowse(b){
   const rows=(f.matches||[]).map(m=>{const dir=m.path.replace(/\/[^/]*$/,'')||'/';
    return `<tr><td class=mut>${esc(m.snapshot)}</td><td>${esc(m.path)}</td><td>${m.type=='file'?esc(fmtBytes(m.size)):esc(m.type||'')}</td><td class=mut>${esc(fmtTs(m.mtime))}</td>
     <td class=acts><button class=lnk onclick="browseTo('${esc(b.host)}','${esc(m.snapshot)}','${esc(dir)}')">open</button>
-    ${m.type=='file'?`<a class=lnk href="/api/v1/download/${encodeURIComponent(b.host)}/${esc(m.snapshot)}?path=${encodeURIComponent(m.path)}">download</a>`:''}</td></tr>`}).join('');
+    ${m.type=='file'?`<a class=lnk href="/api/v1/download/${encodeURIComponent(b.host)}/${esc(m.snapshot)}?path=${encodeURIComponent(m.path)}" data-h="${esc(b.host)}" data-s="${esc(m.snapshot)}" data-p="${esc(m.path)}" onclick="return dlGo(event,this)">download</a>`:''}</td></tr>`}).join('');
   return head+`<div class=sline>${(f.matches||[]).length} match${(f.matches||[]).length==1?'':'es'} for <b>${esc(f.q)}</b>${f.truncated?' (first 200)':''} · <button class=lnk onclick="BR.find=null;repaint('browse',BR)">back to browsing</button></div>
    <table><tr><th>snap</th><th>path</th><th>size</th><th>modified</th><th></th></tr>${rows||'<tr><td class=mut colspan=5>nothing matched</td></tr>'}</table>`}
  const d=b.data;if(!d)return head+'<div class=empty>no data</div>';
@@ -3761,7 +3801,7 @@ function rBrowse(b){
   const dl=`/api/v1/download/${encodeURIComponent(b.host)}/${esc(b.snap)}?path=${encodeURIComponent(full)}${e.type=='dir'?'&dir=1':''}`;
   return `<tr class="${e.type=='dir'?'dir':''}"><td ${e.type=='dir'?`onclick="browseTo('${esc(b.host)}','${esc(b.snap)}','${esc(full)}')"`:''}>${e.type=='dir'?'▸ ':''}${esc(e.name)}${e.type=='symlink'?' <span class=mut>→ '+esc(e.target||'')+'</span>':''}</td>
    <td>${e.type=='file'?esc(fmtBytes(e.size)):'<span class=mut>'+esc(e.type)+'</span>'}</td><td class=mut>${esc(fmtTs(e.mtime))}</td><td class=mut>${esc(e.mode||'')}</td>
-   <td class=acts>${e.type!='symlink'?`<a class=lnk href="${dl}">${e.type=='dir'?'tar':'download'}</a>`:''}
+   <td class=acts>${e.type!='symlink'?`<a class=lnk href="${dl}" data-h="${esc(b.host)}" data-s="${esc(b.snap)}" data-p="${esc(full)}" data-d="${e.type=='dir'?1:''}" onclick="return dlGo(event,this)">${e.type=='dir'?'tar':'download'}</a>`:''}
     <button class=lnk onclick="browseRestore('${esc(full)}','staging')">→ staging</button>
     <button class=lnk onclick="browseRestore('${esc(full)}','host')">→ host</button></td></tr>`}).join('');
  const up=b.path!='/'?`<tr class=dir><td onclick="browseTo('${esc(b.host)}','${esc(b.snap)}','${esc(b.path.replace(/\/[^/]*\/?$/,'')||'/')}')">▴ ..</td><td colspan=4></td></tr>`:'';
@@ -4010,8 +4050,12 @@ class H(BaseHTTPRequestHandler):
         return None
 
     def _who(self):
-        """(name, role) of a signed-in user, or None. Never cached on self: one handler object serves
-        every request of a keep-alive connection, and a cached "nobody" outlived the sign-in."""
+        """(name, role) of a signed-in user or an API token's user, or None. Never cached on self: one
+        handler object serves every request of a keep-alive connection, and a cached "nobody" outlived
+        the sign-in."""
+        a = self.headers.get("Authorization") or ""
+        if a.startswith("Bearer nx_"):
+            return AC.check_token(a[7:])
         return AC.check_session(self._cookie("nx_session"))
 
     def _bearer_ok(self):
@@ -4024,9 +4068,8 @@ class H(BaseHTTPRequestHandler):
             return True
         if mode == "token":
             return need == "view" or self._bearer_ok()
-        if self._bearer_ok():                      # scripts keep working with the token
-            return True
-        w = self._who()
+        w = self._who()                            # a session, or a user's API token: never the site token,
+                                                   # which would act as admin whatever its holder's role
         return bool(w) and AC.rank(w[1]) >= NEED_RANK[need]
 
     def _deny(self, need):
@@ -4226,6 +4269,11 @@ class H(BaseHTTPRequestHandler):
             path = urllib.parse.unquote(q.get("path", "") or "")
             if not _ok_path(path) or path == "/":
                 return self._json({"error": "bad path"}, 400)
+            # a file from a snapshot can be anything (keys, a database): operator and up. A browser
+            # link cannot send the bearer token, so token mode gets a 60 s signed ticket first.
+            if not (self._allowed("operate")
+                    or AC.check_signed(f"dl|{parts[4]}|{parts[5]}|{path}|{q.get('dir') == '1'}", q.get("t"))):
+                return self._deny("operate")
             return self._stream_dump(parts[4], parts[5], path, q.get("dir") == "1")
         if p == "/metrics":
             try:
@@ -4299,7 +4347,7 @@ class H(BaseHTTPRequestHandler):
                 if not role:
                     _login_failed(ip)
                     return self._json({"error": "wrong name or password"}, 401)
-                _LOGIN_FAILS.pop(ip, None)
+                _login_ok(ip)
                 ttl = 30 * 86400 if body.get("remember") else 12 * 3600
                 return self._send(json.dumps({"ok": True, "user": name, "role": role}).encode(),
                                   cookie=f"nx_session={AC.make_session(name, ttl)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age={ttl}")
@@ -4311,6 +4359,17 @@ class H(BaseHTTPRequestHandler):
                 return self._json({"error": "; ".join(errs)}, 400)
             AC.put_settings(w[0], s)
             return self._json({"ok": True})
+        if self.path == "/api/v1/download-ticket":
+            if not self._allowed("operate"):
+                return self._deny("operate")
+            try:
+                b = self._body()
+            except Exception:
+                return self._json({"error": "bad json"}, 400)
+            h, s, path, d = str(b.get("host") or ""), str(b.get("snapshot") or ""), str(b.get("path") or ""), bool(b.get("dir"))
+            if h not in VALID_HOSTS or not _SNAP_RE.match(s) or not _ok_path(path) or path == "/":
+                return self._json({"error": "bad request"}, 400)
+            return self._json({"t": AC.sign(f"dl|{h}|{s}|{path}|{d}", 60)})
         if self.path == "/api/v1/alert-hook":
             # Alertmanager on this host only; no token (it has none) — loopback is the auth
             if self.client_address[0] not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):

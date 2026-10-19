@@ -129,3 +129,23 @@ def test_demo_data_is_scrubbed_and_served():
     assert body["demo"] is True
     assert console.demo_answer("/api/v1/metrics/spark-1?tab=gpu") is not None
     assert console.demo_answer("/api/v1/no-such-report") is None
+
+
+def test_api_tokens_and_signed_tickets(tmp_path, monkeypatch):
+    from noctyx import accounts as ac
+    monkeypatch.setitem(ac.P, "etc", str(tmp_path))
+    monkeypatch.setitem(ac.P, "console_state", str(tmp_path))
+    ac.add("bot", "viewer", "long enough pw")
+    tok = ac.make_token("bot")
+    assert tok not in (tmp_path / "users.json").read_text()                   # only its hash is kept
+    assert ac.check_token(tok) == ("bot", "viewer")
+    assert ac.check_token(tok[:-1] + ("0" if tok[-1] != "0" else "1")) is None
+    ac.set_role("bot", "operator")
+    assert ac.check_token(tok) == ("bot", "operator")                         # role read live
+    tok2 = ac.make_token("bot")
+    assert ac.check_token(tok) is None and ac.check_token(tok2)               # a new token replaces the old
+    assert ac.revoke_token("bot") and ac.check_token(tok2) is None
+    t = ac.sign("dl|spark-1|abcd1234|/etc/hosts|False", 60)
+    assert ac.check_signed("dl|spark-1|abcd1234|/etc/hosts|False", t)
+    assert not ac.check_signed("dl|spark-1|abcd1234|/etc/shadow|False", t)    # bound to its path
+    assert not ac.check_signed("x", ac.sign("x", -1))                         # expired

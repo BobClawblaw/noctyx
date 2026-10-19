@@ -6,6 +6,9 @@ and each user's own display settings.
   admin     also changes configuration: backup policy, schedules, the assistant, console defaults,
             the recipe catalog, reboots
 
+API tokens: `noctyx user token --name N` prints "nx_<name>_<secret>" once; only its sha256 is stored. A
+script sends it as "Authorization: Bearer ..." and acts with that user's role, read live.
+
 Users live in <etc>/users.json (0600, root); the session key in <etc>/session.key (0600, made on first
 use). A session cookie is "<user>.<expiry>.<hmac>": nothing secret in it, and it stops working the
 moment its user is deleted or the key is replaced. Passwords never touch a command line or a log.
@@ -139,6 +142,55 @@ def delete(name):
         (_settings_dir() / f"{name}.json").unlink()
     except OSError:
         pass
+
+
+def make_token(name):
+    """A new API token for name (replacing any earlier one); the caller shows it once."""
+    us = users()
+    if name not in us:
+        raise ValueError(f"no user {name}")
+    tok = f"nx_{name}_{secrets.token_hex(24)}"
+    us[name]["token_sha256"] = hashlib.sha256(tok.encode()).hexdigest()
+    us[name]["token_created"] = int(time.time())
+    _save(us)
+    return tok
+
+
+def revoke_token(name):
+    us = users()
+    if name not in us:
+        raise ValueError(f"no user {name}")
+    had = us[name].pop("token_sha256", None) is not None
+    us[name].pop("token_created", None)
+    _save(us)
+    return had
+
+
+def check_token(tok):
+    """-> (name, role) for a valid API token, else None."""
+    m = re.match(r"^nx_([a-z][a-z0-9._-]{1,31})_([0-9a-f]{48})$", tok or "")
+    if not m:
+        return None
+    u = users().get(m.group(1))
+    want = (u or {}).get("token_sha256")
+    if not want or not hmac.compare_digest(hashlib.sha256(tok.encode()).hexdigest(), want):
+        return None
+    return (m.group(1), u["role"])
+
+
+def sign(text, ttl):
+    """A short-lived signed ticket for text (download links): "<expiry>.<hmac>"."""
+    exp = int(time.time()) + int(ttl)
+    return f"{exp}." + hmac.new(_key(), f"{exp}|{text}".encode(), hashlib.sha256).hexdigest()
+
+
+def check_signed(text, ticket):
+    try:
+        exp, sig = (ticket or "").split(".", 1)
+        want = hmac.new(_key(), f"{exp}|{text}".encode(), hashlib.sha256).hexdigest()
+        return hmac.compare_digest(sig, want) and int(exp) >= time.time()
+    except (ValueError, TypeError):
+        return False
 
 
 def _key():

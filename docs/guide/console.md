@@ -44,7 +44,7 @@ collapse it with ▾. The layout is saved in the browser. **Reset panel layout**
 | Alerts | firing alerts with LLM triage (when an assistant is configured) |
 | Morning Brief | the assistant's summary of the fleet |
 | Hygiene | housekeeping findings per host, the space each fix frees, fixes you can run |
-| Snapshot Browser | browse, search (`*.conf`) and download files from any snapshot. Restore to staging or the host |
+| Snapshot Browser | browse and search (`*.conf`) any snapshot; operators can download files and directories. Restore to staging or the host |
 | Schedule | what is due, late or stale, and when each profile runs next |
 | Runs | recent backup, verify and prune runs and their results |
 | Jobs / Audit | recent lines of the audit log |
