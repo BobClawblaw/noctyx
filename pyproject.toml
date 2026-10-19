@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "noctyx"
+version = "0.0.1"
+description = "The night-shift operator for your AI cluster: deploy model recipes, cache models, back up and watch the fleet."
+readme = "README.md"
+license = "BUSL-1.1"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+noctyx = "noctyx.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

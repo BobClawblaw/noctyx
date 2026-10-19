@@ -1,0 +1,10 @@
+__pycache__/
+*.egg-info/
+build/
+dist/
+.venv/
+# a site's own configuration never enters the repository
+site.toml
+*.local.toml
+# a maintainer's private strings for tools/privacy_check.py
+.privacy-patterns
