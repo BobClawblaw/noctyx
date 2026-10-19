@@ -127,9 +127,11 @@ looks, never what it measures or does.
 | Setting | Values |
 |---|---|
 | Mode | Light, Dark, System (follows the OS as it changes) |
-| Theme | **Noctyx** (navy and neon cyan), **Ember** (charcoal and amber), **Mono** (grayscale), **GitHub** (GitHub Dark/Light Default), **Catppuccin** (Mocha/Latte), **Custom** (nine colours: background, panels, text, muted text, accent, lines, good, warning, bad; the rest is mixed from them, and the mode follows the background) |
+| Theme | **Noctyx** (navy and neon cyan), **Phosphor** (an instrument panel: segmented LED meters, oscilloscope grids behind every trace, LCD numerals with their unlit segments, and one colour per subsystem everywhere — CPU green, GPU blue, memory violet, network cyan, power yellow, temperature amber, LLM magenta; disk and temperature meters run green → amber → red; its two fonts, Michroma and DSEG7, ship with the console under the SIL OFL, so nothing loads from the internet; a CRT overlay on the dark kiosk), **Ember** (charcoal and amber), **Mono** (grayscale), **GitHub** (GitHub Dark/Light Default), **Catppuccin** (Mocha/Latte), **Custom** (nine colours: background, panels, text, muted text, accent, lines, good, warning, bad; the rest is mixed from them, and the mode follows the background) |
 | Temperature | °F or °C (readings and alert thresholds stay in °C underneath) |
 | Layout | reset panel layout (this browser) |
+
+![Phosphor, the kiosk](../screenshots/phosphor-kiosk.png)
 
 ![Ember, light mode](../screenshots/theme-ember-light.png)
 

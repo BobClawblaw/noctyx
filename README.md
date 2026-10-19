@@ -30,7 +30,7 @@ small inference clusters.
 | **Protect** | Nightly snapshots of every node, Docker volumes, consistent database dumps, bare-metal restore |
 | **Watch** | Live fleet console: temperatures, power, tokens/s per model, alerts with LLM triage, a morning brief |
 
-<p align="center"><img src="docs/screenshots/dashboard.png" alt="The Noctyx dashboard: fleet throughput, GPU power, per-node LLM, CPU, memory and network, storage tiers" width="100%"></p>
+<p align="center"><img src="docs/screenshots/phosphor-dashboard.png" alt="The Noctyx dashboard in the Phosphor theme: fleet throughput, GPU power, per-node LLM, CPU, memory and network, storage tiers" width="100%"></p>
 
 ## Screenshots
 
@@ -39,9 +39,10 @@ Regenerate them with `python3 tools/screenshots.py`.
 
 | | |
 |---|---|
+| [![Kiosk, Phosphor](docs/screenshots/phosphor-kiosk.png)](docs/screenshots/phosphor-kiosk.png) **Phosphor.** An instrument panel: segmented LED meters, oscilloscope traces, LCD numerals with their unlit segments, one colour per subsystem everywhere. | [![Machine report, Phosphor](docs/screenshots/phosphor-node.png)](docs/screenshots/phosphor-node.png) **The same, close up.** CPU green, GPU blue, memory violet, network cyan, power yellow, LLM magenta; disks and temperatures run green to amber to red. |
 | [![Machine report](docs/screenshots/node.png)](docs/screenshots/node.png) **Machine report.** Click a node: vitals, LLM, network, storage, GPU, health and backup tabs, with backup and verify buttons. | [![Recipes](docs/screenshots/recipes.png)](docs/screenshots/recipes.png) **Recipes.** What each GPU slot serves; deploy, prepare, stop, start, roll back; public recipes for your hardware ranked by measured speed. |
 | [![Kiosk](docs/screenshots/kiosk.png)](docs/screenshots/kiosk.png) **Kiosk.** A full-screen wall display: fleet tokens/s, GPU watts, backups, alerts, every slot and node. | [![Configuration](docs/screenshots/config.png)](docs/screenshots/config.png) **Configuration.** Backup policy per site and per host, databases found on each machine, retention, the mirror, the assistant. |
-| [![Settings](docs/screenshots/settings.png)](docs/screenshots/settings.png) **Settings drawer.** Five themes plus your own colours, light / dark / system, °F / °C; kept in the browser or in your account. | [![Ember, light](docs/screenshots/theme-ember-light.png)](docs/screenshots/theme-ember-light.png) **Themes.** The same dashboard in Ember, light mode. |
+| [![Settings](docs/screenshots/settings.png)](docs/screenshots/settings.png) **Settings drawer.** Six themes plus your own colours, light / dark / system, °F / °C; kept in the browser or in your account. | [![Ember, light](docs/screenshots/theme-ember-light.png)](docs/screenshots/theme-ember-light.png) **Themes.** The same dashboard in Ember, light mode. |
 | [![Cluster](docs/screenshots/cluster.png)](docs/screenshots/cluster.png) **Cluster.** Schedules, snapshots, capacity and hygiene across the fleet. | [![Menus](docs/screenshots/menu.png)](docs/screenshots/menu.png) **Menus.** Monitor, Deploy, Configure, Kiosk; keys 1–5. |
 | [![About](docs/screenshots/about.png)](docs/screenshots/about.png) **About.** Version, license, this site, links to the docs. | [![Sign-in](docs/screenshots/login.png)](docs/screenshots/login.png) **Sign-in.** Accounts with viewer, operator and admin roles. |
 

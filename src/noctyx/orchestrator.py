@@ -3033,7 +3033,7 @@ def cmd_recipe_discover(a):
 
 
 # ── the console's display defaults (site config "console") ─────────────────────
-CONSOLE_THEMES = ("noctyx", "ember", "mono", "github", "catppuccin", "custom")
+CONSOLE_THEMES = ("noctyx", "ember", "mono", "github", "catppuccin", "phosphor", "custom")
 _HEXCOL = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 

@@ -173,3 +173,12 @@ def test_write_block_without_a_schedule_block(tmp_path, monkeypatch):
     assert d["retention"] == {"keep_daily": 7} and d["server"]["address"] == "192.0.2.10"
     o._write_block("retention", {"keep_daily": 9})                # and replacing it in place
     assert json.loads(f.read_text())["retention"] == {"keep_daily": 9}
+
+
+def test_phosphor_theme_is_a_valid_site_default_and_ships_its_fonts():
+    import pathlib
+    from noctyx import orchestrator as o, console
+    assert not o.validate_console({"theme": "phosphor", "mode": "dark"})[1]
+    for f in ("michroma.woff2", "dseg7.woff2", "LICENSES.txt"):
+        assert f"fonts/{f}" in console.ASSETS and (o.NX_HOME / "assets" / "fonts" / f).stat().st_size > 1000
+    assert "phosphor:{label:'Phosphor'" in console.PAGE and "html[data-palette=phosphor]" in console.PAGE

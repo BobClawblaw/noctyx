@@ -26,6 +26,10 @@ SHOTS = {
     "settings": ("/", ["sleep:2", "document.getElementById('hgear').click()", "sleep:1"], None),
     "menu": ("/", ["sleep:2", "[...document.querySelectorAll('.menu-title')].find(b=>/deploy/i.test(b.textContent))?.click()", "sleep:1"], None),
     "theme-ember-light": ("/", ["NXT.save({theme:'ember',mode:'light'})", "sleep:3"], None),
+    "phosphor-dashboard": ("/", ["NXT.save({theme:'phosphor',mode:'dark'})", "location.reload()", "sleep:5"], None),
+    "phosphor-node": ("/", ["NXT.save({theme:'phosphor',mode:'dark'})", "location.reload()", "sleep:3",
+                            "selectHost('spark-1')", "sleep:4"], None),
+    "phosphor-kiosk": ("/kiosk", ["NXT.save({theme:'phosphor',mode:'dark'})", "location.reload()", "sleep:5"], None),
     "about": ("/about", ["sleep:3"], None),
     "login": ("/login", ["sleep:1"], None),
 }

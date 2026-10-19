@@ -1273,7 +1273,8 @@ def demo_answer(path):
     return _TS_ISO.sub(iso, text).encode()
 
 
-ASSETS = {"favicon.svg": "image/svg+xml", "banner.svg": "image/svg+xml", "donate-qr.png": "image/png"}
+ASSETS = {"favicon.svg": "image/svg+xml", "banner.svg": "image/svg+xml", "donate-qr.png": "image/png",
+          "fonts/michroma.woff2": "font/woff2", "fonts/dseg7.woff2": "font/woff2", "fonts/LICENSES.txt": "text/plain; charset=utf-8"}
 DONATE = "bc1q9echf820hapc04y0f636uxdry2ahyx32tkleff"
 
 
@@ -1993,6 +1994,9 @@ const NXT=(()=>{
   noctyx:{label:'Noctyx',blurb:'Night console — navy and neon cyan',
    dark:{bg:'#070913',panel:'#0d1020',bg2:'#121629',bg3:'#191e36',bg0:'#05060d',line:'#242a47',lineSoft:'#1a1f38',text:'#e2e8f6',muted:'#97a3c2',faint:'#67718f',accent:'#3fe6ff',accentDim:'#1f93b3',accent2:'#b45cff',ok:'#2ecc8f',warn:'#f0b429',bad:'#ef5a5a',info:'#58a6ff'},
    light:{bg:'#eef1f8',panel:'#ffffff',bg2:'#f5f7fc',bg3:'#e7ebf5',bg0:'#e3e8f2',line:'#cfd6e6',lineSoft:'#e0e5f0',text:'#121729',muted:'#525d78',faint:'#8790a6',accent:'#0a9cc0',accentDim:'#077a96',accent2:'#8a3fe0',ok:'#1b9460',warn:'#a87a08',bad:'#d13c3c',info:'#2f6fd6'}},
+  phosphor:{label:'Phosphor',blurb:'Instrument panel — LED meters, scope traces, LCD numerals',
+   dark:{bg:'#04070a',panel:'#0a1015',bg2:'#0d151b',bg3:'#132029',bg0:'#020406',line:'#1a2a35',lineSoft:'#12202a',text:'#e4f1f7',muted:'#8ba3b3',faint:'#587083',accent:'#1fd1ff',accentDim:'#118aab',accent2:'#3dff8f',ok:'#3dff8f',warn:'#ffb020',bad:'#ff4d5e',info:'#3b8cff'},
+   light:{bg:'#e9eef1',panel:'#f8fafb',bg2:'#f1f5f7',bg3:'#e3eaee',bg0:'#dde5ea',line:'#c3d0d8',lineSoft:'#d5dfe5',text:'#0c1a22',muted:'#4a6170',faint:'#7d919e',accent:'#0a8fc0',accentDim:'#086f95',accent2:'#0f9d58',ok:'#0f9d58',warn:'#c77700',bad:'#d1293d',info:'#1f5fe0'}},
   ember:{label:'Ember',blurb:'Charcoal and amber',
    dark:{bg:'#0b0d10',panel:'#12151a',bg2:'#171b21',bg3:'#1e232b',bg0:'#0c0e11',line:'#262c36',lineSoft:'#1d222a',text:'#dfe5ee',muted:'#96a0b0',faint:'#6a7484',accent:'#f7931a',accentDim:'#b06c10',accent2:'#ffb85c',ok:'#2ecc8f',warn:'#f0b429',bad:'#ef5a5a',info:'#58a6ff'},
    light:{bg:'#f3f1ec',panel:'#ffffff',bg2:'#f8f6f2',bg3:'#eeeae3',bg0:'#ebe7e0',line:'#d8d2c8',lineSoft:'#e6e1d8',text:'#1c1f26',muted:'#5b6470',faint:'#8a929e',accent:'#d97706',accentDim:'#b8690a',accent2:'#a8640d',ok:'#1f9d63',warn:'#c48a08',bad:'#d63f3f',info:'#2f6fd6'}},
@@ -2471,6 +2475,140 @@ td.acts{white-space:nowrap} td.acts a,td.acts button.lnk{margin-right:6px}
 .cltot .card{min-width:120px}
 .snaprow{cursor:pointer} .snaprow:hover td{background:var(--bg-2)} .snaprow.sel td{background:var(--bg-3)}
 @media (max-width:860px){.tiles{grid-template-columns:1fr}}
+
+/* ── shared by every theme: the kiosk's per-node meters ── */
+.kmeters{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:7px 10px;align-items:center;margin-top:12px;font:700 9.5px var(--sans);letter-spacing:.1em;color:var(--fg-faint)}
+.kmeters .bar{min-width:0}
+.kclock b small{font:600 14px var(--sans);margin-left:6px;color:var(--fg-dim);letter-spacing:.04em}
+
+/* ── Phosphor: an instrument panel. Every subsystem has one colour everywhere (data-k on the meter);
+   segmented LED meters with unlit segments; oscilloscope grids behind every trace; LCD numerals with
+   their unlit 8s; glow tuned per mode (--gl). Fonts ship with the console (assets/fonts, OFL). ── */
+@font-face{font-family:Michroma;src:url(/assets/fonts/michroma.woff2) format('woff2');font-display:swap}
+@font-face{font-family:DSEG7;src:url(/assets/fonts/dseg7.woff2) format('woff2');font-display:block}
+html[data-palette=phosphor]{
+ --k-cpu:#3dff8f;--k-gpu:#3b8cff;--k-temp:#ffb020;--k-mem:#b45cff;--k-net:#22d3ee;--k-disk:#2ee6a6;--k-power:#ffd60a;--k-llm:#ff4fd8;--k-ok:#3dff8f;--k-alert:#ff4d5e;
+ --k:var(--accent);--gl:1;--display:Michroma,var(--sans);--lcd:DSEG7,var(--mono);--radius:9px;--radius-sm:6px;
+ --c0:#3b8cff;--c1:#ff7a3d;--c2:#3dff8f;--c3:#ffd60a;--c4:#ff4fd8;--c5:#2ee6a6;--c6:#b45cff;--c7:#ff4d5e}
+html[data-palette=phosphor][data-theme=light]{--gl:.35;
+ --k-cpu:#0b9b55;--k-gpu:#1f5fe0;--k-temp:#c77700;--k-mem:#8a3fe0;--k-net:#0891b2;--k-disk:#0d9b6c;--k-power:#a87d00;--k-llm:#c026a0;--k-ok:#0b9b55;--k-alert:#d1293d}
+html[data-palette=phosphor] [data-k=cpu]{--k:var(--k-cpu)} html[data-palette=phosphor] [data-k=gpu]{--k:var(--k-gpu)}
+html[data-palette=phosphor] [data-k=temp]{--k:var(--k-temp)} html[data-palette=phosphor] [data-k=mem]{--k:var(--k-mem)}
+html[data-palette=phosphor] [data-k=net]{--k:var(--k-net)} html[data-palette=phosphor] [data-k=disk]{--k:var(--k-disk)}
+html[data-palette=phosphor] [data-k=power]{--k:var(--k-power)} html[data-palette=phosphor] [data-k=llm]{--k:var(--k-llm)}
+html[data-palette=phosphor] [data-k=ok]{--k:var(--k-ok)} html[data-palette=phosphor] [data-k=alert]{--k:var(--k-alert)}
+
+/* the room: deep glass, two coloured light sources, a faint graticule */
+html[data-palette=phosphor] body{background:
+ radial-gradient(1100px 620px at 100% -8%,color-mix(in srgb,var(--k-net) calc(10% * var(--gl)),transparent),transparent 62%),
+ radial-gradient(900px 560px at -6% 108%,color-mix(in srgb,var(--k-cpu) calc(8% * var(--gl)),transparent),transparent 60%),
+ linear-gradient(color-mix(in srgb,var(--fg) 2.6%,transparent) 1px,transparent 1px) 0 0/44px 44px,
+ linear-gradient(90deg,color-mix(in srgb,var(--fg) 2.6%,transparent) 1px,transparent 1px) 0 0/44px 44px,var(--bg)}
+html[data-palette=phosphor] header.top{background:linear-gradient(180deg,color-mix(in srgb,var(--bg-1) 94%,transparent),color-mix(in srgb,var(--bg) 88%,transparent));
+ border-bottom:1px solid color-mix(in srgb,var(--accent) 22%,var(--line));backdrop-filter:blur(10px);
+ box-shadow:0 1px 0 color-mix(in srgb,var(--accent) calc(14% * var(--gl)),transparent),0 10px 34px rgba(0,0,0,calc(.4 * var(--gl)))}
+html[data-palette=phosphor] .wordmark{font-family:var(--display);font-weight:400;letter-spacing:.2em;
+ text-shadow:0 0 calc(14px * var(--gl)) color-mix(in srgb,var(--accent) 55%,transparent)}
+html[data-palette=phosphor] .menu-title{font-family:var(--display);font-weight:400;letter-spacing:.06em;font-size:9px}
+html[data-palette=phosphor] .hpill{box-shadow:inset 0 0 12px color-mix(in srgb,currentColor calc(12% * var(--gl)),transparent),0 0 calc(10px * var(--gl)) color-mix(in srgb,currentColor calc(14% * var(--gl)),transparent)}
+
+/* panels: machined glass with a lit top edge */
+html[data-palette=phosphor] .panel{background:linear-gradient(180deg,color-mix(in srgb,var(--bg-1) 96%,var(--fg)),var(--bg-1) 40px);
+ border-color:color-mix(in srgb,var(--accent) 9%,var(--line-soft));
+ box-shadow:inset 0 1px 0 color-mix(in srgb,var(--accent) calc(20% * var(--gl)),transparent),0 12px 36px rgba(0,0,0,calc(.45 * var(--gl)))}
+html[data-palette=phosphor] .grip{border-bottom:1px solid color-mix(in srgb,var(--accent) 8%,var(--line-soft))}
+html[data-palette=phosphor] .grip h2{font-family:var(--display);font-weight:400;font-size:10px;letter-spacing:.2em;color:var(--fg)}
+html[data-palette=phosphor] th,html[data-palette=phosphor] .card .l,html[data-palette=phosphor] .ring .rl{font-family:var(--display);font-weight:400;letter-spacing:.14em}
+html[data-palette=phosphor] th{font-size:8.5px}
+
+/* LED meters: lit segments glow, unlit ones stay visible; disk and temperature run green → amber → red */
+html[data-palette=phosphor] .bar{height:11px;border-radius:2px;padding:1px;
+ border:1px solid color-mix(in srgb,var(--k) 24%,var(--line-soft));
+ background:repeating-linear-gradient(90deg,color-mix(in srgb,var(--k) 15%,var(--bg-0)) 0 5px,var(--bg-0) 5px 7px)}
+html[data-palette=phosphor] .bar i{border-radius:1px;
+ background:repeating-linear-gradient(90deg,transparent 0 5px,var(--bg-0) 5px 7px),var(--k);
+ filter:drop-shadow(0 0 calc(4px * var(--gl)) color-mix(in srgb,var(--k) 75%,transparent))}
+html[data-palette=phosphor] .bar:not(.n){border-color:color-mix(in srgb,var(--k-ok) 22%,var(--line-soft));
+ background:repeating-linear-gradient(90deg,transparent 0 5px,var(--bg-0) 5px 7px),
+  linear-gradient(90deg,color-mix(in srgb,var(--k-ok) 15%,var(--bg-0)) 55%,color-mix(in srgb,var(--k-temp) 18%,var(--bg-0)) 80%,color-mix(in srgb,var(--k-alert) 20%,var(--bg-0)))}
+html[data-palette=phosphor] .bar:not(.n) i{
+ background:repeating-linear-gradient(90deg,transparent 0 5px,var(--bg-0) 5px 7px),
+  linear-gradient(90deg,var(--k-ok) 55%,var(--k-temp) 80%,var(--k-alert)) 0 0/calc(10000% / var(--p,100)) 100% no-repeat;
+ filter:drop-shadow(0 0 calc(4px * var(--gl)) color-mix(in srgb,var(--k-ok) 55%,transparent))}
+html[data-palette=phosphor] .bar.w i{filter:drop-shadow(0 0 calc(5px * var(--gl)) color-mix(in srgb,var(--k-temp) 70%,transparent))}
+html[data-palette=phosphor] .bar.b i{filter:drop-shadow(0 0 calc(6px * var(--gl)) color-mix(in srgb,var(--k-alert) 80%,transparent))}
+
+/* oscilloscope traces */
+html[data-palette=phosphor] .spk{border-radius:3px;border:1px solid color-mix(in srgb,var(--k) 16%,var(--line-soft));
+ background:linear-gradient(color-mix(in srgb,var(--k) 9%,transparent) 1px,transparent 1px) 0 0/100% 6px,
+  linear-gradient(90deg,color-mix(in srgb,var(--k) 9%,transparent) 1px,transparent 1px) 0 0/10px 100%,var(--bg-0)}
+html[data-palette=phosphor] .spk polyline,html[data-palette=phosphor] .spk polyline.a,html[data-palette=phosphor] .spk polyline.dim{stroke:var(--k)}
+html[data-palette=phosphor] .spk polyline{stroke-width:1.6;filter:drop-shadow(0 0 calc(2.5px * var(--gl)) var(--k))}
+html[data-palette=phosphor] .spk polyline.g{stroke:var(--k-cpu)} html[data-palette=phosphor] .spk polyline.c0{stroke:var(--k-net)}
+html[data-palette=phosphor] .chart svg{border:1px solid color-mix(in srgb,var(--accent) 12%,var(--line-soft));border-radius:5px;
+ background:linear-gradient(color-mix(in srgb,var(--accent) 6%,transparent) 1px,transparent 1px) 0 0/100% 12px,
+  linear-gradient(90deg,color-mix(in srgb,var(--accent) 6%,transparent) 1px,transparent 1px) 0 0/24px 100%,
+  radial-gradient(120% 140% at 50% 0%,color-mix(in srgb,var(--accent) calc(5% * var(--gl)),transparent),transparent 70%),var(--bg-0);
+ box-shadow:inset 0 0 28px rgba(0,0,0,calc(.55 * var(--gl)))}
+html[data-palette=phosphor] .chart .ln{--g:var(--info);stroke-width:2.2;filter:drop-shadow(0 0 calc(3px * var(--gl)) var(--g))}
+html[data-palette=phosphor] .chart .ln.a{--g:var(--accent)} html[data-palette=phosphor] .chart .ln.g{--g:var(--ok)} html[data-palette=phosphor] .chart .ln.w{--g:var(--warn)}
+html[data-palette=phosphor] .chart .ln.c0{--g:var(--c0)} html[data-palette=phosphor] .chart .ln.c1{--g:var(--c1)} html[data-palette=phosphor] .chart .ln.c2{--g:var(--c2)} html[data-palette=phosphor] .chart .ln.c3{--g:var(--c3)}
+html[data-palette=phosphor] .chart .ln.c4{--g:var(--c4)} html[data-palette=phosphor] .chart .ln.c5{--g:var(--c5)} html[data-palette=phosphor] .chart .ln.c6{--g:var(--c6)} html[data-palette=phosphor] .chart .ln.c7{--g:var(--c7)}
+html[data-palette=phosphor] .chart .wash{opacity:.16}
+html[data-palette=phosphor] .chart .gl{stroke:color-mix(in srgb,var(--accent) 12%,var(--line-soft));stroke-dasharray:2 3}
+
+/* LED rings */
+html[data-palette=phosphor] .ring .track{stroke:color-mix(in srgb,var(--k) 16%,var(--bg-3));stroke-dasharray:2.4 1.3}
+html[data-palette=phosphor] .ring .fill:not(.ok):not(.warn):not(.bad){stroke:var(--k)}
+html[data-palette=phosphor] .ring .fill{stroke-linecap:butt;filter:drop-shadow(0 0 calc(3px * var(--gl)) var(--k))}
+
+/* stat cards wear their subsystem's colour */
+html[data-palette=phosphor] .stat{border-color:color-mix(in srgb,var(--k) 30%,var(--line-soft));
+ background:linear-gradient(180deg,color-mix(in srgb,var(--k) 9%,var(--bg-2)),color-mix(in srgb,var(--k) 2%,var(--bg-2)));
+ box-shadow:inset 0 1px 0 color-mix(in srgb,var(--k) 28%,transparent)}
+html[data-palette=phosphor] .card[data-k]{border-color:color-mix(in srgb,var(--k) 26%,var(--line-soft));
+ background:linear-gradient(180deg,color-mix(in srgb,var(--k) 7%,var(--bg-2)),var(--bg-2));box-shadow:inset 0 1px 0 color-mix(in srgb,var(--k) 24%,transparent)}
+html[data-palette=phosphor] .card[data-k] .l{color:var(--k)}
+html[data-palette=phosphor] .card[data-k] .v{text-shadow:0 0 calc(10px * var(--gl)) color-mix(in srgb,var(--k) 35%,transparent)}
+html[data-palette=phosphor] .stat .l{font-family:var(--display);font-weight:400;font-size:8.5px;letter-spacing:.16em;color:var(--k)}
+html[data-palette=phosphor] .stat .v{color:var(--k);text-shadow:0 0 calc(12px * var(--gl)) color-mix(in srgb,var(--k) 45%,transparent)}
+
+/* fleet tiles: label in its colour, selection lit */
+html[data-palette=phosphor] .tile{background:linear-gradient(180deg,var(--bg-2),color-mix(in srgb,var(--bg-2) 60%,var(--bg-0)));border-color:color-mix(in srgb,var(--accent) 7%,var(--line-soft))}
+html[data-palette=phosphor] .tile .nm{font-family:var(--display);font-weight:400;letter-spacing:.06em}
+html[data-palette=phosphor] .tile.sel{border-color:var(--accent);box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 60%,transparent),0 0 calc(26px * var(--gl)) color-mix(in srgb,var(--accent) 28%,transparent)}
+html[data-palette=phosphor] .mcell>span:first-child,html[data-palette=phosphor] .gauge>span:first-child{color:var(--k);font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+html[data-palette=phosphor] .dot.ok{box-shadow:0 0 calc(9px * var(--gl)) var(--ok),0 0 2px var(--ok)}
+html[data-palette=phosphor] .dot{box-shadow:0 0 calc(9px * var(--gl)) color-mix(in srgb,var(--bad) 80%,transparent)}
+
+/* LCD numerals: digits lit over their unlit 8s */
+html[data-palette=phosphor] .hero .hv,html[data-palette=phosphor] .kbig b,html[data-palette=phosphor] .kclock b{
+ font-family:var(--lcd);font-weight:700;letter-spacing:.04em;position:relative;z-index:0}
+html[data-palette=phosphor] .hero .hv{font-size:clamp(34px,3vw,50px);color:var(--accent);
+ text-shadow:0 0 calc(20px * var(--gl)) color-mix(in srgb,var(--accent) 55%,transparent),0 0 2px color-mix(in srgb,var(--accent) 80%,transparent)}
+html[data-palette=phosphor] [data-ghost]::before{content:attr(data-ghost);position:absolute;left:0;top:0;z-index:-1;
+ color:color-mix(in srgb,currentColor 9%,transparent);text-shadow:none;pointer-events:none;white-space:pre}
+html[data-palette=phosphor] .kbig b:not(.ok):not(.warn):not(.bad){color:var(--k)}
+html[data-palette=phosphor] .kbig b,html[data-palette=phosphor] .kclock b{font-size:44px;
+ text-shadow:0 0 calc(18px * var(--gl)) color-mix(in srgb,currentColor 55%,transparent),0 0 2px color-mix(in srgb,currentColor 80%,transparent)}
+html[data-palette=phosphor] .kclock b{color:var(--accent)}
+html[data-palette=phosphor] .kbig span,html[data-palette=phosphor] .kclock span{font-family:var(--display);font-size:9px;letter-spacing:.18em;margin-top:6px}
+html[data-palette=phosphor] .kmeters .bar{height:13px}
+
+/* kiosk cards and the CRT */
+html[data-palette=phosphor] .kslot,html[data-palette=phosphor] .knode{background:linear-gradient(180deg,color-mix(in srgb,var(--bg-1) 94%,var(--fg)),var(--bg-1) 44px);
+ border-color:color-mix(in srgb,var(--accent) 10%,var(--line-soft));box-shadow:inset 0 1px 0 color-mix(in srgb,var(--accent) calc(22% * var(--gl)),transparent),0 12px 30px rgba(0,0,0,calc(.45 * var(--gl)))}
+html[data-palette=phosphor] .kslot.down,html[data-palette=phosphor] .knode.down{border-color:color-mix(in srgb,var(--bad) 60%,var(--line));
+ box-shadow:inset 0 1px 0 color-mix(in srgb,var(--bad) 40%,transparent),0 0 calc(26px * var(--gl)) color-mix(in srgb,var(--bad) 18%,transparent)}
+html[data-palette=phosphor] .kh b{font-family:var(--display);font-weight:400;letter-spacing:.06em}
+html[data-palette=phosphor] .km,html[data-palette=phosphor] .kllm b{color:var(--k-llm);text-shadow:0 0 calc(10px * var(--gl)) color-mix(in srgb,var(--k-llm) 45%,transparent)}
+html[data-palette=phosphor] .kmeters>span{font-family:var(--display);font-weight:400;font-size:8.5px;letter-spacing:.14em}
+html[data-palette=phosphor] .kmeters>span:nth-child(1){color:var(--k-gpu)} html[data-palette=phosphor] .kmeters>span:nth-child(3){color:var(--k-cpu)}
+html[data-palette=phosphor] .kmeters>span:nth-child(5){color:var(--k-mem)} html[data-palette=phosphor] .kmeters>span:nth-child(7){color:var(--k-temp)}
+html[data-palette=phosphor][data-theme=dark] body.kiosk::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:60;
+ background:repeating-linear-gradient(0deg,rgba(0,0,0,.16) 0 1px,transparent 1px 3px),
+  radial-gradient(130% 120% at 50% 50%,transparent 62%,rgba(0,0,0,.45))}
+html[data-palette=phosphor] button.act:hover{box-shadow:0 0 calc(14px * var(--gl)) color-mix(in srgb,var(--accent) 35%,transparent)}
 </style></head><body>
 <div class=app>
 <header class=top>
@@ -2579,8 +2717,14 @@ const fmtT=(c,short)=>c==null||isNaN(c)?'—':Math.round(tval(+c))+'°'+(short?'
 function setTU(u){TU=u;NXT.save({tunit:u});pushAccount();setRender();
  PANELS.forEach(p=>{if(p._data!==undefined&&p.id!='config')repaint(p.id,p._data)})}
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-function bar(pct,neutral){const p=clamp(parseInt(pct)||0,0,100);
- return `<div class="bar ${neutral?'':p>90?'b':p>75?'w':''}"><i style="width:${p}%"></i></div>`}
+/* the subsystem a meter shows (data-k): themes may colour by it (Phosphor does); others ignore it */
+function kOf(label){const l=String(label||'').toLowerCase().replace(/<[^>]+>/g,'');
+ return /temp/.test(l)?'temp':/gpu/.test(l)?'gpu':/cpu|load/.test(l)?'cpu':/mem/.test(l)?'mem':/disk|root|stor/.test(l)?'disk':
+  /net|fabric/.test(l)?'net':/power|watt|energy/.test(l)?'power':/tok|llm|request|generat|model/.test(l)?'llm':/health|backup/.test(l)?'ok':''}
+/* LCD numerals draw an unlit "8" behind every digit, as a real segment display does */
+const ghost=v=>String(v??'').replace(/[0-9]/g,'8').replace(/[^8:.\s/%-]/g,' ');
+function bar(pct,neutral,k){const p=clamp(parseInt(pct)||0,0,100);
+ return `<div class="bar ${neutral?'n':p>90?'b':p>75?'w':''}" data-k="${k||''}" style="--p:${Math.max(p,1)}"><i style="width:${p}%"></i></div>`}
 const ageD=t=>t?(Date.now()-new Date(t))/864e5:null;
 /* ALL times shown in UTC (the header clock is UTC): clients run mixed zones,
    and a bare 'HH:MM' that is sometimes Chicago and sometimes UTC is a lie */
@@ -2663,8 +2807,8 @@ function slotOf(name){if(!SLOTS){try{SLOTS=JSON.parse(localStorage.getItem(LS_SL
  if(SLOTS[name]==null){const used=new Set(Object.values(SLOTS));let i=0;while(used.has(i)&&i<8)i++;SLOTS[name]=i%8;try{localStorage.setItem(LS_SLOT,JSON.stringify(SLOTS))}catch(e){}}
  return 'c'+SLOTS[name]}
 function ring(pct,label,inner,cls,labHtml){const r=21,c=2*Math.PI*r,p=clamp(+pct||0,0,100);
- return `<div class=ring><svg viewBox="0 0 50 50"><circle class="track" cx="25" cy="25" r="${r}"/><circle class="fill ${cls||''}" cx="25" cy="25" r="${r}" stroke-dasharray="${(p/100*c).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 25 25)"/></svg><div class=rv>${inner}</div><div class=rl>${labHtml??esc(label)}</div></div>`}
-function statTile(label,value,unit,sub,pts,o={}){return `<div class=stat><div class=l>${esc(label)}</div><div class=v>${value}<span class=u>${esc(unit||'')}</span></div>${pts&&pts.length>2?spark([{pts,cls:'dim'}],o):''}<div class=s>${sub||''}</div></div>`}
+ return `<div class=ring data-k="${kOf(label)}"><svg viewBox="0 0 50 50"><circle class="track" cx="25" cy="25" r="${r}"/><circle class="fill ${cls||''}" cx="25" cy="25" r="${r}" stroke-dasharray="${(p/100*c).toFixed(1)} ${c.toFixed(1)}" transform="rotate(-90 25 25)"/></svg><div class=rv>${inner}</div><div class=rl>${labHtml??esc(label)}</div></div>`}
+function statTile(label,value,unit,sub,pts,o={}){return `<div class=stat data-k="${o.k||kOf(label)}"><div class=l>${esc(label)}</div><div class=v>${value}<span class=u>${esc(unit||'')}</span></div>${pts&&pts.length>2?spark([{pts,cls:'dim'}],o):''}<div class=s>${sub||''}</div></div>`}
 function ago(ts){if(!ts)return 'never';const m=Date.now()/1000-ts;
  if(m<90)return Math.round(m)+'s ago';if(m<5400)return Math.round(m/60)+'m ago';return Math.round(m/3600)+'h ago'}
 
@@ -2859,15 +3003,17 @@ function rKiosk(d){
    <div class=kgrid><span>GPU</span><b>${h.gpu_util!=null?Math.round(h.gpu_util)+'%':'—'}</b><span>GPU temp</span>${t(h.gpu_temp,85)}
     <span>power</span><b>${h.gpu_power!=null?Math.round(h.gpu_power)+' W':'—'}</b><span>CPU temp</span>${t(h.sys_temp,90)}
     <span>CPU</span><b>${h.cpu!=null?Math.round(h.cpu)+'%':'—'}</b><span>memory</span><b>${mem!=null?mem+'%':'—'}</b></div>
+   <div class=kmeters><span>GPU</span>${bar(h.gpu_util,true,'gpu')}<span>CPU</span>${bar(h.cpu,true,'cpu')}
+    <span>MEM</span>${bar(mem,true,'mem')}<span>TEMP</span>${bar(h.gpu_temp!=null?h.gpu_temp/95*100:0,false,'temp')}</div>
    ${srv?`<div class=kllm><span class=mut>${esc(srv.model)}</span><b>${g!=null?g.toFixed(0):'—'}<small> tok/s</small></b></div>`:''}</div>`}).join('');
- const now=new Date();
+ const now=new Date(),tm=now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}).match(/^([\d:.\s]+)(.*)$/)||['',now.toTimeString().slice(0,5),''];
  return `<div class=kiosk-wrap>
   <div class=ktop><a class=kbrand href="/"><span class=mark></span><span class=wordmark>Noct<b>yx</b></span></a>
-   <div class=kbig><b>${tps.toFixed(0)}</b><span>tokens / second</span></div>
-   <div class=kbig><b>${Math.round(gpuW)}</b><span>GPU watts</span></div>
-   <div class=kbig><b class="${I.backups_ok<I.backups_total?'warn':'ok'}">${esc(I.backups_ok??'?')}/${esc(I.backups_total??'?')}</b><span>backups on schedule</span></div>
-   <div class=kbig><b class="${crit?'bad':act?'warn':'ok'}">${act}</b><span>alert${act==1?'':'s'}</span></div>
-   <div class=kclock><b>${now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</b><span>${now.toLocaleDateString([], {weekday:'short',month:'short',day:'numeric'})}</span></div></div>
+   <div class=kbig data-k=llm><b data-ghost="${ghost(tps.toFixed(0))}">${tps.toFixed(0)}</b><span>tokens / second</span></div>
+   <div class=kbig data-k=power><b data-ghost="${ghost(Math.round(gpuW))}">${Math.round(gpuW)}</b><span>GPU watts</span></div>
+   <div class=kbig data-k=ok><b class="${I.backups_ok<I.backups_total?'warn':'ok'}" data-ghost="${ghost((I.backups_ok??'?')+'/'+(I.backups_total??'?'))}">${esc(I.backups_ok??'?')}/${esc(I.backups_total??'?')}</b><span>backups on schedule</span></div>
+   <div class=kbig data-k=alert><b class="${crit?'bad':act?'warn':'ok'}" data-ghost="${ghost(act)}">${act}</b><span>alert${act==1?'':'s'}</span></div>
+   <div class=kclock><b data-ghost="${ghost(tm[1].trim())}">${esc(tm[1].trim())}${tm[2].trim()?`<small>${esc(tm[2].trim())}</small>`:''}</b><span>${now.toLocaleDateString([], {weekday:'short',month:'short',day:'numeric'})}</span></div></div>
   ${slots?`<div class=kslots>${slots}</div>`:''}
   <div class=knodes>${nodes}</div></div>`}
 
@@ -2901,7 +3047,7 @@ function rControl(m){
  const ms=v=>v==null?'—':v<1?Math.round(v*1000)+'<span class=u>ms</span>':v.toFixed(1)+'<span class=u>s</span>';
  const kv=(k,v)=>`<div><span class=k>${k}</span><span class=v>${v}</span></div>`;
  const head=`<div class=hero>
-  <div class=hv>${Math.round(tps)}</div>
+  <div class=hv data-ghost="${ghost(Math.round(tps))}">${Math.round(tps)}</div>
   <div class=hl>tokens / second across the fleet<br><b>${models}</b> model${models==1?'':'s'} serving on <b>${upN}</b> of ${names.length} nodes${I.llm_total&&I.llm_up<I.llm_total?` · <span class=bad>${I.llm_total-I.llm_up} endpoint down</span>`:''}</div>
   <div class=stats>
    ${statTile('requests',run,' running',`${wait} waiting`,S.requests)}
@@ -3140,20 +3286,20 @@ function tileLive(M,up){const sp=M.spark||{};
   M.reboot?'<span class="tag warn" title="/var/run/reboot-required">reboot needed</span>':'',
   M.containers?`<span class=tag title="running Docker containers">${M.containers} ctr</span>`:''].join('');
  return `<div class=mgrid>
-  <div class=mcell><span>cpu</span><span class=mv>${pct(M.cpu)} · load ${M.load1??'—'}</span>${spark([{pts:sp.cpu}],{max:100})}</div>
-  <div class=mcell><span>gpu</span><span class=mv>${pct(M.gpu_util)}${M.gpu_temp!=null?' · '+fmtT(M.gpu_temp):''}${M.gpu_power!=null?' · '+Math.round(M.gpu_power)+'W':''}</span>${spark([{pts:sp.gpu_util,cls:'a'}],{max:100})}</div>
-  <div class=mcell><span>net</span><span class=mv>↑${fmtBits(M.net_tx)} ↓${fmtBits(M.net_rx)}</span>${spark([{pts:sp.net_tx,cls:'g'},{pts:sp.net_rx,cls:'c0'}])}</div>
+  <div class=mcell data-k=cpu><span>cpu</span><span class=mv>${pct(M.cpu)} · load ${M.load1??'—'}</span>${spark([{pts:sp.cpu}],{max:100})}</div>
+  <div class=mcell data-k=gpu><span>gpu</span><span class=mv>${pct(M.gpu_util)}${M.gpu_temp!=null?' · '+fmtT(M.gpu_temp):''}${M.gpu_power!=null?' · '+Math.round(M.gpu_power)+'W':''}</span>${spark([{pts:sp.gpu_util,cls:'a'}],{max:100})}</div>
+  <div class=mcell data-k=net><span>net</span><span class=mv>↑${fmtBits(M.net_tx)} ↓${fmtBits(M.net_rx)}</span>${spark([{pts:sp.net_tx,cls:'g'},{pts:sp.net_rx,cls:'c0'}])}</div>
  </div>
  <div class=gauges>
-  <div class=gauge><span>mem</span>${bar(memP,true)}<span>${M.mem_used!=null?Math.round(M.mem_used/1e9)+'G':'—'}</span></div>
-  <div class=gauge><span>disk</span>${bar(M.root_pct)}<span>${pct(M.root_pct)}</span></div>
+  <div class=gauge data-k=mem><span>mem</span>${bar(memP,true,'mem')}<span>${M.mem_used!=null?Math.round(M.mem_used/1e9)+'G':'—'}</span></div>
+  <div class=gauge data-k=disk><span>disk</span>${bar(M.root_pct,false,'disk')}<span>${pct(M.root_pct)}</span></div>
  </div>
  ${llmLine(M.llm)}
  <div class=flags><span class=tnext>up ${esc(up.trim().slice(0,12))}</span>${fl}</div>`}
 function llmLine(L){if(!L)return '';
  const sv=(L.servers||[]).filter(s=>s.model);
  if(!sv.length)return L.worker_for?`<div class=mcell><span>llm</span><span class="mv wk">TP worker for ${esc(L.worker_for)} · ${esc(L.worker_model||'')}</span><span></span></div>`:'';
- return sv.map(s=>`<div class=mcell><span>llm</span><span class=mv title="${esc(s.model)}">${esc(s.model)} · ${s.running??0} run${s.waiting?' / '+s.waiting+' wait':''} · ${Math.round(s.gen_tps||0)} tok/s${s.kv_pct!=null?' · kv '+Math.round(s.kv_pct)+'%':''}</span>${spark([{pts:(s.spark||{}).gen_tps,cls:'a'}])}</div>`).join('')}
+ return sv.map(s=>`<div class=mcell data-k=llm><span>llm</span><span class=mv title="${esc(s.model)}">${esc(s.model)} · ${s.running??0} run${s.waiting?' / '+s.waiting+' wait':''} · ${Math.round(s.gen_tps||0)} tok/s${s.kv_pct!=null?' · kv '+Math.round(s.kv_pct)+'%':''}</span>${spark([{pts:(s.spark||{}).gen_tps,cls:'a'}])}</div>`).join('')}
 /* the host's primary scheduled profile (system if scheduled) */
 function schedRow(s,host){const rs=((s&&s.schedule&&s.schedule.rows)||[]).filter(r=>r.host==host&&r.enabled);
  return rs.find(r=>r.profile=='system')||rs[0]||null}
@@ -3192,8 +3338,8 @@ function rFleet(s){
     <div class=metric><span class=v>${g&&g.util_pct!=null?esc(g.util_pct)+'%':'—'}</span><span class=u>gpu</span></div>
    </div>
    <div class=gauges>
-    <div class=gauge><span>mem</span>${bar(memP,true)}<span>${f.mem_used_gb??'—'}G</span></div>
-    <div class=gauge><span>disk</span>${bar(diskP)}<span>${diskP||'—'}%</span></div>
+    <div class=gauge data-k=mem><span>mem</span>${bar(memP,true,'mem')}<span>${f.mem_used_gb??'—'}G</span></div>
+    <div class=gauge data-k=disk><span>disk</span>${bar(diskP,false,'disk')}<span>${diskP||'—'}%</span></div>
     <div class=gauge><span>gpu</span>${bar(tmp)}<span>${gg?fmtT(gg.temp_c):'—'}</span></div>
    </div><div class=tnext>live metrics unavailable — SSH snapshot</div>`}
    <div class=tline data-jl="${esc(h.name)}">${jobLine(h.name)||nextLine(schedRow(s,h.name),f)}</div></div>`}).join('')+`</div>`;
@@ -3314,12 +3460,12 @@ function rDetail(f){
  ${DTAB=='overview'?`
   <h3>Vitals</h3>
   <div class=cards>
-   <div class=card><div class=l>load</div><div class=v>${esc((f.loadavg||'—').split(' ')[0])}</div><div class=s>${esc(f.loadavg||'')}</div></div>
-   <div class=card><div class=l>memory</div><div class=v>${f.mem_used_gb??'—'}<span class=u>/${f.mem_total_gb??'—'}G</span></div>${bar(f.mem_total_gb?100*f.mem_used_gb/f.mem_total_gb:0,true)}</div>
-   <div class=card><div class=l>cpu</div><div class=v>${esc((f.cpu&&f.cpu[0])||'—')}</div><div class=s>${esc(((f.cpu&&f.cpu[1])||'').slice(0,22))}</div></div>
+   <div class=card data-k=cpu><div class=l>load</div><div class=v>${esc((f.loadavg||'—').split(' ')[0])}</div><div class=s>${esc(f.loadavg||'')}</div></div>
+   <div class=card data-k=mem><div class=l>memory</div><div class=v>${f.mem_used_gb??'—'}<span class=u>/${f.mem_total_gb??'—'}G</span></div>${bar(f.mem_total_gb?100*f.mem_used_gb/f.mem_total_gb:0,true,'mem')}</div>
+   <div class=card data-k=cpu><div class=l>cpu</div><div class=v>${esc((f.cpu&&f.cpu[0])||'—')}</div><div class=s>${esc(((f.cpu&&f.cpu[1])||'').slice(0,22))}</div></div>
    <div class=card><div class=l>uptime</div><div class=v style=font-size:13px>${esc((f.uptime_lines&&f.uptime_lines[0]||'—'))}</div></div>
-   ${g&&g.temp_c!=null?`<div class=card><div class=l>gpu</div><div class=v>${Math.round(tval(g.temp_c))}<span class=u>°${TU}</span></div><div class=s>${g.util_pct??'—'}% · ${g.mem_used_mib??'—'} MiB</div></div>`:''}
-   <div class=card><div class=l>snapshots</div><div class=v>${sn.count||0}</div><div class=s>${sn.last_ts?'last '+esc(fmtTs(sn.last_ts)):'none'}${sn.stale?' · stale':''}</div></div>
+   ${g&&g.temp_c!=null?`<div class=card data-k=gpu><div class=l>gpu</div><div class=v>${Math.round(tval(g.temp_c))}<span class=u>°${TU}</span></div><div class=s>${g.util_pct??'—'}% · ${g.mem_used_mib??'—'} MiB</div></div>`:''}
+   <div class=card data-k=ok><div class=l>snapshots</div><div class=v>${sn.count||0}</div><div class=s>${sn.last_ts?'last '+esc(fmtTs(sn.last_ts)):'none'}${sn.stale?' · stale':''}</div></div>
   </div>
   ${(f.gpu&&f.gpu[0])?`<div class=mut style="font:11px var(--mono);margin-top:8px">${esc(f.gpu.join(' / '))}</div>`:''}
   ${tabOverview(f._m)}
@@ -3362,13 +3508,13 @@ function rCluster(m){
   const cell=(v,f,cls)=>`<td class="n ${cls||''}">${v==null?'<span class=u>—</span>':f(v)}</td>`;
   const ms=v=>v==null?'—':v<1?Math.round(v*1000)+'<span class=u>ms</span>':v.toFixed(1)+'<span class=u>s</span>';   /* null-safe: engines without latency histograms (tensorfold) */
   return `<tr><td><span class="dot ${M.up?'ok':''}"></span> <span class=hn>${esc(n)}</span></td><td>${llm}</td>
-   <td class=n>${sv.length?`${s0.running??0}<span class=u> run</span>${s0.waiting?' <span class=warn>'+s0.waiting+' wait</span>':''} · ${Math.round(s0.gen_tps||0)}<span class=u> tok/s</span> ${spark([{pts:(s0.spark||{}).gen_tps,cls:'a'}])}${s0.decode_tps!=null?`<br><span class=u>decode</span> ${Math.round(s0.decode_tps)}<span class=u> tok/s per req</span>`:''}`:'<span class=u>—</span>'}</td>
+   <td class=n data-k=llm>${sv.length?`${s0.running??0}<span class=u> run</span>${s0.waiting?' <span class=warn>'+s0.waiting+' wait</span>':''} · ${Math.round(s0.gen_tps||0)}<span class=u> tok/s</span> ${spark([{pts:(s0.spark||{}).gen_tps,cls:'a'}])}${s0.decode_tps!=null?`<br><span class=u>decode</span> ${Math.round(s0.decode_tps)}<span class=u> tok/s per req</span>`:''}`:'<span class=u>—</span>'}</td>
    <td class="n lp">${sv.length?(s0.prefill_tps!=null?`${esc(fmtK(s0.prefill_tps))}<span class=u> tok/s</span>${s0.prefill_p50!=null?` · ${ms(s0.prefill_p50)}<span class=u> p50</span>`:''}${s0.prefill_share!=null?`<br><span class=u>${Math.round(s0.prefill_share)}% of busy time</span>`:''}`:'<span class=u>idle</span>'):'<span class=u>—</span>'}</td>
    <td class="n lp">${sv.length?`<span class="${s0.kv_pct>90?'bad':s0.kv_pct>70?'warn':''}">kv ${Math.round(s0.kv_pct||0)}%</span>${s0.ttft_p50!=null?' · ttft '+ms(s0.ttft_p50):''}${s0.queue_p50!=null&&s0.queue_p50>0.05?`<br><span class=u>queue</span> ${ms(s0.queue_p50)}`:''}`:'<span class=u>—</span>'}</td>
-   <td class=n>${M.gpu_util!=null?`${Math.round(M.gpu_util)}% · <span class="${M.gpu_temp>85?'bad':M.gpu_temp>75?'warn':''}">${fmtT(M.gpu_temp)}</span> · ${Math.round(M.gpu_power)}W`:'<span class=u>—</span>'}</td>
-   <td class="n lp2">${M.cpu!=null?Math.round(M.cpu)+'%':'—'} ${spark([{pts:sp.cpu}],{max:100})}</td>
+   <td class=n data-k=gpu>${M.gpu_util!=null?`${Math.round(M.gpu_util)}% · <span class="${M.gpu_temp>85?'bad':M.gpu_temp>75?'warn':''}">${fmtT(M.gpu_temp)}</span> · ${Math.round(M.gpu_power)}W`:'<span class=u>—</span>'}</td>
+   <td class="n lp2" data-k=cpu>${M.cpu!=null?Math.round(M.cpu)+'%':'—'} ${spark([{pts:sp.cpu}],{max:100})}</td>
    <td class="n lp2">${M.mem_used!=null?Math.round(M.mem_used/1e9)+'<span class=u>/'+Math.round((M.mem_total||0)/1e9)+'G</span>':'<span class=u>—</span>'}</td>
-   <td class=n>↑${esc(fmtBits(M.net_tx))} ↓${esc(fmtBits(M.net_rx))}${M.fabric_tx!=null?`<br><span class=u>fabric</span> ↑${esc(fmtBits(M.fabric_tx))} ↓${esc(fmtBits(M.fabric_rx))}`:''}</td>
+   <td class=n data-k=net>↑${esc(fmtBits(M.net_tx))} ↓${esc(fmtBits(M.net_rx))}${M.fabric_tx!=null?`<br><span class=u>fabric</span> ↑${esc(fmtBits(M.fabric_tx))} ↓${esc(fmtBits(M.fabric_rx))}`:''}</td>
    <td class="n lp"><span class="${M.root_pct>90?'bad':M.root_pct>80?'warn':''}">${M.root_pct!=null?Math.round(M.root_pct)+'%':'—'}</span>${M.disk_io!=null?' · '+esc(fmtBytes(M.disk_io))+'<span class=u>/s</span>':''}</td>
    <td>${M.failed_units?goA({host:n,panel:'hygiene'},'warn',M.failed_units+' failed','failed units — fix in Hygiene'):''}${M.reboot?goA({host:n,panel:'hygiene'},'warn','reboot','reboot required — Hygiene'):''}${M.up===0?goA({host:n,panel:'detail',tab:'health'},'bad','no metrics','exporter down — Machine Report › health'):''}</td></tr>`}).join('');
  const F=m.fleet||{},S=F.series||{},I=F.infra||{};
@@ -3384,7 +3530,7 @@ function rCluster(m){
    return `${esc(r.level)} <b class="${r.active<t?'bad':''}">${r.active}/${t}</b>${sy!=null?' <span class=warn>rebuilding '+sy.toFixed(1)+'%</span>':''}`}).join(' · ');
  const upN=names.filter(n=>H[n].up).length;
  return `<div class=hero>
-  <div class=hv>${Math.round(tps)}</div>
+  <div class=hv data-ghost="${ghost(Math.round(tps))}">${Math.round(tps)}</div>
   <div class=hl>tokens / second across the fleet<br><b>${models}</b> model${models==1?'':'s'} serving on <b>${upN}</b> of ${names.length} nodes${I.llm_total&&I.llm_up<I.llm_total?` · <span class=bad>${I.llm_total-I.llm_up} endpoint down</span>`:''}</div>
   <div class=stats>
    ${statTile('requests',run,' running',`${wait} waiting`,S.requests)}
@@ -3420,8 +3566,8 @@ function tabLLM(m){const g=mGuard(m);if(g)return g;
  if(!models.length)return head||'<div class=empty>no LLM server on this node</div>';
  const nm=k=>(N[k]||{});
  const cards=models.map(mo=>`<h3>${esc(mo)}</h3><div class=cards>
-  <div class=card><div class=l>running</div><div class=v>${nm('running')[mo]??'—'}</div><div class=s>${nm('waiting')[mo]??0} waiting</div></div>
-  <div class=card><div class=l>throughput</div><div class=v>${Math.round(nm('gen_tps')[mo]||0)}<span class=u> tok/s</span></div><div class=s>1-min average, idle included</div></div>
+  <div class=card data-k=llm><div class=l>running</div><div class=v>${nm('running')[mo]??'—'}</div><div class=s>${nm('waiting')[mo]??0} waiting</div></div>
+  <div class=card data-k=llm><div class=l>throughput</div><div class=v>${Math.round(nm('gen_tps')[mo]||0)}<span class=u> tok/s</span></div><div class=s>1-min average, idle included</div></div>
   <div class=card><div class=l>decode speed</div><div class=v>${nm('decode_tps')[mo]!=null?Math.round(nm('decode_tps')[mo]):'—'}<span class=u> tok/s</span></div><div class=s>per request, while streaming</div></div>
   <div class=card><div class=l>prefill</div><div class=v>${nm('prefill_tps')[mo]!=null?esc(fmtK(nm('prefill_tps')[mo])):'—'}<span class=u> tok/s</span></div><div class=s>${nm('prefill_p50')[mo]!=null?nm('prefill_p50')[mo].toFixed(2)+' s p50 · ':''}${nm('prefill_share')[mo]!=null?Math.round(nm('prefill_share')[mo])+'% of busy time':''}</div></div>
   <div class=card><div class=l>per request</div><div class=v>${nm('prompt_tok_p50')[mo]!=null?esc(fmtK(nm('prompt_tok_p50')[mo])):'—'}<span class=u> in</span></div><div class=s>→ ${nm('gen_tok_p50')[mo]!=null?esc(fmtK(nm('gen_tok_p50')[mo])):'—'} out (p50) · queue ${nm('queue_p50')[mo]!=null?Math.round(nm('queue_p50')[mo]*1000)+' ms':'—'}</div></div>

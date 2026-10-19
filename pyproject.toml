@@ -19,4 +19,4 @@ noctyx = "noctyx.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-noctyx = ["agent/*", "metrics/*", "units/*", "assets/*", "restore/*", "restore/cidata/*", "demo/*", "server/*"]
+noctyx = ["agent/*", "metrics/*", "units/*", "assets/*", "assets/fonts/*", "restore/*", "restore/cidata/*", "demo/*", "server/*"]
