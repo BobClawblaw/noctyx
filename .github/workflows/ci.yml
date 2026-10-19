@@ -2,10 +2,15 @@ name: ci
 on: [push, pull_request]
 jobs:
   test:
-    runs-on: ubuntu-24.04
+    # our own runner (an unprivileged user on the head node): no queue, and it checks the private-strings
+    # list that never leaves that machine
+    runs-on: [self-hosted, linux, noctyx]
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.12" }
-      - run: python3 tools/privacy_check.py
-      - run: pip install -e . pytest && python3 -m pytest -q
+      - name: privacy check (generic + the maintainer's private list)
+        run: python3 tools/privacy_check.py
+        env:
+          NOCTYX_PRIVACY_PATTERNS: /var/lib/gh-runner/privacy-patterns
+      - name: tests
+        run: PYTHONPATH=src python3 -m pytest -q -p no:cacheprovider

@@ -5,6 +5,7 @@ Generic patterns live here (private address ranges, home-directory paths, e-mail
 GitHub noreply). A maintainer's own private strings go in .privacy-patterns (git-ignored, one regex per
 line), so the list itself is never published.
 """
+import os
 import pathlib
 import re
 import subprocess
@@ -31,9 +32,10 @@ def files():
 
 def main():
     pats = list(GENERIC)
-    local = ROOT / ".privacy-patterns"
-    if local.exists():
-        pats += [l.strip() for l in local.read_text().splitlines() if l.strip() and not l.startswith("#")]
+    # a maintainer's private list: in the checkout (git-ignored), or outside it for a self-hosted CI runner
+    for local in (ROOT / ".privacy-patterns", pathlib.Path(os.environ.get("NOCTYX_PRIVACY_PATTERNS", "/nonexistent"))):
+        if local.is_file():
+            pats += [l.strip() for l in local.read_text().splitlines() if l.strip() and not l.startswith("#")]
     rx = re.compile("|".join(f"(?:{p})" for p in pats), re.I)
     bad = 0
     for f in files():
