@@ -13,7 +13,8 @@
   "nas_ssh": {
    "user": "backup",
    "host": "192.0.2.5",
-   "dir": "noctyx-rest"
+   "dir": "noctyx-rest",
+   "repo_root": "/volume1/backups/noctyx"
   },
   "ssh": {
    "user": "ops",

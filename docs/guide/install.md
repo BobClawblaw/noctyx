@@ -29,9 +29,9 @@ Related pages: [site config reference](site-config.md) · [accounts](accounts.md
   `update-ca-certificates`
 - systemd and `curl`. Before every backup the orchestrator measures the path with curl.
 
-**NAS** (backup target): reachable over ssh as `server.nas_ssh.user`. The repository endpoint is restic's
-[rest-server](https://github.com/restic/rest-server), which `noctyx nas-rest deploy` copies there (see
-[the repository endpoint](#the-repository-endpoint-on-the-nas)).
+**NAS** (backup target): a share the head mounts. The repository endpoint is restic's
+[rest-server](https://github.com/restic/rest-server), on the head (`noctyx setup rest-server`) or on the NAS
+over ssh as `server.nas_ssh.user` (`noctyx nas-rest deploy`, see [the endpoint on the NAS](#the-endpoint-on-the-nas)).
 
 ## 1. Install the package
 
@@ -66,95 +66,68 @@ Check the paths Noctyx will use:
 noctyx paths
 ```
 
-## 3. TLS: CA and server certificate
+## 3. Set up the head: `noctyx setup`
 
-The console (`:20996`) and the directory service (`:20999`) serve HTTPS with `server.tls.cert` and
-`server.tls.key`. Clients trust `server.tls.ca`. `nas-rest deploy` and `noctyx tool install-node-metrics` sign
-their certificates with the CA key at `<tls>/ca.key` (`tls` in [paths](site-config.md#paths), default
-`/etc/noctyx/tls`).
-
-Noctyx does not create the CA itself. Create it once with openssl. The example uses head address `192.0.2.10`
-and name `head-01`:
+`noctyx setup` with no step shows where the site is and the next command to run. Every step can be re-run
+safely: it keeps what already exists.
 
 ```bash
-cd /etc/noctyx/tls     # sudo mkdir -p -m 700 /etc/noctyx/tls first
-sudo openssl req -x509 -newkey rsa:4096 -nodes -days 3650 -subj "/O=Noctyx/CN=Noctyx CA" \
-  -keyout ca.key -out ca.crt
-sudo openssl req -new -newkey rsa:2048 -nodes -subj "/O=Noctyx/CN=head-01" -keyout server.key -out server.csr
-printf 'subjectAltName=IP:192.0.2.10,IP:127.0.0.1,DNS:head-01\nextendedKeyUsage=serverAuth\n' | sudo tee server.ext
-sudo openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 825 \
-  -extfile server.ext -out server.crt
-sudo chmod 600 ca.key server.key
+sudo mkdir -p /mnt/nas && sudo mount /mnt/nas    # your spindle's mount, holding server.repo_root
+sudo noctyx setup              # the checklist
+sudo noctyx setup owner        # the repository owner (paths.repo_owner, default noctyx) and /etc/noctyx
+sudo noctyx setup tls          # the site CA and the head's certificate
+sudo noctyx setup repos        # every entry in "repositories": key, endpoint login, restic init
+sudo noctyx setup escrow       # an encrypted bundle of every key; copy it OFF this machine
+sudo noctyx setup rest-server  # the endpoint on the head; with an endpoint on the NAS: noctyx nas-rest deploy
+sudo noctyx setup              # all ✓ but "units": next is install-head (step 4)
 ```
 
-The certificate includes `IP:127.0.0.1` because the Prometheus job that `install-alerting` adds scrapes the
-console on loopback.
+```text
+  ✓ owner     the repository owner noctyx
+  ✓ tls       the site CA and the head's certificate
+  ✓ repos     repositories (2/2 made)
+  ✓ escrow    an escrow bundle of the keys (newest noctyx-keys-20261019.tar.gz.enc)
+  ✓ endpoint  the repository endpoint https://192.0.2.10:20998
+  · units     the head's services (console, directory, mirror, timers)
 
-The directory service runs as the repository owner (`repo_owner`, default `noctyx`), so that user must be able to
-read `server.key`. For example: `sudo chgrp noctyx server.key && sudo chmod 640 server.key`.
+next: sudo noctyx install-head --apply
+```
+
+Before you start, install `restic`, `openssl` and `htpasswd` (`apt install restic openssl apache2-utils`), and
+put restic's [rest-server](https://github.com/restic/rest-server/releases) binary at
+`/usr/local/bin/rest-server`. The release asset names use underscores: `rest-server_<version>_linux_amd64`.
+
+### What each step does
+
+| Step | Makes | Notes |
+|---|---|---|
+| `owner` | the system user `repo_owner`; `<etc>` (0750, group `repo_owner`), `<repo_keys>` and `<repo_creds>` (0700), `<state>` | `server.repo_owner_uid` pins its uid. A NAS's NFS share often refuses unknown uids even as the owner, so match the NAS user's uid. |
+| `tls` | `<tls>/ca.key` + `server.tls.ca` (a 10-year CA), `server.tls.cert` + `server.tls.key` (825 days) | The certificate names `server.address`, `server.hostname`, `localhost` and `127.0.0.1`, plus anything in `server.tls.san` (e.g. `["DNS:head-01.lan"]`). The key is readable by `repo_owner` (the endpoint and the directory run as it). The CA is added to the head's trust store. Re-running renews a certificate with under 30 days left and **keeps the CA**. `--force` replaces the CA, and then every node must be re-installed. |
+| `repos` | per repository: `<repo_keys>/<repo>.key` (32 random bytes), `<repo_creds>/<prefix><repo>.pass` (hex), a bcrypt line for `<prefix><repo>` in `<etc>/htpasswd`, and `restic init` at `<repo_root>/<prefix><repo>/<repo>` | `restic init` runs as `repo_owner`, because an NFS share usually squashes root. `repo_root` must be writable by that user. |
+| `escrow` | `<etc>/escrow/noctyx-keys-<date>.tar.gz.enc`: AES-256 (PBKDF2, 200 000 rounds) over the keys, logins, TLS and htpasswd | The passphrase is asked twice and stored nowhere. **Without the keys every backup is unreadable.** Keep the bundle off this machine and off the NAS, and check that it opens somewhere else. The checklist flags keys made after the newest bundle. |
+| `rest-server` | `<unit_prefix>-rest-server.service` running rest-server as `repo_owner` | `--private-repos` (each login reaches only its own repository) and `--append-only` (a node can add snapshots, never delete them; pruning runs on the head). |
+
+### The endpoint on the NAS
+
+When `server.rest_host` is set and differs from `server.address`, the endpoint runs on the NAS instead.
+Set `server.nas_ssh.repo_root` to the NAS's own path to the same directory as `repo_root`
+(e.g. `/volume1/backups/noctyx`), install the rest-server build for the NAS's CPU at
+`/usr/local/bin/rest-server` on the head, then:
+
+```bash
+sudo noctyx nas-rest deploy    # a certificate for the NAS from the CA, the binary, run.sh, htpasswd -> ~/<nas_ssh.dir>
+sudo noctyx nas-rest status    # start | stop | restart | status
+```
+
+Every `tick` and every backup checks the endpoint and restarts it over ssh if it is down, so it comes back
+after a NAS reboot without a boot task.
+
+### Ports
 
 To change the console port, set `server.ui_port` (default `20996`) and run `install-head --apply` again. The
 `NOCTYX_CONSOLE_PORT` environment variable overrides it for a one-off run.
 
-## 4. The repository owner and the NAS mount
-
-```bash
-sudo useradd --system --no-create-home --shell /usr/sbin/nologin noctyx   # = paths.repo_owner
-sudo mkdir -p /mnt/nas && sudo mount /mnt/nas                              # your spindle's mount
-```
-
-Repositories live at `<server.repo_root>/<repo_dir_prefix><repo>/<repo>` (prefix default `nx-`). Anything that
-writes to a live repository (restic on the head, the HF mirror service, the directory service) runs as
-`repo_owner`.
-
-## 5. Create a repository
-
-Each entry in `repositories` needs these four things. Noctyx reads them but does not create them:
-
-| What | Where |
-|---|---|
-| restic password | `<repo_keys>/<repo>.key` (default `/etc/noctyx/repo-keys/`), root-only |
-| endpoint password | `<repo_creds>/<repo_dir_prefix><repo>.pass` (default `/etc/noctyx/repo-creds/nx-<repo>.pass`) |
-| endpoint login | a line for user `<repo_dir_prefix><repo>` in `<etc>/htpasswd` (default `/etc/noctyx/htpasswd`) |
-| the repository | `restic init` at `<repo_root>/<repo_dir_prefix><repo>/<repo>`, owned by `repo_owner` |
-
-For a repository named `gpu-01`, run this as root:
-
-```bash
-install -d -m 700 /etc/noctyx/repo-keys /etc/noctyx/repo-creds
-openssl rand -hex 32 > /etc/noctyx/repo-keys/gpu-01.key
-openssl rand -hex 24 > /etc/noctyx/repo-creds/nx-gpu-01.pass
-chmod 600 /etc/noctyx/repo-keys/gpu-01.key /etc/noctyx/repo-creds/nx-gpu-01.pass
-htpasswd -B -i /etc/noctyx/htpasswd nx-gpu-01 < /etc/noctyx/repo-creds/nx-gpu-01.pass   # -c the first time
-install -d -o noctyx -g noctyx /mnt/nas/backups/nx-gpu-01
-setpriv --reuid=noctyx --regid=noctyx --clear-groups \
-  restic -r /mnt/nas/backups/nx-gpu-01/gpu-01 --password-file /dev/stdin init < /etc/noctyx/repo-keys/gpu-01.key
-```
-
-The root shell opens the key file and passes it on stdin, so the repository files are owned by `noctyx` and the
-key stays root-only.
-
-## The repository endpoint on the NAS
-
-Nodes back up over HTTPS to rest-server at `https://<server.rest_host>:<server.rest_port>/<user>/<repo>`.
-rest-server runs with `--private-repos`, so each login sees only its own repository. When `rest_host` is set and
-differs from `server.address`, the endpoint runs on the NAS:
-
-```bash
-sudo noctyx nas-rest deploy    # cert for the NAS from the CA, binary, htpasswd -> ~/<nas_ssh.dir> on the NAS; restarts it
-sudo noctyx nas-rest status    # start | stop | restart | status
-```
-
-`deploy` copies `/usr/local/bin/rest-server` from the head, so install that binary on the head first. Every
-`tick` and every backup checks that the endpoint is up and restarts it over ssh if it is down.
-
-> **Known gap.** `deploy` also uploads a start script, `run.sh`, from `server/nas-rest-server.sh`, and that file
-> is not shipped in the package yet. Until it is, put your own `run.sh` (`start|stop|restart|status`, running
-> rest-server with `--private-repos --tls` on `rest_port` against the repository root) in `~/<nas_ssh.dir>/` on
-> the NAS. Nothing in Noctyx starts an endpoint on the head itself, so if `rest_host` is empty you have to run
-> rest-server there yourself.
-
-## 6. Install the head node's units
+## 4. Install the head node's units
 
 ```bash
 sudo noctyx install-head          # dry run: prints every unit, writes nothing
@@ -186,7 +159,7 @@ sudo noctyx directory --regen
 curl --cacert /etc/noctyx/tls/ca.crt https://192.0.2.10:20999/health
 ```
 
-## 7. Add the nodes
+## 5. Add the nodes
 
 Authorise the head's root key (`server.ssh.key`) for `server.ssh.user` on each node and give that user
 passwordless sudo. Then:
@@ -212,7 +185,7 @@ For each node, `install-agent`:
 `--with-client-timer` adds a nightly timer on the node itself. That timer bypasses the head's per-spindle lock.
 Leave it off so the head schedules backups.
 
-## 8. First backup
+## 6. First backup
 
 ```bash
 sudo noctyx hosts                          # what the config says
@@ -227,7 +200,7 @@ the job. Add `--foreground` to run it in-process, or `--no-follow` to start it a
 start if the probe fails or measures below `network.min_throughput_mbit` (default 40). `--force-low-net`
 overrides this. After the first backup, `noctyx tick --dry-run` shows what the schedule will run next.
 
-## 9. Verify
+## 7. Verify
 
 ```bash
 noctyx status

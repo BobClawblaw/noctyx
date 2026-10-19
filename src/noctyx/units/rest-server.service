@@ -1,0 +1,28 @@
+[Unit]
+Description=Noctyx repository endpoint (restic rest-server) on the head node
+After=network-online.target remote-fs.target
+Wants=network-online.target
+RequiresMountsFor=@REPO_ROOT@
+
+[Service]
+Type=simple
+User=@REPO_OWNER@
+Group=@REPO_OWNER@
+# --private-repos: each login reaches only <repo_root>/<login>/; --append-only: a node can add snapshots but
+# never delete one (pruning runs on the head, as the repository owner)
+ExecStart=/usr/local/bin/rest-server --path @REPO_ROOT@ --listen 0.0.0.0:@REST_PORT@ \
+  --tls --tls-cert @TLS_CERT@ --tls-key @TLS_KEY@ --tls-min-ver 1.2 \
+  --htpasswd-file @ETC@/htpasswd --private-repos --append-only --max-size 0 --prometheus --log -
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=@REPO_ROOT@
+RestrictAddressFamilies=AF_INET AF_INET6
+CapabilityBoundingSet=
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

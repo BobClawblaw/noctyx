@@ -8,7 +8,8 @@ import pytest
 
 SITE = {
     "server": {"hostname": "head", "address": "192.0.2.10", "ui_port": 20996, "rest_port": 20998,
-               "repo_root": "/mnt/nas/backups", "ssh": {"user": "ops", "key": "/root/.ssh/id_ed25519"},
+               "repo_root": "/mnt/nas/backups",
+               "nas_ssh": {"user": "backup", "host": "192.0.2.5", "dir": "noctyx-rest", "repo_root": "/volume1/backups/noctyx"}, "ssh": {"user": "ops", "key": "/root/.ssh/id_ed25519"},
                "tls": {"cert": "/x/server.crt", "key": "/x/server.key", "ca": "/x/ca.crt"}},
     "hosts": [{"name": "gpu-01", "address": "192.0.2.21", "arch": "x86_64", "repo": "gpu-01"}],
     "hf_mirror": {"store": "/mnt/nas/hf-mirror", "port": 20995},

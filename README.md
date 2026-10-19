@@ -102,6 +102,7 @@ sample data at `http://127.0.0.1:20993` (read-only).
 git clone https://github.com/BobClawblaw/noctyx && cd noctyx && pip install .   # not on PyPI yet
 sudo mkdir -p /etc/noctyx && sudo cp examples/site.example.json /etc/noctyx/site.json   # then edit it
 noctyx                                   # the banner and the command list
+sudo noctyx setup                        # a checklist: owner, tls, repos, escrow, the endpoint — run each step it names
 sudo noctyx install-head                 # shows the systemd units it would install; --apply installs them
 sudo noctyx install-agent --host gpu-01  # each node: restic, the agent, keys (never on a command line)
 ```

@@ -149,3 +149,14 @@ def test_api_tokens_and_signed_tickets(tmp_path, monkeypatch):
     assert ac.check_signed("dl|spark-1|abcd1234|/etc/hosts|False", t)
     assert not ac.check_signed("dl|spark-1|abcd1234|/etc/shadow|False", t)    # bound to its path
     assert not ac.check_signed("x", ac.sign("x", -1))                         # expired
+
+
+def test_setup_templates_render_fully(site_config):
+    import re
+    from noctyx import orchestrator as o
+    c = o.cfg()
+    unit = o.render_unit(c, "rest-server.service")
+    nas = o.render_site(c, (o.NX_HOME / "server" / "nas-rest-server.sh").read_text())
+    assert not re.findall(r"@[A-Z_]+@", unit + nas)
+    assert "--private-repos" in unit and "--append-only" in unit and "--listen 0.0.0.0:20998" in unit
+    assert "REPO_ROOT=/volume1/backups/noctyx" in nas

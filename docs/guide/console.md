@@ -188,4 +188,4 @@ The console exports its own state for Prometheus, cached for 30 seconds:
 ```
 
 The job scrapes `127.0.0.1`, so the console's certificate needs `IP:127.0.0.1` in its subjectAltName (see
-[install](install.md#3-tls-ca-and-server-certificate)). The target port is fixed at 20996.
+[install](install.md#3-set-up-the-head-noctyx-setup)). The target port is fixed at 20996.

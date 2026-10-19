@@ -60,10 +60,13 @@ rewrite is re-parsed before an atomic replace, keeps the file's owner and mode, 
 | `repo_root` | the directory on the head that holds the repositories (on the NAS mount) | **required** |
 | `nas_name` | the NAS's name: its lock key and its TLS name | the spindle whose `mount` holds `repo_root`, else `"nas"` |
 | `nas_ssh.user`, `.host`, `.dir` | ssh login to the NAS, and the directory (under its home) for the endpoint | **required** for `nas-rest` |
+| `nas_ssh.repo_root` | the NAS's own path to `repo_root` (what the endpoint serves there) | **required** for `nas-rest deploy` |
+| `repo_owner_uid` | uid for `noctyx setup owner` to give the repository owner (match the NAS user over NFS) | the next system uid |
 | `ssh.user` | ssh user on the nodes (needs passwordless sudo) | **required** |
 | `ssh.key` | root's private key used for every ssh | **required** (example `/root/.ssh/id_ed25519`) |
 | `tls.cert`, `tls.key` | server certificate and key (console, directory) | **required** |
 | `tls.ca` | CA certificate that nodes trust | **required** |
+| `tls.san` | extra names for `noctyx setup tls` to put in the certificate, e.g. `["DNS:head-01.lan"]` | `[]` |
 | `console_auth` | `false` leaves the console open (see [accounts](accounts.md)) | `true` |
 | `hot_root` | a second repository tier, shown in capacity and Storage Tiers | none |
 
