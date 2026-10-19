@@ -2996,6 +2996,48 @@ def validate_console(s):
     return out, errs
 
 
+def cmd_user(a):
+    """Console accounts. Passwords are read from the terminal (twice), or one line on stdin with
+    --password-stdin: never from the command line."""
+    import getpass
+    from noctyx import accounts as ac
+
+    def pw():
+        if a.password_stdin:
+            return sys.stdin.readline().rstrip("\n")
+        p1 = getpass.getpass("password: ")
+        if p1 != getpass.getpass("again: "):
+            sys.exit("the passwords differ")
+        return p1
+    try:
+        if a.op == "list":
+            us = ac.users()
+            for n, u in sorted(us.items()):
+                print(f"{n:<20} {u['role']:<9} created {datetime.datetime.fromtimestamp(u.get('created', 0)).date()}")
+            print(f"{len(us)} user(s); console mode: "
+                  + ("accounts (sign-in required)" if us and cfg()["server"].get("console_auth", True) is not False
+                     else "open access (sign-in optional)" if cfg()["server"].get("console_auth", True) is False
+                     else "token"))
+            return
+        if not a.name:
+            sys.exit("--name is required")
+        if a.op == "add":
+            errs = ac.check_new(a.name, a.role)
+            if errs:
+                sys.exit("; ".join(errs))
+            ac.add(a.name, a.role, pw())
+        elif a.op == "passwd":
+            ac.set_password(a.name, pw())
+        elif a.op == "role":
+            ac.set_role(a.name, a.role)
+        elif a.op == "del":
+            ac.delete(a.name)
+    except ValueError as e:
+        sys.exit(str(e))
+    audit(f"user-{a.op}", name=a.name, role=a.role if a.op in ("add", "role") else None)
+    print(f"user {a.op}: {a.name}" + (f" ({a.role})" if a.op in ("add", "role") else ""))
+
+
 def cmd_console_set(a):
     new, errs = validate_console(json.loads(a.json))
     if errs:
@@ -3283,6 +3325,10 @@ def main():
     g2.add_argument("--json"); g2.add_argument("--remove", action="store_true")
     rdi = sub.add_parser("recipe-discover", help="search GitHub for recipes that fit this cluster; rank by measured speed or recency")
     rdi.add_argument("--sort", choices=["fastest", "newest"], default="fastest")
+    us_ = sub.add_parser("user", help="console accounts: add | del | passwd | role | list")
+    us_.add_argument("op", choices=["add", "del", "passwd", "role", "list"]); us_.add_argument("--name")
+    us_.add_argument("--role", choices=["viewer", "operator", "admin"], default="viewer")
+    us_.add_argument("--password-stdin", action="store_true", help="read the password as one line on stdin")
     css = sub.add_parser("console-set", help="the console's display defaults (JSON: mode, theme, tunit, custom)")
     css.add_argument("--json", required=True)
     sub.add_parser("nightly", help="maintenance after the backup window (mirror harvest, recipe discovery, weekly prune dry-run + verify)")
@@ -3312,7 +3358,7 @@ def main():
                "policy-show": cmd_policy_show, "dumps": cmd_dumps, "hf-harvest": cmd_hf_harvest,
                "recipe-deploy": cmd_recipe_deploy, "recipe-stop": cmd_recipe_stop, "recipe-start": cmd_recipe_start,
                "recipe-rollback": cmd_recipe_rollback, "recipe-status": cmd_recipe_status,
-               "recipe-catalog": cmd_recipe_catalog, "recipe-discover": cmd_recipe_discover, "nightly": cmd_nightly, "install-head": cmd_install_head, "console-set": cmd_console_set, "assistant-set": cmd_assistant_set}[a.cmd]
+               "recipe-catalog": cmd_recipe_catalog, "recipe-discover": cmd_recipe_discover, "nightly": cmd_nightly, "install-head": cmd_install_head, "console-set": cmd_console_set, "user": cmd_user, "assistant-set": cmd_assistant_set}[a.cmd]
     rc = 0
     try:
         handler(a)

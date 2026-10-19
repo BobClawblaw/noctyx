@@ -1899,7 +1899,7 @@ body{margin:0;color:var(--fg);font:13px/1.5 var(--sans);-webkit-font-smoothing:a
   overflow:hidden;background:radial-gradient(1200px 600px at 80% -10%,var(--glow) 0%,transparent 60%),var(--bg)}
 .app{display:grid;grid-template-rows:auto 1fr;height:100vh;grid-template-columns:minmax(0,1fr)}
 header.top{display:flex;align-items:center;gap:14px;flex-wrap:nowrap;white-space:nowrap;
-  min-width:0;overflow:hidden;padding:0 14px;height:46px;
+  min-width:0;overflow:visible;padding:0 14px;height:46px;position:relative;
   background:linear-gradient(180deg,var(--bg-2),var(--bg-1));border-bottom:1px solid var(--line);z-index:50}
 .brand{display:flex;align-items:center;gap:9px;font-weight:650}
 .mark{width:22px;height:22px;border-radius:6px;flex:0 0 auto;
@@ -1928,6 +1928,7 @@ a.brand{text-decoration:none;color:inherit;flex:0 0 auto}
 .menu-title:hover,.menu.open .menu-title{color:var(--fg);background:var(--bg-3)}
 .menu.cur .menu-title,a.menu-title.cur{color:var(--accent)}
 a.menu-title{text-decoration:none;display:inline-flex;align-items:center;gap:6px} a.menu-title kbd{font:10px var(--mono);color:var(--fg-faint);border:1px solid var(--line);border-radius:4px;padding:0 4px}
+.menu-pop.hide{display:none}
 .menu-pop{position:absolute;top:calc(100% + 6px);left:0;min-width:190px;background:var(--bg-2);border:1px solid var(--line);border-radius:var(--radius);padding:5px;box-shadow:0 10px 30px rgba(0,0,0,.35);z-index:80}
 .menu-pop a{display:flex;align-items:center;gap:12px;padding:7px 10px;border-radius:var(--radius-sm);color:var(--fg);text-decoration:none;font:12.5px var(--sans)}
 .menu-pop a:hover,.menu-pop a.cur{background:var(--bg-3)} .menu-pop a.cur{color:var(--accent)}
