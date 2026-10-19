@@ -36,6 +36,18 @@ the HF mirror, recipe slots and catalog, the assistant's LLM endpoint.
 set up by an earlier tool keeps its directories, agent and unit names and moves when it wants to.
 `noctyx paths` prints what is in effect.
 
+## Accounts
+
+```bash
+sudo noctyx user add --name alice --role admin     # viewer | operator | admin; the password is asked twice
+sudo noctyx user list | passwd | role | del
+```
+
+With `server.console_auth` on (the default) and at least one user, the console asks everyone to sign in;
+viewers look, operators run jobs, admins change configuration. With `console_auth: false` (a LAN you
+trust) it stays open and signing in is optional: it keeps your display settings in your account and puts
+your name in the audit log.
+
 ## License
 
 Noctyx is **source-available** under the [Business Source License 1.1](LICENSE):

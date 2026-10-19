@@ -181,7 +181,9 @@ protect (restic, schedule, dumps) → cache → deploy → watch → console API
 Python → agent. Exit: a fresh site goes from `pip install` + `noctyx init` to nightly backups,
 a working model cache and one deployed recipe, with zero edits to code.
 
-**Phase 2 — Harden (3–4 weeks).** Console auth and roles; scoped sudo; backup target plug-ins
+**Phase 2 — Harden (3–4 weeks). Started 2026-10-19:** console accounts (scrypt passwords, viewer /
+operator / admin, signed HttpOnly SameSite=Strict session cookies, sign-in lockout, Origin check on every
+POST, per-user display settings), themes and a settings drawer, About, Kiosk. Console auth and roles; scoped sudo; backup target plug-ins
 (S3/B2, local disk, NAS over REST); packaging (wheel + .deb for the agent), upgrades between
 versions; CI with a simulated cluster (containers as nodes, a fake GPU exporter, a stub
 OpenAI-compatible server for deploy tests); hardware-in-the-loop runs on the reference cluster before

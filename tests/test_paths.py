@@ -87,3 +87,31 @@ def test_nas_name_from_the_spindle_holding_the_repositories():
     c["server"]["nas_name"] = "explicit"
     assert o.nas_name(c) == "explicit"
     assert o.nas_name({"server": {}, "spindles": {}}) == "nas"
+
+
+def test_accounts_passwords_sessions_roles(tmp_path, monkeypatch):
+    from noctyx import accounts as ac
+    monkeypatch.setitem(ac.P, "etc", str(tmp_path))
+    monkeypatch.setitem(ac.P, "console_state", str(tmp_path))
+    ac.add("alice", "operator", "correct horse battery")
+    assert (tmp_path / "users.json").stat().st_mode & 0o777 == 0o600
+    assert "correct horse" not in (tmp_path / "users.json").read_text()
+    assert ac.verify("alice", "correct horse battery") == "operator"
+    assert ac.verify("alice", "wrong") is None and ac.verify("nobody", "x" * 12) is None
+    s = ac.make_session("alice", ttl=60)
+    assert ac.check_session(s) == ("alice", "operator")
+    name, exp, sig = s.rsplit(".", 2)
+    assert ac.check_session(f"{name}.{int(exp) + 999}.{sig}") is None        # tampered expiry
+    assert ac.check_session(f"bob.{exp}.{sig}") is None                        # another name
+    assert ac.check_session(ac.make_session("alice", ttl=-1)) is None         # expired
+    ac.set_role("alice", "admin")
+    assert ac.check_session(s) == ("alice", "admin")                           # role read live
+    ac.delete("alice")
+    assert ac.check_session(s) is None                                         # gone with the user
+    import pytest
+    with pytest.raises(ValueError):
+        ac.add("Bad Name", "admin", "long enough pw")
+    with pytest.raises(ValueError):
+        ac.add("carol", "root", "long enough pw")
+    with pytest.raises(ValueError):
+        ac.add("carol", "viewer", "short")

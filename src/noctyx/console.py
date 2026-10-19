@@ -49,6 +49,7 @@ if __package__ in (None, ""):
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from noctyx import orchestrator as CM                # noqa: E402  the console never disagrees with `tick`
 from noctyx.paths import P, CONFIG                   # noqa: E402
+from noctyx import accounts as AC                    # noqa: E402
 
 NX_HOME = pathlib.Path(__file__).resolve().parent
 CFG_PATH = CONFIG
@@ -205,6 +206,32 @@ def _utcnow():
 
 def auth_on():
     return os.environ.get("NOCTYX_CONSOLE_AUTH", "1") != "0"
+
+
+def console_mode():
+    """open: anyone on the LAN may look and act (sign-in optional: per-user settings, a name in the audit);
+    accounts: sign in for everything, roles decide what you may do; token: the old bearer token for actions."""
+    if not auth_on():
+        return "open"
+    return "accounts" if AC.users() else "token"
+
+
+# what each action needs: everything else that changes something needs "operate"
+ADMIN_ACTIONS = {"setPolicy", "setSchedule", "setAssistant", "setConsoleDefaults", "recipeCatalog",
+                 "reboot", "rebootFinish", "nasRest", "policyApply"}
+NEED_RANK = {"view": 0, "operate": 1, "admin": 2}
+_LOGIN_FAILS = {}            # ip -> (failures, locked_until)
+
+
+def _login_locked(ip):
+    n, until = _LOGIN_FAILS.get(ip, (0, 0))
+    return until > time.time()
+
+
+def _login_failed(ip):
+    n, _ = _LOGIN_FAILS.get(ip, (0, 0))
+    n += 1
+    _LOGIN_FAILS[ip] = (n, time.time() + (min(3600, 30 * 2 ** (n - 5)) if n >= 5 else 0))
 
 
 def token() -> str:
@@ -371,7 +398,7 @@ def _persist_jobs():
 _ORPHAN_SWEEP_DONE = False
 
 
-def run_job(name: str, params: dict):
+def run_job(name: str, params: dict, user=None):
     # A previous UI process that was restarted/killed left its in-process jobs
     # "running" with nobody to ever finish them. Mark them dead at startup so
     # adoptRunning()/pollAll cannot repaint frozen "running" badges for ghosts.
@@ -400,8 +427,8 @@ def run_job(name: str, params: dict):
     # record the human trigger in the same audit trail everything else uses
     try:
         with AUDIT.open("a") as f:
-            f.write(json.dumps({"ts": job["started"], "event": "ui-trigger",
-                                "action": name, **params}) + "\n")
+            f.write(json.dumps({"ts": job["started"], "event": "ui-trigger", "action": name,
+                                **({"user": user} if user else {}), **params}) + "\n")
     except Exception:
         pass
 
@@ -1803,6 +1830,44 @@ def overview():
 # Favicon + brand mark: the watching eye (assets/favicon.svg, the source of truth), inlined so the
 # page stays one file.
 FAVICON = 'data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%20%3Cdefs%3E%20%3ClinearGradient%20id%3D%22tile%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%220%22%20y2%3D%221%22%3E%20%3Cstop%20offset%3D%220%22%20stop-color%3D%22%23151b3d%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%2305060d%22%2F%3E%20%3C%2FlinearGradient%3E%20%3ClinearGradient%20id%3D%22neon%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%20%3Cstop%20offset%3D%220%22%20stop-color%3D%22%233ff0ff%22%2F%3E%3Cstop%20offset%3D%22.55%22%20stop-color%3D%22%235b8cff%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%23b45cff%22%2F%3E%20%3C%2FlinearGradient%3E%20%3CradialGradient%20id%3D%22iris%22%20cx%3D%22.5%22%20cy%3D%22.42%22%20r%3D%22.62%22%3E%20%3Cstop%20offset%3D%220%22%20stop-color%3D%22%23f0feff%22%2F%3E%3Cstop%20offset%3D%22.3%22%20stop-color%3D%22%235ff3ff%22%2F%3E%3Cstop%20offset%3D%22.78%22%20stop-color%3D%22%235b6cff%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%237a3cff%22%2F%3E%20%3C%2FradialGradient%3E%20%3Cfilter%20id%3D%22glow%22%20x%3D%22-30%25%22%20y%3D%22-30%25%22%20width%3D%22160%25%22%20height%3D%22160%25%22%3E%20%3CfeGaussianBlur%20stdDeviation%3D%222%22%20result%3D%22b%22%2F%3E%3CfeMerge%3E%3CfeMergeNode%20in%3D%22b%22%2F%3E%3CfeMergeNode%20in%3D%22SourceGraphic%22%2F%3E%3C%2FfeMerge%3E%20%3C%2Ffilter%3E%20%3C%2Fdefs%3E%20%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2215%22%20fill%3D%22url%28%23tile%29%22%2F%3E%20%3Crect%20x%3D%22.75%22%20y%3D%22.75%22%20width%3D%2262.5%22%20height%3D%2262.5%22%20rx%3D%2214.25%22%20fill%3D%22none%22%20stroke%3D%22%233ff0ff%22%20stroke-opacity%3D%22.25%22%20stroke-width%3D%221.5%22%2F%3E%20%3Cg%20fill%3D%22%23d6ecff%22%3E%3Ccircle%20cx%3D%2212%22%20cy%3D%2212.5%22%20r%3D%221.1%22%2F%3E%3Ccircle%20cx%3D%2251.5%22%20cy%3D%2210%22%20r%3D%22.8%22%2F%3E%3Ccircle%20cx%3D%2254%22%20cy%3D%2252.5%22%20r%3D%221%22%2F%3E%3Ccircle%20cx%3D%229.5%22%20cy%3D%2250%22%20r%3D%22.7%22%2F%3E%3C%2Fg%3E%20%3Cg%20filter%3D%22url%28%23glow%29%22%3E%20%3Cpath%20d%3D%22M6.5%2032%20Q32%207%2057.5%2032%20Q32%2057%206.5%2032%20Z%22%20fill%3D%22none%22%20stroke%3D%22url%28%23neon%29%22%20stroke-width%3D%223.8%22%20stroke-linejoin%3D%22round%22%2F%3E%20%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2210.8%22%20fill%3D%22url%28%23iris%29%22%2F%3E%20%3C%2Fg%3E%20%3Cpath%20d%3D%22M32%2021.8%20Q35.6%2032%2032%2042.2%20Q28.4%2032%2032%2021.8%20Z%22%20fill%3D%22%2305060d%22%2F%3E%20%3Ccircle%20cx%3D%2228.2%22%20cy%3D%2227.9%22%20r%3D%222.1%22%20fill%3D%22%23fff%22%20fill-opacity%3D%22.92%22%2F%3E%20%3C%2Fsvg%3E'
+LOGIN_PAGE = r"""<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>Noctyx · sign in</title><link rel=icon href="/assets/favicon.svg">__THEME_JS__<style>
+:root{--bg:#070913;--bg-1:#0d1020;--bg-0:#05060d;--line:#242a47;--fg:#e2e8f6;--fg-dim:#97a3c2;--fg-faint:#67718f;--accent:#3fe6ff;--accent-2:#b45cff;--accent-ink:#0a0d14;--bad:#ef5a5a;--glow:#0b1124;
+ --sans:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;--mono:ui-monospace,Menlo,Consolas,monospace}
+html,body{height:100%;margin:0}
+body{display:grid;place-items:center;background:radial-gradient(900px 500px at 70% -10%,var(--glow),transparent 60%),var(--bg);color:var(--fg);font:14px var(--sans)}
+.box{width:min(360px,92vw);background:var(--bg-1);border:1px solid var(--line);border-radius:14px;padding:26px 26px 22px;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+.brand{display:flex;align-items:center;gap:10px;margin-bottom:18px} .brand img{width:34px;height:34px}
+.brand b{font:800 20px var(--sans);letter-spacing:.14em;background:linear-gradient(90deg,var(--accent),var(--accent-2));-webkit-background-clip:text;background-clip:text;color:transparent}
+label{display:block;font:600 12px var(--sans);color:var(--fg-dim);margin:12px 0 5px}
+input[type=text],input[type=password]{width:100%;box-sizing:border-box;background:var(--bg-0);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:9px 10px;font:14px var(--mono)}
+input:focus{outline:none;border-color:var(--accent)}
+.rem{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:12.5px;color:var(--fg-dim)}
+button{margin-top:18px;width:100%;background:var(--accent);color:var(--accent-ink);border:0;border-radius:8px;padding:10px;font:700 13px var(--sans);letter-spacing:.06em;text-transform:uppercase;cursor:pointer}
+#msg{min-height:18px;margin-top:10px;font-size:12.5px;color:var(--bad)} .foot{margin-top:6px;font-size:11.5px;color:var(--fg-faint)}
+</style></head><body>
+<form class=box id=lf><div class=brand><img src="/assets/favicon.svg" alt=""><b>NOCTYX</b></div>
+ <label for=u>Name</label><input id=u type=text autocomplete=username autofocus required>
+ <label for=pw>Password</label><input id=pw type=password autocomplete=current-password required>
+ <label class=rem><input id=rem type=checkbox> keep me signed in for 30 days</label>
+ <button type=submit>Sign in</button><div id=msg></div><div class=foot id=foot></div></form>
+<script>
+const next=new URLSearchParams(location.search).get('next')||'/';
+document.getElementById('lf').addEventListener('submit',go);
+fetch('/api/v1/me').then(r=>r.json()).then(m=>{if(m.mode=='open')document.getElementById('foot').innerHTML='This console is in open access: signing in is optional (per-user settings, your name in the audit). <a href="/" style="color:var(--accent)">Continue without</a>'});
+async function go(e){e.preventDefault();const m=document.getElementById('msg');m.textContent='';
+ const r=await fetch('/api/v1/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:document.getElementById('u').value,password:document.getElementById('pw').value,remember:document.getElementById('rem').checked})});
+ const j=await r.json().catch(()=>({}));
+ if(r.ok)location.href=next.startsWith('/')&&!next.startsWith('//')?next:'/';else{m.textContent=j.error||('sign-in failed ('+r.status+')');document.getElementById('pw').select()}}
+</script></body></html>"""
+
+
+def login_page():
+    """The sign-in page, drawn with the console's own theme script (the viewer's colours)."""
+    theme = PAGE[PAGE.index("<script>"):PAGE.index("</script>") + len("</script>")]
+    return LOGIN_PAGE.replace("__THEME_JS__", theme).encode()
+
+
 def page(view=None):
     """The one page, filled in for this site: brand mark, build stamp, the NAS's name, node paths."""
     out = (PAGE.replace("__FAVICON__", FAVICON).replace("__BUILD__", UI_BUILD)
@@ -1935,6 +2000,8 @@ a.menu-title{text-decoration:none;display:inline-flex;align-items:center;gap:6px
 .menu-pop kbd{margin-left:auto;font:10.5px var(--mono);color:var(--fg-faint);border:1px solid var(--line);border-radius:4px;padding:0 5px}
 .pagename{font:600 12px var(--sans);color:var(--fg);padding-left:10px;border-left:1px solid var(--line);flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .hbtn.gear{display:inline-flex;align-items:center;padding:5px 8px}
+.huser{display:inline-flex;align-items:center;gap:8px;font:12px var(--sans);color:var(--fg-dim);flex:0 0 auto}
+.huser b{color:var(--fg)} .huser .role{font:10.5px var(--mono);border:1px solid var(--line);border-radius:999px;padding:1px 7px}
 .setwrap{position:fixed;inset:0;z-index:200} .setwrap.hide{display:none}
 .setscrim{position:absolute;inset:0;background:var(--scrim)}
 .setpanel{position:absolute;top:0;right:0;bottom:0;width:min(520px,100vw);overflow:auto;background:var(--bg-1);border-left:1px solid var(--line);padding:18px 20px 40px;box-shadow:-12px 0 40px rgba(0,0,0,.35)}
@@ -2321,6 +2388,7 @@ td.acts{white-space:nowrap} td.acts a,td.acts button.lnk{margin-right:6px}
   <span class="hpill go" id=hrpo onclick="goTo({panel:'schedule'})" title="open Schedule"></span>
   <span class="hpill go" id=halert onclick="goTo({panel:'alerts'})" title="open Alerts"></span>
   <span class=hspacer></span>
+  <span class=huser id=huser></span>
   <button type=button class="hbtn gear" id=hgear title="Display settings: theme, units, layout" aria-label="Display settings" onclick="setOpen()"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="currentColor"><path fill-rule="evenodd" d="M13.9 2c.5 0 .9.4 1 .9l.3 1.8c.5.2 1 .4 1.4.7l1.7-.7c.5-.2 1 0 1.3.4l1.4 2.5c.3.5.2 1-.2 1.3l-1.5 1.2v1.6l1.5 1.2c.4.3.5.8.2 1.3l-1.4 2.5c-.3.4-.8.6-1.3.4l-1.7-.7c-.4.3-.9.5-1.4.7l-.3 1.8c-.1.5-.5.9-1 .9h-2.9c-.5 0-.9-.4-1-.9l-.3-1.8c-.5-.2-1-.4-1.4-.7l-1.7.7c-.5.2-1 0-1.3-.4l-1.4-2.5c-.3-.5-.2-1 .2-1.3l1.5-1.2v-1.6L3.6 9c-.4-.3-.5-.8-.2-1.3l1.4-2.5c.3-.4.8-.6 1.3-.4l1.7.7c.4-.3.9-.5 1.4-.7l.3-1.8c.1-.5.5-.9 1-.9zM12 8.4a3.6 3.6 0 1 0 0 7.2 3.6 3.6 0 0 0 0-7.2z"/></svg></button>
 </header>
 <div class="setwrap hide" id=setwrap role=dialog aria-modal=true aria-labelledby=setTitle><div class=setscrim onclick="setClose()"></div><section class=setpanel id=setpanel></section></div>
@@ -2405,7 +2473,7 @@ const esc=t=>String(t??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 let TU=NXT.eff().tunit=='C'?'C':'F';
 const tval=c=>TU=='F'?c*9/5+32:c;
 const fmtT=(c,short)=>c==null||isNaN(c)?'—':Math.round(tval(+c))+'°'+(short?'':TU);
-function setTU(u){TU=u;NXT.save({tunit:u});setRender();
+function setTU(u){TU=u;NXT.save({tunit:u});pushAccount();setRender();
  PANELS.forEach(p=>{if(p._data!==undefined&&p.id!='config')repaint(p.id,p._data)})}
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 function bar(pct,neutral){const p=clamp(parseInt(pct)||0,0,100);
@@ -2566,7 +2634,22 @@ function closeMenus(){document.querySelectorAll('#nav .menu.open').forEach(m=>{m
 
 /* ── display settings (the gear): appearance, units, layout. This browser's, over the site's
    defaults (site config "console", saved by an operator with "save as site default"). ── */
-let SITESET=null;
+var SITESET=null,ME=null;   // var: fetchJSON may run before this line, and a let would throw there
+const LS_WHERE='nx_settings_where';
+const whereSaved=()=>{try{return localStorage.getItem(LS_WHERE)||'browser'}catch(e){return 'browser'}};
+async function loadMe(){try{ME=await fetchJSON('/api/v1/me')}catch(e){ME=null}
+ const c=$('huser');if(c&&ME){
+  c.innerHTML=ME.user?`<b>${esc(ME.user)}</b><span class=role>${esc(ME.role)}</span><button class=lnk onclick="signOut()">sign out</button>`
+   :ME.mode=='open'?`<span class="hpill" title="anyone on this network may look and act; sign-in is optional">open access</span>${ME.accounts?'<a class=lnk href="/login?next='+encodeURIComponent(location.pathname)+'">sign in</a>':''}`:''}
+ if(ME&&ME.user&&whereSaved()=='account'){try{const s=await fetchJSON('/api/v1/settings/mine');
+   if(s.settings&&Object.keys(s.settings).length){localStorage.setItem('nx_settings_v1',JSON.stringify(s.settings));NXT.apply();
+    const t=NXT.eff().tunit=='C'?'C':'F';if(t!=TU){TU=t;PANELS.forEach(p=>{if(p._data!==undefined&&p.id!='config')repaint(p.id,p._data)})}}}catch(e){}}
+ setRender()}
+async function signOut(){await fetch('/api/v1/logout',{method:'POST'});location.href=ME&&ME.mode=='accounts'?'/login':location.pathname}
+async function pushAccount(){if(!(ME&&ME.user&&whereSaved()=='account'))return;
+ const r=await fetch('/api/v1/settings/mine',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({settings:NXT.local()})});
+ const m=$('setmsg');if(m&&!r.ok)m.textContent='✗ could not save to your account: '+((await r.json().catch(()=>({}))).error||r.status)}
+function setWhere(w){try{localStorage.setItem(LS_WHERE,w)}catch(e){};if(w=='account')pushAccount();setRender()}
 async function loadSiteSettings(){try{SITESET=await fetchJSON('/api/v1/console-settings');NXT.setSite(SITESET.settings||{});
  const t=NXT.eff().tunit=='C'?'C':'F';if(t!=TU){TU=t;PANELS.forEach(p=>{if(p._data!==undefined&&p.id!='config')repaint(p.id,p._data)})}}catch(e){}
  setRender()}
@@ -2585,10 +2668,12 @@ function setRender(){
  const names={bg:'Background',panel:'Panels',text:'Text',muted:'Muted text',accent:'Accent',line:'Lines',ok:'Good',warn:'Warning',bad:'Bad'};
  const picks=NXT.BASE.map(k=>`<label><input type=color value="${esc(s.custom[k])}" oninput="setCustom('${k}',this.value)">${names[k]}</label>`).join('');
  const site=SITESET&&SITESET.settings&&Object.keys(SITESET.settings).length;
+ const canSite=!ME||ME.mode!='accounts'||ME.role=='admin',acct=ME&&ME.user;
  P.innerHTML=`<h2 id=setTitle>Display settings <span class=sp></span><button class=hbtn onclick="setReset()" title="Back to the site's defaults (or the shipped look)">reset</button><button class=hbtn onclick="setClose()">close</button></h2>
  <p class=setnote>Applied as you change them. They change how the console looks, never what it measures or does.</p>
- <div class=setstore>${own?'<b>This browser</b> has its own settings':'Using <b>'+(site?'the site\'s defaults':'the shipped look')+'</b>'}
-  <span class=hspacer></span><button class=hbtn onclick="setSaveSite()" title="Every browser without its own settings gets these">save as site default</button>${own?'<button class=hbtn onclick="setReset()">use site default</button>':''}</div>
+ <div class=setstore>${own?(acct&&whereSaved()=='account'?'Saved in <b>your account</b> ('+esc(ME.user)+')':'<b>This browser</b> has its own settings'):'Using <b>'+(site?'the site\'s defaults':'the shipped look')+'</b>'}
+  <span class=hspacer></span>${canSite?'<button class=hbtn onclick="setSaveSite()" title="Every browser without its own settings gets these">save as site default</button>':''}${own?'<button class=hbtn onclick="setReset()">use site default</button>':''}</div>
+ ${acct?`<div class=setrow><label>Keep my settings</label>${segH(whereSaved(),[['browser','In this browser'],['account','In my account']],'setWhere')}<div class=hint>In your account they follow you to any browser you sign in on.</div></div>`:''}
  <div id=setmsg class=setnote></div>
  <div class=setgrp><h3>Appearance</h3><p class=gnote>The colours of the console: page, panels, text, lines, accent and the good / warning / bad states.</p>
   <div class=setrow><label>Mode</label>${segH(s.mode,[['light','Light'],['dark','Dark'],['system','System']],'setMode')}<div class=hint>Light or dark, or whatever the operating system asks for (System follows it as it changes).</div></div>
@@ -2598,9 +2683,9 @@ function setRender(){
   <div class=setrow><label>Temperature</label>${segH(TU,[['F','°F'],['C','°C']],'setTU')}<div class=hint>Readings and alert thresholds stay in °C underneath; only the display converts.</div></div></div>
  <div class=setgrp><h3>Layout</h3>
   <div class=setrow><label>Panels</label><div><button class=hbtn onclick="layoutReset()">reset panel layout</button></div><div class=hint>Puts every dashboard panel back where it started (this browser).</div></div></div>`}
-function setMode(m){NXT.save({mode:m});setRender()}
-function setTheme(id){NXT.save({theme:id});setRender()}
-function setCustom(k,v){NXT.save({theme:'custom',custom:{[k]:v}});
+function setMode(m){NXT.save({mode:m});pushAccount();setRender()}
+function setTheme(id){NXT.save({theme:id});pushAccount();setRender()}
+function setCustom(k,v){NXT.save({theme:'custom',custom:{[k]:v}});clearTimeout(setCustom._p);setCustom._p=setTimeout(pushAccount,600);
  /* re-render only the cards/swatches when the pickers settle: keep the open picker */
  clearTimeout(setCustom._t);setCustom._t=setTimeout(setRender,400)}
 function setReset(){NXT.clearLocal();TU=NXT.eff().tunit=='C'?'C':'F';PANELS.forEach(p=>{if(p._data!==undefined&&p.id!='config')repaint(p.id,p._data)});setRender()}
@@ -2608,7 +2693,7 @@ async function setSaveSite(){const s=NXT.eff(),body={mode:s.mode,theme:s.theme,t
  const m=$('setmsg');if(m)m.textContent='saving as the site default…';
  const r=await act('setConsoleDefaults',{settings:body});
  if(m)m.textContent=r&&r.error?'✗ '+r.error:'✓ saved: browsers without their own settings use these';setTimeout(loadSiteSettings,2500)}
-loadSiteSettings();
+loadSiteSettings();loadMe();
 if(location.hash=='#settings')setOpen();
 
 /* ── About ── */
@@ -2873,6 +2958,7 @@ function dragify(el,grip){
 
 async function fetchJSON(u){const r=await fetch(u,{headers:{'Accept':'application/json'}});
  buildCheck(r);
+ if(r.status==401&&ME&&ME.mode=='accounts'){location.href='/login?next='+encodeURIComponent(location.pathname+location.hash);throw new Error('sign in')}
  if(!r.ok)throw new Error(u+' -> '+r.status);return r.json()}
 /* the server stamps every response with its build; a page from an older build reloads itself once
    (otherwise a tab left open across a UI restart keeps running stale code with no hint) */
@@ -3853,8 +3939,62 @@ class H(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
-    def _send(self, body: bytes, ctype="application/json", code=200):
+    def _body(self):
+        """The request's JSON body ({} when there is none)."""
+        n = int(self.headers.get("Content-Length") or 0)
+        return json.loads(self.rfile.read(n) if n > 0 else b"{}")
+
+    def _cookie(self, name):
+        for part in (self.headers.get("Cookie") or "").split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == name:
+                return v
+        return None
+
+    def _who(self):
+        """(name, role) of a signed-in user, or None. Never cached on self: one handler object serves
+        every request of a keep-alive connection, and a cached "nobody" outlived the sign-in."""
+        return AC.check_session(self._cookie("nx_session"))
+
+    def _bearer_ok(self):
+        tok = token()
+        return bool(tok) and self.headers.get("Authorization") == f"Bearer {tok}"
+
+    def _allowed(self, need):
+        mode = console_mode()
+        if mode == "open":
+            return True
+        if mode == "token":
+            return need == "view" or self._bearer_ok()
+        if self._bearer_ok():                      # scripts keep working with the token
+            return True
+        w = self._who()
+        return bool(w) and AC.rank(w[1]) >= NEED_RANK[need]
+
+    def _deny(self, need):
+        w = self._who()
+        if console_mode() == "accounts" and not w:
+            return self._json({"error": "sign in first", "login": True}, 401)
+        if console_mode() == "token":
+            return self._json({"error": "bad token"}, 401)
+        return self._json({"error": f"{w[1] if w else 'this session'} may not do this (needs {'admin' if need == 'admin' else 'operator'})"}, 403)
+
+    def _origin_ok(self):
+        o = self.headers.get("Origin")
+        return not o or urllib.parse.urlparse(o).netloc == (self.headers.get("Host") or "")
+
+    def _redirect(self, where, cookie=None):
+        self.send_response(302)
+        self.send_header("Location", where)
+        if cookie is not None:
+            self.send_header("Set-Cookie", cookie)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def _send(self, body: bytes, ctype="application/json", code=200, cookie=None):
         self.send_response(code)
+        if cookie is not None:
+            self.send_header("Set-Cookie", cookie)
         self.send_header("Content-Type", ctype)
         self.send_header("X-CM-Build", UI_BUILD)   # the page reloads itself once when this changes
         self.send_header("Content-Length", str(len(body)))
@@ -3907,6 +4047,20 @@ class H(BaseHTTPRequestHandler):
         p = self.path.split("?")[0]
         q = dict(kv.split("=", 1) for kv in self.path.split("?")[1].split("&") if "=" in kv) \
             if "?" in self.path else {}
+        if p in ("/login", "/login/"):
+            return self._send(login_page(), "text/html; charset=utf-8")
+        if p == "/api/v1/me":
+            w = self._who()
+            return self._json({"mode": console_mode(), "user": w[0] if w else None, "role": w[1] if w else None,
+                               "accounts": bool(AC.users())})
+        # accounts mode: everything below needs a session (Prometheus' /metrics and the assets excepted)
+        if not (p.startswith("/assets/") or p in ("/favicon.ico", "/favicon.svg", "/metrics")) and not self._allowed("view"):
+            if p.startswith("/api/"):
+                return self._deny("view")
+            return self._redirect("/login?next=" + urllib.parse.quote(self.path, safe=""))
+        if p == "/api/v1/settings/mine":
+            w = self._who()
+            return self._json({"settings": AC.get_settings(w[0]) if w else {}, "user": w[0] if w else None})
         if p in ("/", "/index.html"):
             return self._send(page(), "text/html; charset=utf-8")
         if p in ("/cluster", "/cluster/", "/config", "/config/", "/recipes", "/recipes/", "/about", "/about/",
@@ -4059,35 +4213,67 @@ class H(BaseHTTPRequestHandler):
         return self._json({"error": "not found"}, 404)
 
     def do_POST(self):
+        if self.path != "/api/v1/alert-hook" and not self._origin_ok():
+            return self._json({"error": "cross-origin request refused"}, 403)
+        if self.path in ("/api/v1/login", "/api/v1/logout", "/api/v1/settings/mine"):
+            try:
+                body = self._body()
+            except Exception:
+                return self._json({"error": "bad json"}, 400)
+            ip = self.client_address[0]
+            if self.path.endswith("/logout"):
+                return self._send(b'{"ok": true}', cookie="nx_session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0")
+            if self.path.endswith("/login"):
+                if _login_locked(ip):
+                    return self._json({"error": "too many failed sign-ins from here: wait a little"}, 429)
+                name, pw = str(body.get("user") or "").strip().lower(), str(body.get("password") or "")
+                role = AC.verify(name, pw) if name and pw else None
+                try:
+                    with AUDIT.open("a") as f:
+                        f.write(json.dumps({"ts": _utcnow(), "event": "login", "user": name[:32], "ok": bool(role), "ip": ip}) + "\n")
+                except Exception:
+                    pass
+                if not role:
+                    _login_failed(ip)
+                    return self._json({"error": "wrong name or password"}, 401)
+                _LOGIN_FAILS.pop(ip, None)
+                ttl = 30 * 86400 if body.get("remember") else 12 * 3600
+                return self._send(json.dumps({"ok": True, "user": name, "role": role}).encode(),
+                                  cookie=f"nx_session={AC.make_session(name, ttl)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age={ttl}")
+            w = self._who()                                       # settings/mine
+            if not w:
+                return self._json({"error": "sign in first", "login": True}, 401)
+            s, errs = CM.validate_console(body.get("settings"))
+            if errs:
+                return self._json({"error": "; ".join(errs)}, 400)
+            AC.put_settings(w[0], s)
+            return self._json({"ok": True})
         if self.path == "/api/v1/alert-hook":
             # Alertmanager on this host only; no token (it has none) — loopback is the auth
             if self.client_address[0] not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
                 return self._json({"error": "loopback only"}, 403)
             try:
-                body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)) or b"{}"))
+                body = self._body()
             except Exception:
                 return self._json({"error": "bad json"}, 400)
             return self._json({"recorded": record_alerts(body)})
         if self.path == "/api/v1/explain":
-            # same token gate as actions; explanations are read-only but cost GPU time
-            if auth_on():
-                tok = token()
-                if not tok or self.headers.get("Authorization") != f"Bearer {tok}":
-                    return self._json({"error": "bad token"}, 401)
+            # explanations change nothing but cost GPU time: operator and up
+            if not self._allowed("operate"):
+                return self._deny("operate")
             try:
-                body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)) or b"{}"))
+                body = self._body()
             except Exception:
                 return self._json({"error": "bad json"}, 400)
             if body.get("kind") == "hygiene" and body.get("host") in VALID_HOSTS and isinstance(body.get("id"), str):
                 return self._json(explain_hygiene(body["host"], body["id"]))
             return self._json({"error": "unknown kind/host"}, 400)
         if self.path in ("/api/v1/assistant-test", "/api/v1/assistant-key"):
-            if auth_on():
-                tok = token()
-                if not tok or self.headers.get("Authorization") != f"Bearer {tok}":
-                    return self._json({"error": "bad token"}, 401)
+            need = "admin" if self.path.endswith("-key") else "operate"
+            if not self._allowed(need):
+                return self._deny(need)
             try:
-                body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)) or b"{}"))
+                body = self._body()
             except Exception:
                 return self._json({"error": "bad json"}, 400)
             if self.path.endswith("-test"):
@@ -4101,15 +4287,14 @@ class H(BaseHTTPRequestHandler):
         # NOCTYX_CONSOLE_AUTH=0 disables the token gate (dev mode, systemd unit). The gate
         # stays in code — flip env back to 1 to restore. Whitelist + validation
         # apply either way: auth-off must not mean injection-on.
-        if auth_on():
-            tok = token()
-            if not tok or self.headers.get("Authorization") != f"Bearer {tok}":
-                return self._json({"error": "bad token"}, 401)
         try:
-            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)) or b"{}"))
+            body = self._body()
             name, params = body.get("action"), body.get("params") or {}
         except Exception:
             return self._json({"error": "bad json"}, 400)
+        need = "admin" if name in ADMIN_ACTIONS else "operate"
+        if not self._allowed(need):
+            return self._deny(need)
         if name == "setAssistant":
             errs = CM.validate_assistant(params.get("assistant"))[1]
             if errs:
@@ -4124,7 +4309,8 @@ class H(BaseHTTPRequestHandler):
                 return self._json({"error": "; ".join(errs)}, 400)
         if name not in ACTIONS or not valid_params(name, params):
             return self._json({"error": "unknown action or invalid host/profile"}, 400)
-        return self._json({"id": run_job(name, params)})
+        w = self._who()
+        return self._json({"id": run_job(name, params, user=w[0] if w else None)})
 
 
 def _finish_head_reboot():
