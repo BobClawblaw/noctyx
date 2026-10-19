@@ -3340,7 +3340,8 @@ async function hySend(host,ids){for(const id of ids)HY[hyKey(host,id)]={st:'send
  for(const id of ids)HY[hyKey(host,id)]=r.error?{st:'failed',msg:hyErr(r.error)}:{st:'queued',job:r.id};hyRepaint()}
 function hyFix(btn){const {h,id,what}=btn.dataset;if(confirm(`${what} on ${h}?`))hySend(h,[id])}
 function hyFixAll(btn){const jobs=JSON.parse(btn.dataset.jobs);const n=jobs.reduce((a,[,ids])=>a+ids.length,0);
- if(confirm(`Apply all ${n} space-reclaim fixes (package removal, journal vacuum, docker prune) on every host?`))for(const [h,ids] of jobs)hySend(h,ids)}
+ const fb=Number(btn.dataset.bytes||0);
+ if(confirm(`Apply all ${n} space-reclaim fixes (package removal, old kernels, journal vacuum, docker prune) on every host?${fb?`\n\nFrees about ${fmtBytes(fb)}.`:''}`))for(const [h,ids] of jobs)hySend(h,ids)}
 async function hyScan(){if(HYSCAN&&!['failed'].includes(HYSCAN.st))return;HYSCAN={st:'sending'};hyRepaint();
  const r=await act('hygiene');HYSCAN=r.error?{st:'failed',msg:hyErr(r.error)}:{st:'queued',job:r.id};hyRepaint()}
 function hySync(){let ch=false;const upd=e=>{if(!e||!e.job||e.st=='done'||e.st=='failed')return;const j=JOBS[e.job];if(!j)return;
@@ -3370,21 +3371,29 @@ function rHygiene(d){
  const H=d.hosts||{},names=Object.keys(H);
  if(!names.length)return `<div class=empty>no report yet — <button class=lnk onclick="hyScan()">run hygiene now</button></div>`;
  let rows='',open=0;
+ // what the open space fixes would free (measured by each host's agent the way the fix works; ~ = estimate)
+ const freeOf=items=>items.filter(i=>!i.fixed&&i.bytes>0).reduce((a,i)=>a+i.bytes,0);
+ const approxOf=items=>items.some(i=>!i.fixed&&i.bytes>0&&i.bytes_approx);
+ const frees=i=>i.bytes>0&&!i.fixed?` <span class="tag ok" title="${i.bytes_approx?'an estimate: ':''}what this fix frees on disk">frees ${i.bytes_approx?'~':''}${esc(fmtBytes(i.bytes))}</span>`:'';
+ let fleet=0,fleetApprox=false;
  for(const n of names){const items=H[n].items||[];open+=items.filter(i=>!i.fixed).length;
+  const hf=freeOf(items),ha=approxOf(items);fleet+=hf;fleetApprox=fleetApprox||ha;
+  const hcell=`${esc(n)}${hf?`<div class=mut style="font:10px var(--mono)">${ha?'~':''}${esc(fmtBytes(hf))} reclaimable</div>`:''}`;
   if(H[n].error){rows+=`<tr><td>${esc(n)}</td><td colspan=3 class=bad>${esc(H[n].error)}</td></tr>`;continue}
   if(!items.length){rows+=`<tr class="${hlRow('hygiene',n)}"><td>${esc(n)}</td><td colspan=3 class=mut>clean${FOCUS.panel=='hygiene'&&FOCUS.host==n?' — nothing to fix here; the finding may be older than the last scan':''}</td></tr>`;continue}
-  rows+=items.map((i,k)=>`<tr class="${i.fixed?'mut':''}${hlRow('hygiene',n)}"><td>${k?'':esc(n)}</td><td><span class="tag ${i.severity=='warning'&&!i.fixed?'warn':''}">${esc(i.severity)}</span></td>
-   <td><b>${esc(i.title)}</b>${i.detail?`<div class=mut style="font:10.5px var(--mono);white-space:normal">${esc(i.detail)}</div>`:''}
+  rows+=items.map((i,k)=>`<tr class="${i.fixed?'mut':''}${hlRow('hygiene',n)}"><td>${k?'':hcell}</td><td><span class="tag ${i.severity=='warning'&&!i.fixed?'warn':''}">${esc(i.severity)}</span></td>
+   <td><b>${esc(i.title)}</b>${frees(i)}${i.detail?`<div class=mut style="font:10.5px var(--mono);white-space:normal">${esc(i.detail)}</div>`:''}
     ${i.fixed?'':i.explain?`<div class=xpl style="font:11.5px/1.5 var(--sans);color:var(--fg);margin-top:6px;white-space:normal;border-left:2px solid var(--line);padding-left:8px">${esc(i.explain)}<div class=mut style="font:10px var(--mono);margin-top:2px">— ${esc(i.explain_model||'assistant')}</div></div>`
      :`<button class=lnk data-h="${esc(n)}" data-id="${esc(i.id)}" onclick="explainItem(this.dataset.h,this.dataset.id,this)">explain</button>`}</td>
    <td class=acts>${hyCell(n,i)}</td></tr>`).join('')}
  // bulk = space reclaim only; unit restarts/clears (items with a named fix) are always one click each
  const bulk=names.map(n=>[n,(H[n].items||[]).filter(i=>!i.fixed&&i.tier=='manual'&&!i.fix&&!HY[hyKey(n,i.id)]).map(i=>i.id)]).filter(([,ids])=>ids.length);
  const nb=bulk.reduce((a,[,ids])=>a+ids.length,0);
+ const nbBytes=bulk.reduce((a,[n,ids])=>a+(H[n].items||[]).filter(i=>ids.includes(i.id)&&i.bytes>0).reduce((s,i)=>s+i.bytes,0),0);
  const scan=!HYSCAN?`<button class=lnk onclick="hyScan()">re-scan</button>`
   :HYSCAN.st=='failed'?`<span class=badj>✗</span> <span class=warn>${esc(HYSCAN.msg)}</span> <button class=lnk onclick="hyScan()">retry</button>`
   :HYSCAN.st=='running'?`<span class=spin>◌</span> scanning every host…`:HYSCAN.st=='done'?`<span class=spin>◌</span> reading report…`:`<span class=qj>…</span> scan ${HYSCAN.st=='sending'?'sending':'queued'}`;
- return `<div class=sline><b>${open}</b> open item${open==1?'':'s'} · report ${esc(agoS(d.ts))} · ${scan}${nb?` · <button class=lnk data-jobs='${esc(JSON.stringify(bulk))}' onclick="hyFixAll(this)">fix all ${nb} space items</button>`:''}</div>
+ return `<div class=sline><b>${open}</b> open item${open==1?'':'s'}${fleet?` · <b class=ok>${fleetApprox?'~':''}${esc(fmtBytes(fleet))}</b> can be freed`:''} · report ${esc(agoS(d.ts))} · ${scan}${nb?` · <button class=lnk data-jobs='${esc(JSON.stringify(bulk))}' data-bytes="${nbBytes}" onclick="hyFixAll(this)">fix all ${nb} space items${nbBytes?` (frees ${fleetApprox?'~':''}${esc(fmtBytes(nbBytes))})`:''}</button>`:''}</div>
   <table><tr><th>host</th><th></th><th>finding</th><th></th></tr>${rows}</table>`}
 function rBrief(d){
  if(!d)return '<div class=empty>loading…</div>';

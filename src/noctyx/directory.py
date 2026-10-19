@@ -98,9 +98,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": str(e)}, 500)
 
         if p == "/api/v1/restore-script":
-            f = pathlib.Path(P["restore_script"] or NX_HOME / "restore" / "noctyx-restore.sh")   # restore image script
             try:
-                return self._send(f.read_bytes(), "text/x-shellscript")
+                if P["restore_script"]:              # a site's own (e.g. an older stick's engine)
+                    return self._send(pathlib.Path(P["restore_script"]).read_bytes(), "text/x-shellscript")
+                from noctyx import orchestrator as cm
+                eng = cm.render_site(CFG, (NX_HOME / "restore" / "noctyx-restore.sh").read_text())
+                return self._send(eng.encode(), "text/x-shellscript")
             except Exception as e:
                 return self._json({"error": str(e)}, 500)
 

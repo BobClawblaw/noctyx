@@ -5,8 +5,9 @@
   noctyx mirror               the Hugging Face mirror server (HF_ENDPOINT)
   noctyx llm-discover         find LLM servers on the fleet (timer)
   noctyx mtplx-exporter       Apple-silicon LLM server metrics for Prometheus
-  noctyx tool NAME [ARGS]     a setup script rendered for this site (install-node-metrics, install-mac-metrics,
-                              install-alerting, install-llm-monitoring)
+  noctyx tool NAME [ARGS]     a script rendered for this site: install-node-metrics, install-mac-metrics,
+                              install-alerting, install-llm-monitoring; recovery: build-stick, build-stick-single,
+                              make-restore-usb, vm-boot-test, rehearse-head
   noctyx paths                the effective paths for this site (paths.py + the site config's "paths")
   noctyx banner               the banner
   noctyx <command> …          everything else: backup, tick, recipe-deploy, hf-harvest, … (`noctyx -h`)
@@ -19,26 +20,43 @@ import subprocess
 import sys
 import tempfile
 
-TOOLS = ("install-node-metrics", "install-mac-metrics", "install-alerting", "install-llm-monitoring")
+# name -> (package dir, script): run with this site's paths and values filled in
+TOOLS = {
+    "install-node-metrics": ("metrics", "install-node-metrics.sh"),
+    "install-mac-metrics": ("metrics", "install-mac-metrics.sh"),
+    "install-alerting": ("metrics", "install-alerting.sh"),
+    "install-llm-monitoring": ("metrics", "install-llm-monitoring.sh"),
+    "build-stick": ("restore", "build-stick.sh"),               # dual-arch recovery stick (x86_64 + arm64)
+    "build-stick-single": ("restore", "build-stick-single.sh"), # one-arch stick; --fetch-only caches the ISOs
+    "make-restore-usb": ("restore", "make-restore-usb.sh"),     # payload (keys, engine, menu, restic) onto a FAT partition
+    "vm-boot-test": ("restore", "vm-boot-test.sh"),             # boot recovery media in a UEFI VM
+    "rehearse-head": ("restore", "rehearse-head.sh"),           # rebuild the head node from its snapshot in a VM
+}
 
 
 def tool(name, args):
-    """Render the metrics directory for this site into a temp dir and run one of its scripts there."""
-    from .paths import P, CONFIG, render
+    """Render one of the package's script directories for this site into a temp dir and run the script there
+    (the scripts call their siblings, so the whole directory is rendered)."""
+    from .paths import CONFIG
+    from . import orchestrator as cm
     if name not in TOOLS:
         sys.exit(f"unknown tool {name!r} (tools: {', '.join(TOOLS)})")
-    src = pathlib.Path(__file__).resolve().parent / "metrics"
-    extra = {"NX_PKG_PARENT": str(src.parents[1]), "NX_CONFIG": CONFIG, "NX_PY": sys.executable}
+    sub, script = TOOLS[name]
+    src = pathlib.Path(__file__).resolve().parent / sub
+    c = cm.cfg()
     with tempfile.TemporaryDirectory(prefix="noctyx-tool-") as td:
-        for f in src.iterdir():
-            if f.is_file() and not f.name.endswith(".py"):
-                text = render(f.read_text())
-                for k, v in extra.items():
-                    text = text.replace(f"@{k}@", v)
-                (pathlib.Path(td) / f.name).write_text(text)
-                shutil.copymode(f, pathlib.Path(td) / f.name)
-        env = {**os.environ, "NOCTYX_CONFIG": CONFIG, "PYTHONPATH": extra["NX_PKG_PARENT"], "NX_PY": sys.executable}
-        return subprocess.call([str(pathlib.Path(td) / f"{name}.sh"), *args], env=env)
+        for f in src.rglob("*"):
+            if f.is_file() and "__pycache__" not in f.parts and not (sub == "metrics" and f.suffix == ".py"):
+                out = pathlib.Path(td) / f.relative_to(src)
+                out.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    out.write_text(cm.render_site(c, f.read_text()))
+                except UnicodeDecodeError:
+                    out.write_bytes(f.read_bytes())
+                shutil.copymode(f, out)
+        os.chmod(td, 0o755)
+        env = {**os.environ, "NOCTYX_CONFIG": CONFIG, "PYTHONPATH": str(src.parents[1]), "NX_PY": sys.executable}
+        return subprocess.call(["bash", str(pathlib.Path(td) / script), *args], env=env)
 
 
 def main(argv=None):

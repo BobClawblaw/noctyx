@@ -371,8 +371,21 @@ cmd_retention() {
 # or removes packages — a human clicks), or none (report only: a real failed
 # service, a real pending reboot). `hygiene [--fix auto|manual|ID,ID]`
 hyg_items=()
-hyg_add() { # <id> <severity> <title> <detail> <tier> [fix-label]  — fix-label names what the button will do
-  hyg_items+=("$(python3 -c 'import json,sys;a=sys.argv[1:];print(json.dumps({"id":a[0],"severity":a[1],"title":a[2],"detail":a[3],"tier":a[4] or None,"fixed":False,"fix":(a[5] if len(a)>5 and a[5] else None)}))' "$@")"); }
+hyg_add() { # <id> <severity> <title> <detail> <tier> [fix-label] [bytes[~]]  — fix-label names what the button will do;
+            # bytes = what the fix would free (measured the way the fix works); a trailing ~ marks an estimate
+  hyg_items+=("$(python3 -c 'import json,sys
+a=sys.argv[1:]; b=a[6] if len(a)>6 else ""
+print(json.dumps({"id":a[0],"severity":a[1],"title":a[2],"detail":a[3],"tier":a[4] or None,"fixed":False,
+                  "fix":(a[5] if len(a)>5 and a[5] else None),
+                  "bytes":(int(b.rstrip("~")) if b.rstrip("~").isdigit() else None),"bytes_approx":b.endswith("~")}))' "$@")"); }
+# "After this operation, 1,234 kB disk space will be freed." (apt's own estimate) -> bytes
+apt_freed() { python3 -c 'import re,sys
+m=re.search(r"([0-9][0-9.,]*)\s*([kMG]?B) disk space will be freed",sys.stdin.read())
+print(int(float(m.group(1).replace(",",""))*{"B":1,"kB":1e3,"MB":1e6,"GB":1e9}[m.group(2)]) if m else "")'; }
+# journalctl --disk-usage / docker sizes: "3.5G", "512.0M", "1.2kB" -> bytes
+hsize() { python3 -c 'import re,sys
+m=re.match(r"([0-9.]+)\s*([KkMGT]?)i?B?",sys.argv[1].strip())
+print(int(float(m.group(1))*{"":1,"K":1024,"k":1000,"M":1024**2,"G":1024**3,"T":1024**4}[m.group(2)]) if m else "")' "$1"; }
 hyg_mark_fixed() { local id=$1 i; for i in "${!hyg_items[@]}"; do
     [[ ${hyg_items[$i]} == *"\"id\": \"$id\""* ]] && hyg_items[$i]=${hyg_items[$i]/\"fixed\": false/\"fixed\": true}; done; }
 hyg_want_fix() { # <tier> <id>
@@ -437,27 +450,55 @@ cmd_hygiene() {
   local n
   n=$(apt-get -s autoremove 2>/dev/null | grep -c '^Remv ')
   if (( n > 0 )); then
-    hyg_add apt-autoremove info "$n package(s) no longer needed" "$(apt-get -s autoremove 2>/dev/null | grep -i 'disk space will be freed' | head -1 | sed 's/^After this operation, //')" manual
+    # what autoremove frees = the installed size of exactly the packages it would remove
+    local akb
+    akb=$(apt-get -s autoremove 2>/dev/null | awk '/^Remv /{print $2}' | xargs -r dpkg-query -W -f='${Installed-Size}\n' 2>/dev/null | awk '{s+=$1} END{print s+0}')
+    hyg_add apt-autoremove info "$n package(s) no longer needed" "apt autoremove --purge" manual "" "$(( akb * 1024 ))"
     hyg_want_fix manual apt-autoremove && DEBIAN_FRONTEND=noninteractive apt-get -y -q autoremove --purge >/dev/null 2>&1 && hyg_mark_fixed apt-autoremove
   fi
-  local runk old
+  local runk old kv base pk kb oldpk=() vers=()
   runk=$(uname -r)
-  old=$(dpkg-query -W -f='${Package}\n' 'linux-image-[0-9]*' 2>/dev/null | grep -v "$runk" | sort -V | head -n -1 | tr '\n' ' ')
-  if [[ -n ${old// /} ]]; then
-    hyg_add old-kernels info "old kernels installed" "$old (running $runk; newest kept)" manual
-    hyg_want_fix manual old-kernels && DEBIAN_FRONTEND=noninteractive apt-get -y -q purge $old >/dev/null 2>&1 && hyg_mark_fixed old-kernels
+  # installed ones only: a removed kernel whose config files linger (dpkg state rc) takes no space.
+  # A kernel is many packages (image, unsigned image, modules, modules-extra, GPU modules, headers):
+  # the fix purges every installed package of that version, and its initrd goes with them.
+  old=$(dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' 'linux-image-[0-9]*' 2>/dev/null | awk '$1=="ii"{print $2}' \
+        | grep -v "$runk" | sort -V | head -n -1)
+  kb=0
+  for pk in $old; do
+    kv=${pk#linux-image-}; base=$(grep -oE '^[0-9]+\.[0-9]+\.[0-9]+-[0-9]+' <<<"$kv")
+    [[ -n $base && $runk != "$base"* ]] || continue
+    vers+=("$kv")
+    while read -r s n; do oldpk+=("$n"); kb=$(( kb + ${s:-0} )); done < <(dpkg-query -W -f='${db:Status-Abbrev} ${Installed-Size} ${Package}\n' 'linux-*' 2>/dev/null \
+        | awk -v b="$base" '$1=="ii" && index($3, b) {print ($2==""?0:$2), $3}')
+    [[ -f /boot/initrd.img-$kv ]] && kb=$(( kb + $(stat -c%s "/boot/initrd.img-$kv") / 1024 ))
+  done
+  if (( ${#oldpk[@]} )); then
+    hyg_add old-kernels info "old kernels installed" "${vers[*]}: ${#oldpk[@]} package(s) (running $runk; newest kept)" manual "" "$(( kb * 1024 ))"
+    hyg_want_fix manual old-kernels && DEBIAN_FRONTEND=noninteractive apt-get -y -q purge "${oldpk[@]}" >/dev/null 2>&1 && hyg_mark_fixed old-kernels
   fi
   local jb
   jb=$(journalctl --disk-usage 2>/dev/null | grep -oE '[0-9.]+[KMG]' | head -1)
   if [[ $jb == *G ]] && (( ${jb%.*G} >= 1 )); then
-    hyg_add journal info "journal uses $jb" "vacuum to 500M keeps recent history" manual
+    hyg_add journal info "journal uses $jb" "vacuum to 500M keeps recent history" manual "" "$(( $(hsize "$jb") - 500*1024*1024 ))"
     hyg_want_fix manual journal && journalctl --vacuum-size=500M >/dev/null 2>&1 && hyg_mark_fixed journal
   fi
   if command -v docker >/dev/null 2>&1; then
     local dang stopped
     dang=$(docker images -f dangling=true -q 2>/dev/null | wc -l); stopped=$(docker ps -aq -f status=exited 2>/dev/null | wc -l)
     if (( dang + stopped > 0 )); then
-      hyg_add docker-prune info "docker leftovers" "$dang dangling image(s), $stopped exited container(s)" manual
+      # docker's own accounting: each dangling image's UNIQUE size (layers no other image uses) + exited
+      # containers' size. Layers shared only among dangling images are not counted: an estimate, slightly low.
+      local db
+      db=$(docker system df -v --format '{{json .}}' 2>/dev/null | python3 -c 'import json,re,sys
+U={"B":1,"kB":1e3,"KB":1e3,"MB":1e6,"GB":1e9,"TB":1e12}
+def b(s):
+    m=re.match(r"([0-9.]+)\s*([kKMGT]?B)",s or ""); return float(m.group(1))*U[m.group(2)] if m else 0
+try: d=json.loads(sys.stdin.read())
+except Exception: print(""); sys.exit()
+n=sum(b(i.get("UniqueSize")) for i in d.get("Images") or [] if i.get("Repository")=="<none>")
+n+=sum(b(c.get("Size","").split(" ")[0]) for c in d.get("Containers") or [] if c.get("State")=="exited")
+print(int(n))')
+      hyg_add docker-prune info "docker leftovers" "$dang dangling image(s), $stopped exited container(s)" manual "" "${db}~"
       hyg_want_fix manual docker-prune && docker image prune -f >/dev/null 2>&1 && docker container prune -f >/dev/null 2>&1 && hyg_mark_fixed docker-prune
     fi
   fi

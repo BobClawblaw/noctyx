@@ -35,7 +35,12 @@ DEFAULTS = {
     "recipe_root": "~/.local/share/noctyx/recipes",
     "gpu_lock": "/var/lock/noctyx-gpu.lock",
     "mirror_unit": "noctyx-hf-mirror",            # the HF mirror's service
-    "restore_script": "",                         # what /api/v1/restore-script serves ("" = the packaged one)      # a slot's GPU lock when the slot names none
+    "restore_script": "",                         # what /api/v1/restore-script serves ("" = the packaged one)
+    "iso_dir": "/srv/noctyx/isos",                # cached Ubuntu live ISOs + restic binaries for recovery sticks
+    "vmtest_dir": "/srv/noctyx/vmtest",           # VM boot tests of recovery media
+    "rehearsal_dir": "/var/tmp/noctyx-rehearsal", # head-node rebuild rehearsal scratch (hundreds of GB)
+    "stick_label": "NOCTYX",                      # the recovery stick's payload partition (FAT, max 11 chars)
+    "live_label": "NOCTYXLIVE",                   # its ext4 live-image partition      # a slot's GPU lock when the slot names none
     # Prometheus wiring (the console's queries and the alert rules use these names)
     "prom_node_targets": "/etc/prometheus/noctyx-targets.json",   # file_sd for node_exporter on every node
     "prom_llm_targets": "/etc/prometheus/llm-targets.json",        # file_sd for LLM servers (llm-discover)

@@ -168,8 +168,13 @@ it — adoption is the point; the implementation stays BSL). Then:
 HF mirror, node agent + dumps hook, metrics exporters and installers, head-node units and the CLI are
 in the package with every site fact moved to the config (`paths`, `common_exclusions_extra`,
 `hf_mirror.scan_roots`, `recipes.harness_dir`); the reference cluster's own config runs on it beside the
-old tool (console on a trial port, timers still the old tool's). Left: the bare-metal restore image,
-`noctyx init`, splitting the two large modules, the web UI out of Python, a cut-over command.
+old tool (console on a trial port, timers still the old tool's). **Cut over the same day:** the reference
+cluster runs on Noctyx's units. **Bare-metal restore image ported** (2026-10-19): `noctyx tool build-stick`
+builds the dual-arch (x86_64 + arm64) recovery stick from the site config; a stick built into an image
+file through a loop device passed all its checks (its key opens a live repository) and booted in UEFI VMs
+on both arches into the recovery menu with the live inventory and snapshots. Left: `noctyx init`,
+splitting the two large modules, the web UI out of Python, `noctyx migrate` (move nodes to Noctyx's own
+layout), a restore on real hardware.
  Port module by module from the private implementation, each
 through the privacy check, none of its history. Order: config + inventory → jobs/locks/audit →
 protect (restic, schedule, dumps) → cache → deploy → watch → console API → web UI split out of

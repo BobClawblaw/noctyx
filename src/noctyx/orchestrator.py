@@ -677,10 +677,14 @@ def cmd_hygiene(a):
         print(f"  {h['name']:<10} {len(items)} item(s)" + (f", {sum(1 for i in items if i.get('fixed'))} fixed" if a.fix else ""))
         for i in items:
             print(f"     {'✓' if i.get('fixed') else '·'} [{i['severity']}] {i['title']}"
-                  + (f" — {i['detail'][:110]}" if i.get("detail") else "") + (f"  ({i['tier']})" if i.get("tier") else ""))
+                  + (f" — {i['detail'][:110]}" if i.get("detail") else "") + (f"  ({i['tier']})" if i.get("tier") else "")
+                  + (f"  frees {'~' if i.get('bytes_approx') else ''}{i['bytes'] / 1e9:.1f} GB" if (i.get("bytes") or 0) > 0 and not i.get("fixed") else ""))
         audit("hygiene", host=h["name"], items=len(items), fixed=sum(1 for i in items if i.get("fixed")),
               fix=a.fix or "", warnings=sum(1 for i in items if i["severity"] == "warning"))
     report["ts"] = time.time()
+    free = sum(i.get("bytes") or 0 for d in report["hosts"].values() for i in d.get("items") or [] if not i.get("fixed") and (i.get("bytes") or 0) > 0)
+    if free:
+        print(f"reclaimable: about {free / 1e9:.1f} GB (the space fixes, if all applied)")
     try:
         HYGIENE_FILE.parent.mkdir(parents=True, exist_ok=True)
         HYGIENE_FILE.write_text(json.dumps(report, indent=1))
@@ -3031,16 +3035,27 @@ HEAD_UNITS = ("console.service", "directory.service", "hf-mirror.service", "tick
               "hygiene.service", "hygiene.timer")
 
 
-def render_unit(c, name):
+def site_values(c):
+    """Template values that come from the site config rather than paths.py (units, tools, the restore image)."""
     hc = hf_cfg(c)
-    extra = {"NX_PY": sys.executable, "NX_PKG_PARENT": str(NX_HOME.parent), "NX_CONFIG": CFG_PATH,
-             "UI_PORT": str(c["server"].get("ui_port", 20996)), "HF_STORE": hc["store"], "HF_PORT": str(hc["port"]),
-             "CONSOLE_AUTH": "0" if c["server"].get("console_auth", True) is False else "1",
-             "REPO_ROOT": c["server"].get("repo_root") or "/"}
-    text = render((NX_HOME / "units" / name).read_text())
-    for k, v in extra.items():
+    s = c["server"]
+    head = next((h for h in c.get("hosts", []) if h.get("address") == s.get("address")), {})
+    return {"NX_PY": sys.executable, "NX_PKG_PARENT": str(NX_HOME.parent), "NX_CONFIG": CFG_PATH,
+            "UI_PORT": str(s.get("ui_port", 20996)), "HF_STORE": hc["store"], "HF_PORT": str(hc["port"]),
+            "CONSOLE_AUTH": "0" if s.get("console_auth", True) is False else "1",
+            "REPO_ROOT": s.get("repo_root") or "/", "HEAD_ADDR": s.get("address") or "",
+            "HEAD_HOST": head.get("name") or "", "RESTIC_VERSION": str(c.get("restic_version") or "0.19.1")}
+
+
+def render_site(c, text):
+    text = render(text)
+    for k, v in site_values(c).items():
         text = text.replace(f"@{k}@", v)
     return text
+
+
+def render_unit(c, name):
+    return render_site(c, (NX_HOME / "units" / name).read_text())
 
 
 def cmd_install_head(a):

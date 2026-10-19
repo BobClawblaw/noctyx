@@ -50,3 +50,22 @@ def test_agent_result_parsing_accepts_old_and_new_tokens():
     from noctyx import orchestrator as o
     out = 'noise\nLEGACY_RESULT {"a": 1}\nNOCTYX_RESULT {"b": 2}\nCLUSTERMAN_RESULT {"c": 3}\n'
     assert o.result_lines(out) == ['{"a": 1}', '{"b": 2}', '{"c": 3}']
+
+
+def test_shipped_files_are_not_empty():
+    """A truncated template ships silently (an empty cloud-init seed boots the stock installer)."""
+    from noctyx import orchestrator as o
+    empty = [str(f) for f in o.NX_HOME.rglob("*") if f.is_file() and f.stat().st_size == 0
+             and f.name != "__init__.py" and "__pycache__" not in f.parts]
+    assert not empty, empty
+
+
+def test_restore_templates_render_completely():
+    from noctyx import orchestrator as o
+    c = o.cfg()
+    for f in (o.NX_HOME / "restore").rglob("*"):
+        if f.is_file() and "__pycache__" not in f.parts:
+            out = o.render_site(c, f.read_text())
+            assert not re.search(r"@[A-Z_]+@", out), f.name
+    seed = (o.NX_HOME / "restore" / "cidata" / "user-data").read_text()
+    assert "bootcmd:" in seed and "noctyx-menu.sh" in seed

@@ -1,0 +1,37 @@
+#cloud-config
+# Noctyx recovery stick — read by the Ubuntu live image's cloud-init from the
+# CIDATA partition (NoCloud). It puts the recovery menu (noctyx-menu.sh on the
+# @STICK_LABEL@ partition) on tty1 in place of the installer. No `autoinstall:`
+# key: nothing is ever installed from this stick.
+#
+# How: the installer's console client is snap.subiquity.subiquity-service (it
+# opens tty1 itself). A drop-in replaces its ExecStart with the menu, so the
+# menu inherits the installer's own start slot and console. Written in bootcmd
+# (cloud-init network stage) because the unit's start job is already queued by
+# then and only waits for cloud-config; daemon-reload makes the queued job run
+# the new definition. What did NOT work (VM tests 2026-10-11):
+#   - a separate unit + `systemctl stop` of the installer: the installer is
+#     Restart=always and the two fought over tty1 with SIGHUPs;
+#   - `mask --runtime`: the snap's unit is in /etc, which outranks /run;
+#   - masking in /etc (symlink to /dev/null): snapd seeding then never finished,
+#     and cloud-final (runcmd) waits for it.
+bootcmd:
+  - |
+    d=/etc/systemd/system/snap.subiquity.subiquity-service.service.d
+    mkdir -p "$d"
+    cat > "$d/noctyx.conf" <<'EOF'
+    [Unit]
+    Description=Noctyx recovery menu on tty1 (replaces the installer)
+    [Service]
+    ExecStart=
+    ExecStart=/bin/sh -c 'mkdir -p /run/nx-usb; mountpoint -q /run/nx-usb || mount -o ro LABEL=@STICK_LABEL@ /run/nx-usb; exec /bin/bash /run/nx-usb/noctyx-menu.sh'
+    StandardInput=tty-force
+    StandardOutput=tty
+    StandardError=tty
+    TTYPath=/dev/tty1
+    TTYReset=yes
+    Environment=TERM=linux
+    Restart=always
+    RestartSec=2
+    EOF
+    systemctl daemon-reload
