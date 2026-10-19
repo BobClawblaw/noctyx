@@ -1,0 +1,13 @@
+[Unit]
+Description=Noctyx MTPLX exporter (Mac LLM server JSON metrics -> vLLM-style Prometheus metrics on 127.0.0.1:9411)
+After=network-online.target
+
+[Service]
+Type=simple
+Environment=PYTHONPATH=@NX_PKG_PARENT@ NOCTYX_CONFIG=@NX_CONFIG@
+ExecStart=@NX_PY@ -u -m noctyx.metrics.mtplx_exporter
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

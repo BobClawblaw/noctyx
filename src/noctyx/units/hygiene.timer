@@ -1,0 +1,11 @@
+[Unit]
+Description=Noctyx hygiene (timer)
+
+[Timer]
+OnCalendar=*-*-* 06:45:00
+Persistent=true
+RandomizedDelaySec=5m
+Unit=@UNIT_PREFIX@-hygiene.service
+
+[Install]
+WantedBy=timers.target

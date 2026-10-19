@@ -1,0 +1,11 @@
+[Unit]
+Description=Noctyx nightly (timer)
+
+[Timer]
+OnCalendar=*-*-* 07:30:00
+Persistent=true
+RandomizedDelaySec=15m
+Unit=@UNIT_PREFIX@-nightly.service
+
+[Install]
+WantedBy=timers.target

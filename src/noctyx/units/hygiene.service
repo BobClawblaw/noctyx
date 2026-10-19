@@ -1,0 +1,12 @@
+[Unit]
+Description=Noctyx hygiene: report housekeeping on every node, fix the safe tier
+After=network-online.target remote-fs.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Nice=10
+IOSchedulingClass=best-effort
+Environment=NOCTYX_CONFIG=@NX_CONFIG@ PYTHONPATH=@NX_PKG_PARENT@ NOCTYX_FOREGROUND=1
+ExecStart=@NX_PY@ -m noctyx.cli hygiene --fix auto
+TimeoutStartSec=1h

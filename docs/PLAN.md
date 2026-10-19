@@ -164,7 +164,13 @@ it — adoption is the point; the implementation stays BSL). Then:
 - [ ] Legal setup started (§2 checklist): company, trademark search, lawyer for the grant text
 - [ ] Domains registered
 
-**Phase 1 — Extract (3–4 weeks).** Port module by module from the private implementation, each
+**Phase 1 — Extract (3–4 weeks). In progress — 2026-10-19:** orchestrator, console, directory service,
+HF mirror, node agent + dumps hook, metrics exporters and installers, head-node units and the CLI are
+in the package with every site fact moved to the config (`paths`, `common_exclusions_extra`,
+`hf_mirror.scan_roots`, `recipes.harness_dir`); the reference cluster's own config runs on it beside the
+old tool (console on a trial port, timers still the old tool's). Left: the bare-metal restore image,
+`noctyx init`, splitting the two large modules, the web UI out of Python, a cut-over command.
+ Port module by module from the private implementation, each
 through the privacy check, none of its history. Order: config + inventory → jobs/locks/audit →
 protect (restic, schedule, dumps) → cache → deploy → watch → console API → web UI split out of
 Python → agent. Exit: a fresh site goes from `pip install` + `noctyx init` to nightly backups,

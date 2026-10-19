@@ -1,0 +1,52 @@
+import re
+
+from noctyx import paths
+
+
+def test_defaults_are_noctyx_layout():
+    assert paths.DEFAULTS["agent_bin"] == "/usr/local/bin/noctyx-agent"
+    assert paths.DEFAULTS["result_token"] == "NOCTYX_RESULT"
+
+
+def test_site_overrides_and_unknown_keys_ignored(site_config, tmp_path):
+    p = paths.load(str(site_config))
+    assert p["agent_bin"] == "/usr/local/bin/legacy-agent"
+    assert p["node_etc"] == "/etc/legacy"
+    assert p["state"] == paths.DEFAULTS["state"]
+    bad = tmp_path / "s.json"
+    bad.write_text('{"paths": {"nonsense": "/x"}}')
+    assert "nonsense" not in paths.load(str(bad))
+
+
+def test_env_overrides(site_config, monkeypatch):
+    monkeypatch.setenv("NOCTYX_PATH_STATE", "/tmp/nx-state")
+    assert paths.load(str(site_config))["state"] == "/tmp/nx-state"
+
+
+def test_render_fills_every_node_template(site_config):
+    from noctyx import orchestrator as o
+    p = paths.load(str(site_config))
+    for name in ("noctyx-agent.sh", "noctyx-dumps.py"):
+        out = paths.render((o.NX_HOME / "agent" / name).read_text(), p)
+        assert not re.search(r"@[A-Z_]+@", out), name
+    agent = paths.render((o.NX_HOME / "agent" / "noctyx-agent.sh").read_text(), p)
+    assert "printf 'LEGACY_RESULT %s" in agent and "/etc/legacy/client.conf" in agent
+
+
+def test_units_render_completely():
+    from noctyx import orchestrator as o
+    c = o.cfg()
+    for n in o.HEAD_UNITS:
+        assert not re.search(r"@[A-Z_]+@", o.render_unit(c, n)), n
+
+
+def test_common_exclusions_take_site_extras():
+    from noctyx import orchestrator as o
+    text = o.common_exclusions(o.cfg())
+    assert "/data/**" in text and "/boot" not in [l.strip() for l in text.splitlines()]
+
+
+def test_agent_result_parsing_accepts_old_and_new_tokens():
+    from noctyx import orchestrator as o
+    out = 'noise\nLEGACY_RESULT {"a": 1}\nNOCTYX_RESULT {"b": 2}\nCLUSTERMAN_RESULT {"c": 3}\n'
+    assert o.result_lines(out) == ['{"a": 1}', '{"b": 2}', '{"c": 3}']

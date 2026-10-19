@@ -1,0 +1,11 @@
+[Unit]
+Description=Noctyx tick (timer)
+
+[Timer]
+OnCalendar=*:0/15
+Persistent=true
+RandomizedDelaySec=60
+Unit=@UNIT_PREFIX@-tick.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,20 @@
+# Noctyx Alertmanager config (/etc/prometheus/alertmanager.yml).
+# Every alert goes to the Noctyx UI webhook (Alerts panel + audit.jsonl).
+# External delivery (email / ntfy / …) is added as a second receiver by
+# install-alerting.sh from @ALERT_ENV@ — see README.
+global:
+  resolve_timeout: 5m
+route:
+  receiver: console
+  group_by: [alertname, host]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 12h
+receivers:
+- name: console
+  webhook_configs:
+  - url: https://127.0.0.1:20996/api/v1/alert-hook
+    send_resolved: true
+    http_config:
+      tls_config:
+        ca_file: @TLS@/ca.crt

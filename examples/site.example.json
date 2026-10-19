@@ -1,0 +1,115 @@
+{
+ "version": 1,
+ "server": {
+  "hostname": "head",
+  "address": "192.0.2.10",
+  "ui_port": 20996,
+  "rest_port": 20998,
+  "rest_host": "192.0.2.5",
+  "directory_port": 20999,
+  "discovery_udp_port": 20997,
+  "repo_root": "/mnt/nas/backups",
+  "nas_name": "nas",
+  "nas_ssh": {
+   "user": "backup",
+   "host": "192.0.2.5",
+   "dir": "noctyx-rest"
+  },
+  "ssh": {
+   "user": "ops",
+   "key": "/root/.ssh/id_ed25519"
+  },
+  "tls": {
+   "cert": "/etc/noctyx/tls/server.crt",
+   "key": "/etc/noctyx/tls/server.key",
+   "ca": "/etc/noctyx/tls/ca.crt"
+  }
+ },
+ "spindles": {
+  "nas": {
+   "mount": "/mnt/nas",
+   "kind": "nas"
+  }
+ },
+ "repositories": [
+  {
+   "id": "gpu-01",
+   "spindle": "nas"
+  }
+ ],
+ "hosts": [
+  {
+   "name": "gpu-01",
+   "address": "192.0.2.21",
+   "arch": "x86_64",
+   "repo": "gpu-01",
+   "os": "linux"
+  },
+  {
+   "name": "gpu-02",
+   "address": "192.0.2.22",
+   "arch": "aarch64",
+   "repo": "gpu-01",
+   "os": "linux"
+  }
+ ],
+ "profiles": {
+  "system": {
+   "description": "whole root filesystem minus the noise list",
+   "paths": [
+    "/"
+   ],
+   "exclusions": [
+    "common",
+    "per-host"
+   ]
+  }
+ },
+ "schedule": {
+  "tick_minutes": 15,
+  "retry_after": "1h",
+  "defaults": {
+   "system": {
+    "every": "24h",
+    "window": "01:00-07:00"
+   }
+  }
+ },
+ "retention": {
+  "daily": 14,
+  "weekly": 8,
+  "monthly": 6
+ },
+ "network": {
+  "expected_client_to_server_mbit": 1000,
+  "measured_client_to_server_mbit": null,
+  "floor_mbit": 100
+ },
+ "hf_mirror": {
+  "store": "/mnt/nas/hf-mirror",
+  "port": 20995,
+  "harvest": true,
+  "scan_roots": [
+   "/"
+  ]
+ },
+ "assistant": {
+  "enabled": true,
+  "url": "http://192.0.2.21:8000/v1",
+  "model": "",
+  "timeout_seconds": 60,
+  "fallback": true
+ },
+ "recipes": {
+  "slots": {
+   "gpu": {
+    "head": "gpu-01",
+    "port": 30000,
+    "health_timeout_s": 900
+   }
+  },
+  "catalog": {}
+ },
+ "common_exclusions_extra": [],
+ "paths": {}
+}

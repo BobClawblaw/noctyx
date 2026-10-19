@@ -1,0 +1,7 @@
+[Unit]
+Description=Noctyx textfile metrics (GPU + Docker) for node_exporter
+
+[Service]
+Type=oneshot
+Nice=10
+ExecStart=/usr/local/bin/@TEXTFILE_UNIT@

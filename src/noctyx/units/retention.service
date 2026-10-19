@@ -1,0 +1,12 @@
+[Unit]
+Description=Noctyx retention: forget + prune per the site config, gated by restic check (monthly)
+After=network-online.target remote-fs.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Nice=10
+IOSchedulingClass=best-effort
+Environment=NOCTYX_CONFIG=@NX_CONFIG@ PYTHONPATH=@NX_PKG_PARENT@ NOCTYX_FOREGROUND=1
+ExecStart=@NX_PY@ -m noctyx.cli prune --apply
+TimeoutStartSec=infinity

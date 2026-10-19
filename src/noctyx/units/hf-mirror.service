@@ -1,0 +1,19 @@
+[Unit]
+Description=Noctyx HF mirror (Hugging Face endpoint on :@HF_PORT@, backed by the NAS model store)
+After=network-online.target remote-fs.target
+Wants=network-online.target
+
+[Service]
+Environment=NOCTYX_HF_STORE=@HF_STORE@/hub NOCTYX_HF_PORT=@HF_PORT@ PYTHONPATH=@NX_PKG_PARENT@
+ExecStart=@NX_PY@ -m noctyx.cli mirror
+User=@REPO_OWNER@
+Group=@REPO_OWNER@
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+NoNewPrivileges=yes
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

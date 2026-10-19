@@ -1,0 +1,22 @@
+[Unit]
+Description=Noctyx directory + discovery service (restore images find the head here)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=@REPO_OWNER@
+Group=@REPO_OWNER@
+Environment=NOCTYX_CONFIG=@NX_CONFIG@ PYTHONPATH=@NX_PKG_PARENT@ PYTHONUNBUFFERED=1
+ExecStart=@NX_PY@ -m noctyx.cli directory-service
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=@STATE@
+RestrictAddressFamilies=AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

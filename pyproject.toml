@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "noctyx"
-version = "0.0.1"
+version = "0.1.0"
 description = "The night-shift operator for your AI cluster: deploy model recipes, cache models, back up and watch the fleet."
 readme = "README.md"
 license = "BUSL-1.1"
@@ -17,3 +17,6 @@ noctyx = "noctyx.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+noctyx = ["agent/*", "metrics/*", "units/*", "assets/*"]

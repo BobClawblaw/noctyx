@@ -1,0 +1,16 @@
+[Unit]
+Description=Noctyx console (observe + controlled actions on :@UI_PORT@)
+After=network-online.target @UNIT_PREFIX@-directory.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Environment=NOCTYX_CONFIG=@NX_CONFIG@ PYTHONPATH=@NX_PKG_PARENT@ NOCTYX_CONSOLE_PORT=@UI_PORT@
+ExecStart=@NX_PY@ -m noctyx.cli console
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

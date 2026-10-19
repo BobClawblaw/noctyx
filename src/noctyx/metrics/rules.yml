@@ -1,0 +1,173 @@
+# Noctyx alert rules — evaluated by the head node's Prometheus.
+# Sources: the UI's /metrics (job @PROM_JOB_CONSOLE@) + node_exporter (job @PROM_JOB_NODES@ / node).
+# Installed by install-alerting.sh; check with: promtool check rules rules.yml
+groups:
+- name: noctyx
+  rules:
+  - alert: BackupNever
+    expr: cm_backup_health_code == 3
+    for: 2h
+    labels: {severity: critical}
+    annotations: {summary: "{{ $labels.host }}/{{ $labels.profile }} has NO backup on the NAS"}
+  - alert: BackupStale
+    expr: cm_backup_health_code == 2
+    for: 1h
+    labels: {severity: critical}
+    annotations: {summary: "{{ $labels.host }}/{{ $labels.profile }} backup is >2 intervals old"}
+  - alert: BackupLate
+    expr: cm_backup_health_code == 1
+    for: 6h
+    labels: {severity: warning}
+    annotations: {summary: "{{ $labels.host }}/{{ $labels.profile }} missed its last backup window"}
+  - alert: BackupJobFailed
+    expr: cm_run_last_rc{cmd=~"backup|tick"} != 0 and cm_run_running == 0
+    for: 15m
+    labels: {severity: warning}
+    annotations: {summary: "last {{ $labels.cmd }} run{{ if $labels.host }} for {{ $labels.host }}{{ end }} exited {{ $value }} — see Runs"}
+  - alert: JobDied
+    expr: cm_run_died == 1
+    for: 5m
+    labels: {severity: warning}
+    annotations: {summary: "a {{ $labels.cmd }} job{{ if $labels.host }} on {{ $labels.host }}{{ end }} ended without an exit record (killed?)"}
+  - alert: RepoUnreadable
+    expr: cm_repo_unreadable == 1
+    for: 30m
+    labels: {severity: critical}
+    annotations: {summary: "repository {{ $labels.repo }} on the NAS cannot be listed"}
+  - alert: RestEndpointDown
+    expr: cm_rest_endpoint_up == 0
+    for: 15m
+    labels: {severity: critical}
+    annotations: {summary: "repository endpoint {{ $labels.url }} not answering (clients cannot back up)"}
+  - alert: TickTimerInactive
+    expr: cm_tick_timer_active == 0
+    for: 30m
+    labels: {severity: critical}
+    annotations: {summary: "@UNIT_PREFIX@-tick.timer is not active — nothing is scheduling backups"}
+  - alert: NasNotMounted
+    expr: cm_tier_mounted{tier=~"nas.*"} == 0
+    for: 10m
+    labels: {severity: critical}
+    annotations: {summary: "the NAS is not mounted on the head node"}
+  - alert: NasLowSpace
+    expr: cm_tier_free_bytes{tier=~"nas.*"} / (cm_tier_free_bytes{tier=~"nas.*"} + cm_tier_used_bytes{tier=~"nas.*"}) < 0.10
+    for: 30m
+    labels: {severity: warning}
+    annotations: {summary: "the NAS below 10% free ({{ $value | humanizePercentage }})"}
+  - alert: NasRaidDegraded
+    expr: cm_nas_raid_members_active < cm_nas_raid_members_total
+    for: 5m
+    labels: {severity: critical}
+    annotations: {summary: "NAS {{ $labels.array }} ({{ $labels.level }}) has {{ $value }} of its members — a disk is out"}
+  - alert: NasRaidUnknown
+    expr: cm_source_ok{source="nas_raid"} == 0
+    for: 30m
+    labels: {severity: warning}
+    annotations: {summary: "cannot read RAID state from the NAS (ssh)"}
+  - alert: NoctyxMetricsDown
+    expr: up{job="@PROM_JOB_CONSOLE@"} == 0
+    for: 10m
+    labels: {severity: critical}
+    annotations: {summary: "the Noctyx UI/metrics endpoint is down"}
+  - alert: NodeExporterDown
+    expr: up{job=~"@PROM_JOB_NODES@|node"} == 0
+    for: 15m
+    labels: {severity: warning}
+    annotations: {summary: "no metrics from {{ $labels.host }} (host down or exporter stopped)"}
+  - alert: HostRootFilesystemFull
+    expr: 100 * (1 - node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) > 92
+    for: 30m
+    labels: {severity: warning}
+    annotations: {summary: "{{ $labels.host }} root filesystem {{ $value | printf \"%.0f\" }}% full"}
+  - alert: HostHygieneWarning
+    expr: cm_hygiene_items{severity="warning"} > 0
+    for: 24h
+    labels: {severity: warning}
+    annotations: {summary: "{{ $labels.host }} has {{ $value }} housekeeping warning(s) for a day — Hygiene panel"}
+  - alert: HostSystemdUnitFailed
+    expr: count by(host)(node_systemd_unit_state{state="failed"} == 1) > 0
+    for: 24h
+    labels: {severity: warning}
+    annotations: {summary: "{{ $labels.host }} has {{ $value }} failed systemd unit(s) for a day"}
+# tensorfold (noctyx llm-discover) exposes the same counters as vLLM under its own
+# names, with a `model` label instead of `model_name`. The UI and the LLM alerts are written
+# for vLLM's names, so record them here under those names. Both are counters, so the UI's
+# rate()/increase() work unchanged. No KV-cache or latency histograms exist: those stay "—".
+- name: tensorfold-as-vllm
+  rules:
+  - record: vllm:num_requests_running
+    expr: label_replace(tensorfold_requests_inflight, "model_name", "$1", "model", "(.*)")
+      or tensorfold:num_requests_running
+  - record: vllm:generation_tokens_total
+    expr: label_replace(tensorfold_completion_tokens_total, "model_name", "$1", "model", "(.*)")
+      or tensorfold:generation_tokens_total
+  - record: vllm:prompt_tokens_total
+    expr: label_replace(tensorfold_prompt_tokens_total, "model_name", "$1", "model", "(.*)")
+      or tensorfold:prompt_tokens_total
+  - record: vllm:request_success_total
+    expr: label_replace(tensorfold_requests_total - tensorfold_request_errors_total, "model_name", "$1", "model", "(.*)")
+      or tensorfold:e2e_request_latency_seconds_count
+  - record: vllm:request_decode_time_seconds_sum
+    expr: label_replace(tensorfold_decode_seconds_total, "model_name", "$1", "model", "(.*)")
+      or tensorfold:request_decode_time_seconds_sum
+  - record: vllm:request_prefill_time_seconds_sum
+    expr: label_replace(tensorfold_prefill_seconds_total, "model_name", "$1", "model", "(.*)")
+      or tensorfold:request_prefill_time_seconds_sum
+  # prompt tokens resumed from cache vs. all prompt tokens = the prefix-cache hit share
+  - record: vllm:prefix_cache_hits_total
+    expr: label_replace(tensorfold_cached_tokens_total, "model_name", "$1", "model", "(.*)")
+  - record: vllm:prefix_cache_queries_total
+    expr: label_replace(tensorfold_prompt_tokens_total, "model_name", "$1", "model", "(.*)")
+  # the roster's "started" column reads process_start_time_seconds{job="llm"}
+  - record: process_start_time_seconds
+    expr: time() - tensorfold_uptime_seconds
+# tensorfold-native (/opt/tensorfold/native) already uses vLLM's names under a `tensorfold:`
+# prefix, with no model label at all: llm-discover puts `model_name` on its scrape target.
+# Names both builds produce are recorded once above (`old or native`); promtool rejects duplicates.
+# It does have KV-cache and latency histograms. Per-request time-per-output-token stands in
+# for vLLM's inter-token latency; completed requests = the e2e latency histogram's count.
+- name: tensorfold-native-as-vllm
+  rules:
+  - record: vllm:num_requests_waiting
+    expr: tensorfold:num_requests_waiting
+  - record: vllm:num_preemptions_total
+    expr: tensorfold:preemptions_total
+  - record: vllm:kv_cache_usage_perc
+    expr: max without(stream) (tensorfold:kv_cache_usage_perc)
+  - record: vllm:time_to_first_token_seconds_bucket
+    expr: tensorfold:time_to_first_token_seconds_bucket
+  - record: vllm:e2e_request_latency_seconds_bucket
+    expr: tensorfold:e2e_request_latency_seconds_bucket
+  - record: vllm:inter_token_latency_seconds_bucket
+    expr: tensorfold:request_time_per_output_token_seconds_bucket
+  - record: vllm:request_decode_time_seconds_bucket
+    expr: tensorfold:request_decode_time_seconds_bucket
+  - record: vllm:request_prefill_time_seconds_bucket
+    expr: tensorfold:request_prefill_time_seconds_bucket
+- name: llm
+  rules:
+  - alert: TensorfoldEngineFatal
+    expr: tensorfold_engine_fatal == 1
+    for: 2m
+    labels: {severity: critical}
+    annotations: {summary: "{{ $labels.host }} {{ $labels.model }}: tensorfold engine raised — restart both ranks (it refuses requests until then)"}
+  - alert: LLMServerDown
+    expr: up{job="llm"} == 0
+    for: 10m
+    labels: {severity: warning}
+    annotations: {summary: "{{ $labels.engine }} on {{ $labels.host }}:{{ $labels.port }} stopped answering /metrics"}
+  - alert: LLMQueueBacklog
+    expr: max by(host, model_name)(vllm:num_requests_waiting) > 20
+    for: 10m
+    labels: {severity: warning}
+    annotations: {summary: "{{ $labels.host }} {{ $labels.model_name }}: {{ $value }} requests waiting for 10 min"}
+  - alert: LLMKvCacheFull
+    expr: max by(host, model_name)(vllm:kv_cache_usage_perc) > 0.97
+    for: 15m
+    labels: {severity: warning}
+    annotations: {summary: "{{ $labels.host }} {{ $labels.model_name }}: KV cache at {{ $value | humanizePercentage }} — requests will be preempted"}
+  - alert: MtplxUpstreamDown
+    expr: up_mtplx == 0
+    for: 5m
+    labels: {severity: warning}
+    annotations: {summary: "{{ $labels.host }}: MTPLX server unreachable from the exporter — LLM stats frozen (address change, server down, or key)"}

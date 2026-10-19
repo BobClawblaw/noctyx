@@ -1,0 +1,12 @@
+[Unit]
+Description=Noctyx nightly maintenance after the backup window: mirror harvest, recipe discovery, weekly prune dry-run and verify
+After=network-online.target remote-fs.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Nice=10
+IOSchedulingClass=best-effort
+Environment=NOCTYX_CONFIG=@NX_CONFIG@ PYTHONPATH=@NX_PKG_PARENT@ NOCTYX_FOREGROUND=1
+ExecStart=@NX_PY@ -m noctyx.cli nightly
+TimeoutStartSec=20h

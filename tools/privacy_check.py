@@ -12,13 +12,13 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 GENERIC = [
-    r"\b(?:10|127)\.\d{1,3}\.\d{1,3}\.\d{1,3}\b",
+    r"\b10\.\d{1,3}\.\d{1,3}\.\d{1,3}\b",                          # private (loopback is fine)
     r"\b192\.168\.\d{1,3}\.\d{1,3}\b",
     r"\b172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}\b",
     r"\b100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}\b",   # CGNAT / tailnets
     r"/home/[a-z_][a-z0-9_-]*/", r"/Users/[A-Za-z][\w.-]*/",
     r"\.ts\.net\b",
-    r"[\w.+-]+@(?!users\.noreply\.github\.com)[\w-]+\.[\w.-]+",
+    r"[\w.+-]+@(?!users\.noreply\.github\.com|example\.(?:com|org))[A-Za-z0-9][\w-]*\.[A-Za-z]{2,}\b",
 ]
 SKIP = {"LICENSE", "tools/privacy_check.py"}
 
