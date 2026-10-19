@@ -15,7 +15,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 OUT = ROOT / "docs" / "screenshots"
 W, H = 1500, 900
 
-FAMILY = ["phosphor", "p1green", "p3amber", "nixie", "synthwave", "arctic", "redops"]
+FAMILY = ["phosphor", "aurora", "outrun", "lcd", "p1green", "p3amber", "nixie", "synthwave", "arctic", "redops"]
 # name: (path, [js steps run after load; "sleep:N" waits], full-page height or None); "_" names are
 # intermediate (the Phosphor family's kiosks, tiled into phosphor-family.png and then removed)
 SHOTS = {
@@ -113,7 +113,8 @@ def main():
         if not all(f.exists() for f in parts):
             return
         w, h, gap = 1000, 480, 8
-        sheet = Image.new("RGB", (2 * w + gap, 4 * h + 3 * gap), (0, 0, 0))
+        rows = (len(FAMILY) + 1) // 2
+        sheet = Image.new("RGB", (2 * w + gap, rows * h + (rows - 1) * gap), (0, 0, 0))
         for i, (v, f) in enumerate(zip(FAMILY, parts)):
             im = Image.open(f).convert("RGB")
             im = im.crop((0, 0, im.width, int(im.width * h / w))).resize((w, h), Image.LANCZOS)   # the kiosk's top: no empty floor

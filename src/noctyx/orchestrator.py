@@ -3034,7 +3034,10 @@ def cmd_recipe_discover(a):
 
 # ── the console's display defaults (site config "console") ─────────────────────
 CONSOLE_THEMES = ("noctyx", "ember", "mono", "github", "catppuccin", "phosphor", "p1green", "p3amber", "nixie",
-                  "synthwave", "arctic", "redops", "custom")
+                  "synthwave", "arctic", "redops", "aurora", "outrun", "lcd", "custom")
+# the Phosphor themes' effects (console › settings): key -> allowed values
+CONSOLE_FX = {"glow": ("off", "soft", "normal", "bright"), "scan": ("off", "kiosk", "all"), "vignette": ("off", "on"),
+              "grain": ("off", "on"), "beam": ("off", "on"), "flicker": ("off", "on"), "fringe": ("off", "on")}
 _HEXCOL = re.compile(r"^#[0-9a-fA-F]{6}$")
 
 
@@ -3055,6 +3058,12 @@ def validate_console(s):
         if s["tunit"] not in ("F", "C"):
             errs.append("tunit: F or C")
         out["tunit"] = s["tunit"]
+    if "fx" in s:
+        fx = s["fx"]
+        if not isinstance(fx, dict) or any(k not in CONSOLE_FX or v not in CONSOLE_FX[k] for k, v in fx.items()):
+            errs.append("fx: " + "; ".join(f"{k} {'|'.join(v)}" for k, v in CONSOLE_FX.items()))
+        else:
+            out["fx"] = dict(fx)
     if "custom" in s:
         cu = s["custom"]
         keys = ("bg", "panel", "text", "muted", "accent", "line", "ok", "warn", "bad")

@@ -178,7 +178,9 @@ def test_write_block_without_a_schedule_block(tmp_path, monkeypatch):
 def test_phosphor_theme_is_a_valid_site_default_and_ships_its_fonts():
     import pathlib
     from noctyx import orchestrator as o, console
-    for v in ("phosphor", "p1green", "p3amber", "nixie", "synthwave", "arctic", "redops"):
+    assert not o.validate_console({"fx": {"glow": "bright", "scan": "all", "beam": "on", "flicker": "on"}})[1]
+    assert o.validate_console({"fx": {"beam": "yes"}})[1] and o.validate_console({"fx": {"nope": "on"}})[1]
+    for v in ("phosphor", "aurora", "outrun", "lcd", "p1green", "p3amber", "nixie", "synthwave", "arctic", "redops"):
         assert not o.validate_console({"theme": v, "mode": "dark"})[1]
         assert f"{v}:" in console.PAGE
     for f in ("michroma.woff2", "dseg7.woff2", "LICENSES.txt"):

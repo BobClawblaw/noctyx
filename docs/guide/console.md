@@ -127,9 +127,26 @@ looks, never what it measures or does.
 | Setting | Values |
 |---|---|
 | Mode | Light, Dark, System (follows the OS as it changes) |
-| Theme | **Noctyx** (navy and neon cyan), the **Phosphor** family — **Phosphor**, **P1 Green** (green-phosphor CRT), **P3 Amber** (amber terminal), **Nixie** (neon tubes, green indicator lamps), **Synthwave** (magenta, violet, cyan), **Arctic** (ice blue and frost), **Red Ops** (all red, keeps night vision in a dark room) — each an instrument panel: segmented LED meters, oscilloscope grids behind every trace, LCD numerals with their unlit segments, and one colour per subsystem everywhere — CPU green, GPU blue, memory violet, network cyan, power yellow, temperature amber, LLM magenta; disk and temperature meters run green → amber → red; its two fonts, Michroma and DSEG7, ship with the console under the SIL OFL, so nothing loads from the internet; a CRT overlay on the dark kiosk), **Ember** (charcoal and amber), **Mono** (grayscale), **GitHub** (GitHub Dark/Light Default), **Catppuccin** (Mocha/Latte), **Custom** (nine colours: background, panels, text, muted text, accent, lines, good, warning, bad; the rest is mixed from them, and the mode follows the background) |
+| Theme | **Noctyx** (navy and neon cyan), the **Phosphor** family — **Phosphor**, **Aurora** (teal, violet and rose under northern lights), **Outrun** (sunset over a neon grid), **LCD** (a reflective calculator display by day, blue backlight by night: the easiest on the eyes), **P1 Green** (green-phosphor CRT), **P3 Amber** (amber terminal), **Nixie** (neon tubes, green indicator lamps), **Synthwave** (magenta, violet, cyan), **Arctic** (ice blue and frost), **Red Ops** (all red, keeps night vision in a dark room) — each an instrument panel: segmented LED meters, oscilloscope grids behind every trace, LCD numerals with their unlit segments, and one colour per subsystem everywhere — CPU green, GPU blue, memory violet, network cyan, power yellow, temperature amber, LLM magenta; disk and temperature meters run green → amber → red; its two fonts, Michroma and DSEG7, ship with the console under the SIL OFL, so nothing loads from the internet; a CRT overlay on the dark kiosk), **Ember** (charcoal and amber), **Mono** (grayscale), **GitHub** (GitHub Dark/Light Default), **Catppuccin** (Mocha/Latte), **Custom** (nine colours: background, panels, text, muted text, accent, lines, good, warning, bad; the rest is mixed from them, and the mode follows the background) |
 | Temperature | °F or °C (readings and alert thresholds stay in °C underneath) |
 | Layout | reset panel layout (this browser) |
+
+**Phosphor effects** (settings drawer, Phosphor themes only; kept with the other display settings, so they can
+be a site default or follow your account):
+
+| Effect | Choices | What it is | Cost |
+|---|---|---|---|
+| Glow | off, soft, normal, bright | how much meters, traces and numerals bloom | none at rest |
+| Scanlines | off, kiosk (default), everywhere | fine CRT lines | one still layer |
+| Vignette | on (default), off | darker corners | one still layer |
+| Grain | off (default), on | faint film grain | one still layer |
+| RGB fringe | off (default), on | colour separation on the big numerals | text shadows, drawn once |
+| Beam sweep | off (default), on | a band of light rolling down every 9 s | moves by `transform` on the compositor |
+| Flicker | off (default), on | a barely-there phosphor flicker | `opacity` on the compositor |
+
+Measured over 8 s of an idle page in headless Chrome, all seven effects on (beam and flicker running) cost
+no extra style recalculation or layout, and about 3 ms more main-thread time than none. The moving two stop
+when the system asks for reduced motion.
 
 ![Phosphor, the kiosk](../screenshots/phosphor-kiosk.png)
 
