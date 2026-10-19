@@ -6,7 +6,7 @@
 #   build-stick-single.sh --arch amd64 --dry-run                 (no writes)
 #   build-stick-single.sh --fetch-only --arch amd64              (refresh cache)
 #
-# arm64 ISOs (the four GB10 clients) have an MBR table, not a GPT: same verbatim
+# arm64 ISOs (DGX Spark-class nodes) have an MBR table, not a GPT: same verbatim
 # dd, then p3 is appended to the MBR with sfdisk instead of the GPT rewrite.
 #
 # Method: the verified way an Ubuntu live ISO boots — write it VERBATIM at the

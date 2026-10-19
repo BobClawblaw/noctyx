@@ -542,7 +542,7 @@ def cmd_snapshots(a):
 def cmd_verify(a):
     c = cfg()
     _sweep_root_owned_repo_files(c)
-    subset = a.subset or c["verification"].get("read_data_subset", "2%")
+    subset = a.subset or (c.get("verification") or {}).get("read_data_subset", "2%")
     for h in backup_hosts(c):
         if a.host and h["name"] != a.host:
             continue
@@ -1549,7 +1549,7 @@ def cmd_schedule_set(a):
         sys.exit(f"--every '{a.every}': use 15m..90d, e.g. 6h, 1d, 1w")
     if a.window and a.window != "any" and (not _WINDOW_RE.match(a.window)
                                           or a.window[:5] == a.window[6:]):
-        sys.exit(f"--window '{a.window}': use HH:MM-HH:MM (UTC, may wrap midnight) or 'any'")
+        sys.exit(f"--window '{a.window}': use HH:MM-HH:MM (the head node's local time, may wrap midnight) or 'any'")
     if not (a.every or a.window or a.disable or a.reset):
         sys.exit("nothing to change: give --every/--window, --disable or --reset")
     win = None if a.window == "any" else a.window
@@ -3064,24 +3064,28 @@ def validate_assistant(a):
             if not isinstance(a[k], bool):
                 errs.append(f"{k}: true or false")
             out[k] = a[k]
+    # only the keys given: assistant-set merges them over the stored block ("" clears url / model)
     url = str(a.get("url") or "").strip().rstrip("/")
     if url and not _URL.match(url):
         errs.append("url: http(s)://host:port/v1")
-    out["url"] = url
+    if "url" in a:
+        out["url"] = url
     m = str(a.get("model") or "").strip()
     if m and not _MODEL.match(m):
         errs.append("model: the served model id (letters, digits, . _ : / @ + -)")
-    out["model"] = m
-    to = a.get("timeout_seconds", 60)
-    if type(to) is not int or not 5 <= to <= 600:
-        errs.append("timeout_seconds: 5..600")
-    out["timeout_seconds"] = to
+    if "model" in a:
+        out["model"] = m
+    if "timeout_seconds" in a:
+        to = a["timeout_seconds"]
+        if type(to) is not int or not 5 <= to <= 600:
+            errs.append("timeout_seconds: 5..600")
+        out["timeout_seconds"] = to
     if "key_host" in a:      # "" clears it
         kh = a["key_host"] or ""
         if kh and not re.match(r"^[A-Za-z0-9._-]{1,64}$", str(kh)):
             errs.append("key_host: a key file name")
         out["key_host"] = kh
-    if out.get("enabled", True) and not url and out.get("fallback") is False:
+    if out.get("enabled") and "url" in a and not url and out.get("fallback") is False:
         errs.append("enabled with no url and no fallback: nothing to ask")
     return out, errs
 
@@ -3094,9 +3098,11 @@ def cmd_assistant_set(a):
     old = c.get("assistant") or {}
     blk = {k: v for k, v in old.items() if k.startswith("_")}
     blk.update({k: v for k, v in {**old, **new}.items() if k in ASSISTANT_KEYS and v not in (None, "")})
+    if blk.get("enabled") and not blk.get("url") and blk.get("fallback") is False:
+        sys.exit("invalid: enabled with no url and no fallback: nothing to ask")
     _write_block("assistant", blk, lines=True)
     audit("assistant-set", **{k: blk.get(k) for k in ("enabled", "url", "model", "timeout_seconds", "fallback")})
-    print(f"assistant: {'on' if blk.get('enabled', True) else 'off'} · {blk.get('url') or '(discovered endpoints only)'}"
+    print(f"assistant: {'on' if blk.get('enabled') else 'off'} · {blk.get('url') or '(discovered endpoints only)'}"
           f" · model {blk.get('model') or '(as served)'} · fallback {'on' if blk.get('fallback', True) else 'off'}")
 
 
@@ -3289,7 +3295,7 @@ def main():
     ss = sub.add_parser("schedule-set", help="change how often a profile is snapshotted")
     ss.add_argument("--profile", required=True); ss.add_argument("--host")
     ss.add_argument("--every", help="interval: 15m..90d, e.g. 6h, 1d")
-    ss.add_argument("--window", help="HH:MM-HH:MM start window (UTC), or 'any'")
+    ss.add_argument("--window", help="HH:MM-HH:MM start window (head node local time), or 'any'")
     g = ss.add_mutually_exclusive_group()
     g.add_argument("--disable", action="store_true", help="stop scheduling this profile (for --host, or fleet-wide)")
     g.add_argument("--reset", action="store_true", help="drop --host's override, back to the default")

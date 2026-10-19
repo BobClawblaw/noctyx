@@ -14,7 +14,7 @@
 #
 # The head node itself keeps its pre-existing exporter/scrape (job "node",
 # localhost:9100, set up before Noctyx); it only gains the textfile
-# collector and a host="agent" label.
+# collector and a host="@HEAD_HOST@" label.
 set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CFG=${NOCTYX_CONFIG:?run through: noctyx tool <name>}
@@ -103,7 +103,7 @@ for row in "${HOSTS[@]}"; do
 done
 
 # Prometheus: file_sd target list from the site config (re-read automatically),
-# a scrape job for it, and host="agent" on the pre-existing head-node job.
+# a scrape job for it, and host="@HEAD_HOST@" on the pre-existing head-node job.
 install -m 0644 "$CA_CRT" /etc/prometheus/@UNIT_PREFIX@-ca.crt
 python3 - "$CFG" <<'EOF' > @PROM_NODE_TARGETS@
 import json, sys
@@ -146,13 +146,13 @@ fi
 # the head node's pre-existing job gets the same `host` label the UI queries
 # by. Anchored on its targets line (the stock file has comments between
 # job_name and static_configs), applied on its own so it is never skipped.
-if ! grep -q "host: agent" "$PY"; then
+if ! grep -q "host: @HEAD_HOST@" "$PY"; then
   python3 - "$PY" <<'EOF2'
 import sys
 p = sys.argv[1]; s = open(p).read()
 line = "      - targets: ['localhost:9100']\n"
 assert s.count(line) == 1, "cannot find the head node's node_exporter target"
-open(p, "w").write(s.replace(line, line + "        labels:\n          host: agent\n"))
+open(p, "w").write(s.replace(line, line + "        labels:\n          host: @HEAD_HOST@\n"))
 EOF2
 fi
 promtool check config "$PY" >/dev/null

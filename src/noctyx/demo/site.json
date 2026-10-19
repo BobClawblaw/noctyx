@@ -1,0 +1,399 @@
+{
+ "version": 1,
+ "updated": "2026-09-23",
+ "server": {
+  "console_auth": false,
+  "nas_name": "nas",
+  "hostname": "head",
+  "address": "192.0.2.242",
+  "rest_port": 20998,
+  "rest_host": "192.0.2.58",
+  "nas_ssh": {
+   "user": "head",
+   "host": "192.0.2.58",
+   "dir": "noctyx-rest"
+  },
+  "directory_port": 20999,
+  "ui_port": 20996,
+  "discovery_udp_port": 20997,
+  "repo_root": "/mnt/nas/backups/noctyx",
+  "nas_root": "/mnt/nas/backups/noctyx",
+  "tls": {
+   "ca": "/etc/noctyx/tls/noctyx-ca.crt",
+   "cert": "/etc/noctyx/tls/server.crt",
+   "key": "/etc/noctyx/tls/server.key"
+  },
+  "ssh": {
+   "user": "ops",
+   "key": "/root/.ssh/id_ed25519"
+  }
+ },
+ "spindles": {
+  "nvme-hot": {
+   "mount": "/mnt/scratch",
+   "class": "cmr-nvme",
+   "writers": 1
+  },
+  "nas": {
+   "mount": "/mnt/nas",
+   "class": "nfs-synology",
+   "writers": 1
+  }
+ },
+ "repositories": [
+  {
+   "id": "spark-class",
+   "members": [
+    "spark-2",
+    "spark-3",
+    "spark-4"
+   ],
+   "reason": "three near-identical aarch64 Ubuntu 24.04 images: chunk-level cross-host dedup is the largest capacity lever available (ADR-0001). Credential boundary == key boundary == blast radius."
+  },
+  {
+   "id": "spark-1",
+   "members": [
+    "spark-1"
+   ],
+   "reason": "unique hardware (ASUS Ascent spark-1)"
+  },
+  {
+   "id": "head",
+   "members": [
+    "head"
+   ],
+   "reason": "head node; its backups must also land on removable media because it hosts the others"
+  }
+ ],
+ "hosts": [
+  {
+   "name": "spark-1",
+   "address": "192.0.2.250",
+   "arch": "aarch64",
+   "repo": "spark-1",
+   "boot": "uefi-arm64",
+   "root_disk": "/dev/nvme0n1",
+   "root_fs": "ext4",
+   "lvm": false,
+   "spindle": "nas",
+   "used_gb": 1224,
+   "restore_template": "gpt-esp-ext4"
+  },
+  {
+   "name": "spark-2",
+   "address": "192.0.2.251",
+   "arch": "aarch64",
+   "repo": "spark-class",
+   "boot": "uefi-arm64",
+   "root_disk": "/dev/nvme0n1",
+   "root_fs": "ext4",
+   "lvm": false,
+   "spindle": "nas",
+   "used_gb": 2797,
+   "restore_template": "gpt-esp-ext4",
+   "exclude_extra": [
+    "/dev/root"
+   ]
+  },
+  {
+   "name": "spark-3",
+   "address": "192.0.2.252",
+   "arch": "aarch64",
+   "repo": "spark-class",
+   "boot": "uefi-arm64",
+   "root_disk": "/dev/nvme0n1",
+   "root_fs": "ext4",
+   "lvm": false,
+   "spindle": "nas",
+   "used_gb": 1278,
+   "restore_template": "gpt-esp-ext4"
+  },
+  {
+   "name": "spark-4",
+   "address": "192.0.2.253",
+   "arch": "aarch64",
+   "repo": "spark-class",
+   "boot": "uefi-arm64",
+   "root_disk": "/dev/nvme0n1",
+   "root_fs": "ext4",
+   "lvm": false,
+   "spindle": "nas",
+   "used_gb": 1959,
+   "restore_template": "gpt-esp-ext4"
+  },
+  {
+   "name": "head",
+   "address": "192.0.2.242",
+   "arch": "x86_64",
+   "repo": "head",
+   "boot": "uefi-x64",
+   "root_disk": "/dev/nvme0n1",
+   "root_fs": "ext4",
+   "lvm": true,
+   "vg": "ubuntu-vg",
+   "lv": "ubuntu-lv",
+   "separate_boot": true,
+   "esp": "/dev/nvme0n1p1",
+   "boot_dev": "/dev/nvme0n1p2",
+   "spindle": "nas",
+   "used_gb": 2164,
+   "restore_template": "gpt-esp-boot-lvm"
+  },
+  {
+   "name": "mac-1",
+   "address": "mac-1.local",
+   "arch": "arm64",
+   "os": "macos",
+   "repo": null,
+   "backup": false,
+   "ssh_user": "ops"
+  },
+  {
+   "name": "WIN-PENDING",
+   "address": null,
+   "arch": "x86_64",
+   "repo": "windows-class",
+   "boot": "bios-or-uefi-windows",
+   "enabled": false
+  }
+ ],
+ "profiles": {
+  "system": {
+   "description": "whole root filesystem, minus the noise list. This is the profile that satisfies 'full system backup'.",
+   "paths": [
+    "/"
+   ],
+   "exclusions": [
+    "common",
+    "per-host"
+   ]
+  },
+  "smoke": {
+   "description": "tiny, for pipeline validation and restore rehearsals on a live cluster. Never the production profile.",
+   "paths": [
+    "/etc",
+    "/boot"
+   ],
+   "exclusions": [
+    "common"
+   ]
+  },
+  "dataproxy": {
+   "description": "Phase 8: huge append-only datasets (weights, checkpoints, /legal) on their own schedule. Split out because 'system' would otherwise be dominated by them and the nightly window would drift.",
+   "paths": [
+    "/root",
+    "/home",
+    "/opt",
+    "/workspace",
+    "/legal"
+   ],
+   "exclusions": [
+    "common",
+    "datasets",
+    "per-host"
+   ]
+  },
+  "headdata": {
+   "description": "head node only: /storage and /mnt/scratch, the mounts 'system' excludes. Replaced external-tool's backup-root.sh rsync mirror (no --delete: kept every deleted bench run, ~16 TB) on 2026-10-11. Uses /etc/noctyx/exclusions-headdata.conf INSTEAD of the common list, whose /data/** and /mnt/** lines would exclude the profile's own paths.",
+   "paths": [
+    "/storage",
+    "/mnt/scratch"
+   ],
+   "exclusions": [
+    "headdata"
+   ]
+  }
+ },
+ "assistant": {
+  "enabled": true,
+  "url": "http://192.0.2.250:8888/v1",
+  "model": "qwen3.8-flash-next",
+  "timeout_seconds": 60,
+  "fallback": true
+ },
+ "backup_policy": {
+  "docker_volumes": true,
+  "db_dumps": true,
+  "exclude": [],
+  "skip_dumps": [],
+  "sqlite": [],
+  "hosts": {}
+ },
+ "hf_mirror": {
+  "store": "/mnt/nas/hf-mirror",
+  "port": 20995,
+  "harvest": true,
+  "exclude_hosts": [
+   "mac-1"
+  ],
+  "bwlimit_mb": 0,
+  "scan_roots": [
+   "/",
+   "/storage",
+   "/mnt/scratch"
+  ]
+ },
+ "common_exclusions_extra": [
+  "/data/**"
+ ],
+ "recipes": {
+  "root": "~/.local/share/noctyx/recipes",
+  "harness_dir": "/data/recipe-harness",
+  "hf_mirror": true,
+  "slots": {
+   "rtx5090": {
+    "head": "head",
+    "port": 30000,
+    "lock": "/data/locks/rtx5090.lock",
+    "gpu_idle_check": true,
+    "health_timeout_s": 900,
+    "settle_s": 5,
+    "env": {
+     "ZIG": "/data/tensorfold-qwen38-27b-5090/toolchain/zig-x86_64-linux-0.17.0/zig",
+     "NVCC": "/usr/local/cuda/bin/nvcc"
+    },
+    "adopt": {
+     "name": "qwen38-27b (start-native.sh)",
+     "unit": "tensorfold-qwen38.service"
+    },
+    "conflicts": [
+     "tensorfold-qwen38.service",
+     "tensorfold-bolt.service"
+    ]
+   },
+   "spark-a": {
+    "head": "spark-1",
+    "worker": "spark-2",
+    "port": 8888,
+    "lock": "~/.cache/tf-gpu-pair.lock",
+    "health_timeout_s": 3600,
+    "settle_s": 30,
+    "cluster": {
+     "head_ip": "198.51.100.20",
+     "worker": "198.51.100.30",
+     "hca": "rocep1s0f1,roceP2p1s0f1"
+    },
+    "script_env": {
+     "WORKER": "198.51.100.30"
+    },
+    "adopt": {
+     "name": "qwen38-int4mixed (hand checkout)",
+     "unit": "qwen38-int4mixed.service",
+     "spark_dir": "~/qwen38-flashnext-int4mixed"
+    },
+    "conflicts": [
+     "qwen38-int4mixed.service"
+    ]
+   },
+   "spark-b": {
+    "head": "spark-3",
+    "worker": "spark-4",
+    "port": 8000,
+    "lock": "~/.cache/tf-gpu-pair.lock",
+    "health_timeout_s": 3600,
+    "settle_s": 30,
+    "cluster": {
+     "head_ip": "198.51.100.50",
+     "worker": "198.51.100.60",
+     "iface": "enp1s0f0np0",
+     "hca": "rocep1s0f0"
+    },
+    "script_env": {
+     "WORKER": "198.51.100.60"
+    },
+    "adopt": {
+     "name": "glm53-exl3 (hand checkout)",
+     "unit": "glm53-flash.service",
+     "spark_dir": "~/glm53-flash-exl3-2x-dgx-sparks"
+    },
+    "conflicts": [
+     "glm53-flash.service",
+     "glm53-tf.service",
+     "glm53-exl3.service"
+    ]
+   }
+  },
+  "catalog": {
+   "qwen38-27b-vision-5090": {
+    "repo": "https://github.com/BobClawblaw/qwen38-27b-vision-rtx-5090.git",
+    "ref": "main",
+    "kind": "systemd",
+    "slots": [
+     "rtx5090"
+    ]
+   },
+   "nemotron-bolt-5090": {
+    "repo": "https://github.com/BobClawblaw/nemotron-bolt-74b-vision-rtx-5090.git",
+    "ref": "main",
+    "kind": "systemd",
+    "slots": [
+     "rtx5090"
+    ]
+   },
+   "qwen38-int4mixed-2x": {
+    "repo": "https://github.com/BobClawblaw/qwen38-flashnext-int4mixed-2x-dgx-sparks.git",
+    "ref": "main",
+    "kind": "spark",
+    "slots": [
+     "spark-a",
+     "spark-b"
+    ]
+   },
+   "glm53-exl3-2x": {
+    "repo": "https://github.com/BobClawblaw/glm53-flash-exl3-2x-dgx-sparks.git",
+    "ref": "main",
+    "kind": "spark",
+    "slots": [
+     "spark-a",
+     "spark-b"
+    ]
+   }
+  }
+ },
+ "console": {
+  "settings": {}
+ },
+ "schedule": {
+  "tick_minutes": 15,
+  "retry_after": "1h",
+  "defaults": {
+   "system": {
+    "every": "24h",
+    "window": "01:00-07:00"
+   }
+  },
+  "hosts": {
+   "head": {
+    "headdata": {
+     "every": "24h",
+     "window": "01:00-07:00"
+    }
+   }
+  }
+ },
+ "retention": {
+  "daily": 14,
+  "weekly": 8,
+  "monthly": 6,
+  "keep_2nd_last_monthly": true
+ },
+ "verification": {
+  "check_after_copy": true,
+  "read_data_subset": "2%",
+  "read_subset_schedule": "weekly",
+  "restore_rehearsal": "monthly"
+ },
+ "network": {
+  "reserved_unused_ports": [
+   21000,
+   21001
+  ],
+  "expected_client_to_server_mbit": 2350,
+  "measured_client_to_server_mbit": 400,
+  "measured_ts": "2026-09-26 (noctyx probe: spark-1 268, sparks ~400-413, head 3216)",
+  "degraded": true,
+  "degraded_reason": "link fault mostly resolved 2026-09-26 (was 93 Mbit/s): now ~270-410 Mbit/s client-side \u2014 above the floor, below nominal 2350. Full-speed path verified client\u2194client and client\u2194NAS; the ~400 Mbit/s is the directory-probe measurement through TLS+curl and the remaining path asymmetry is not yet fully traced. Floor still guards.",
+  "min_throughput_mbit": 40,
+  "abort_below_min_throughput": true
+ }
+}

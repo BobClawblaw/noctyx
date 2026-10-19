@@ -83,7 +83,7 @@
  "network": {
   "expected_client_to_server_mbit": 1000,
   "measured_client_to_server_mbit": null,
-  "floor_mbit": 100
+  "min_throughput_mbit": 100
  },
  "hf_mirror": {
   "store": "/mnt/nas/hf-mirror",

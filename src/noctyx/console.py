@@ -1197,6 +1197,42 @@ SYSTEM_PROMPT = ("You are the assistant inside Noctyx, a deployment, backup and 
 DIGEST_FILE = UI_STATE / "digest.json"
 
 
+# ── demo mode (noctyx demo): every API answer from a captured, scrubbed site, its times moved to now ──
+DEMO = os.environ.get("NOCTYX_DEMO")
+_DEMO = None
+_TS_EPOCH = re.compile(r"(?<![\d.])1[6-9]\d{8}(?:\.\d+)?(?![\d])")
+_TS_ISO = re.compile(r"20\d\d-\d\d-\d\d[T ]\d\d:\d\d(?::\d\d)?(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)?")
+
+
+def demo_answer(path):
+    """The captured answer for path (exact, then without its query, then any tab of the same report), with
+    every timestamp shifted by (now - capture time), so ages read as they did when it was captured."""
+    global _DEMO
+    if _DEMO is None:
+        _DEMO = json.loads(pathlib.Path(DEMO).read_text())
+    fx = _DEMO["fixtures"]
+    base = path.split("?")[0]
+    v = fx.get(path)
+    if v is None:
+        v = next((fx[k] for k in fx if k.split("?")[0] == base), None)
+    if v is None:
+        return None
+    if base == "/api/v1/overview":
+        v = dict(v, demo=True)
+    d = time.time() - _DEMO["captured"]
+    text = _TS_EPOCH.sub(lambda m: (f"{float(m.group(0)) + d:.3f}" if "." in m.group(0) else str(int(int(m.group(0)) + d))), json.dumps(v))
+
+    def iso(m):
+        s = m.group(0)
+        try:
+            dt = datetime.datetime.fromisoformat(s.replace("Z", "+00:00").replace(" ", "T"))
+        except ValueError:
+            return s
+        out = (dt + datetime.timedelta(seconds=d)).isoformat(timespec="seconds" if len(s) > 16 else "minutes")
+        return out.replace("+00:00", "Z") if s.endswith("Z") else out if ("+" in s[10:] or s.count("-") > 2) else out.split("+")[0]
+    return _TS_ISO.sub(iso, text).encode()
+
+
 ASSETS = {"favicon.svg": "image/svg+xml", "banner.svg": "image/svg+xml", "donate-qr.png": "image/png"}
 DONATE = "bc1q9echf820hapc04y0f636uxdry2ahyx32tkleff"
 
@@ -1220,7 +1256,7 @@ def about_info():
             "site": {"head": c["server"].get("hostname"), "nas": CM.nas_name(c),
                      "hosts": len([h for h in c["hosts"] if h.get("enabled", True) is not False and h.get("address")]),
                      "slots": len(rc["slots"]), "recipes": len(rc["catalog"])},
-            "donate": DONATE}
+            "repo": "https://github.com/BobClawblaw/noctyx", "donate": DONATE}
 
 
 def assistant_cfg():
@@ -2026,6 +2062,13 @@ a.menu-title{text-decoration:none;display:inline-flex;align-items:center;gap:6px
 .adonate{display:flex;gap:14px;align-items:center} .adonate img{border-radius:8px;background:#fff;padding:4px}
 .addr{background:var(--bg-0);border:1px solid var(--line);color:var(--fg);font:11.5px var(--mono);padding:6px 9px;border-radius:999px;cursor:pointer;word-break:break-all;text-align:left}
 .addr:hover{border-color:var(--accent)}
+.apills{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+.apill{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;font:11.5px var(--mono)}
+.apill span{background:var(--bg-3);color:var(--fg-dim);padding:3px 9px} .apill b{background:color-mix(in srgb,var(--accent) 22%,var(--bg-1));color:var(--fg);padding:3px 9px}
+.apill.warn b{background:color-mix(in srgb,var(--warn) 25%,var(--bg-1))}
+.afeat{display:grid;grid-template-columns:72px 1fr;gap:10px;padding:6px 0;border-bottom:1px solid var(--line-soft)} .afeat b{color:var(--accent);font:700 12px var(--sans)} .afeat span{color:var(--fg-dim)}
+.alinks{display:flex;flex-direction:column;gap:5px;margin-top:4px} .alinks a{color:var(--accent);text-decoration:none} .alinks a:hover{text-decoration:underline}
+.akeys{font:12px var(--sans);color:var(--fg-dim);line-height:2} .akeys kbd{font:10.5px var(--mono);border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--fg);margin-right:2px}
 /* Kiosk: no chrome, big type */
 body.kiosk header.top{display:none} body.kiosk .panel{border:0;background:transparent;box-shadow:none} body.kiosk .panel>.grip{display:none}
 .kiosk-wrap{display:flex;flex-direction:column;gap:18px;padding:6px 4px}
@@ -2699,24 +2742,39 @@ if(location.hash=='#settings')setOpen();
 /* ── About ── */
 function rAbout(d){
  if(!d)return '<div class=empty>loading…</div>';
- const S=d.site||{};
+ const S=d.site||{},R=d.repo||'https://github.com/BobClawblaw/noctyx';
+ const pill=(k,v,c)=>`<span class="apill ${c||''}"><span>${esc(k)}</span><b>${esc(v)}</b></span>`;
  return `<div class=about>
   <img class=abanner src="/assets/banner.svg" alt="Noctyx — the night-shift operator for your AI cluster">
+  <div class=apills>${pill('version',d.version)}${pill('license','BSL 1.1')}${pill('Apache 2.0 on',d.change_date||'—')}${pill('python',d.python)}${pill('restic',d.restic)}${pill('status','alpha','warn')}</div>
   <div class=acols>
-   <div class=acard><h3>Running</h3>
-    <div class=arow><span>Noctyx</span><b>${esc(d.version)}</b></div>
+   <div class=acard><h3>What Noctyx does</h3>
+    <div class=afeat><b>Deploy</b><span>Model recipes onto GPU slots: built while the current model serves, switched under the slot's GPU lock, rolled back automatically. Public recipes for your hardware, ranked by measured speed.</span></div>
+    <div class=afeat><b>Cache</b><span>One copy of every Hugging Face model on the cluster, served back as <code>HF_ENDPOINT</code>; keeps working when the Hub does not.</span></div>
+    <div class=afeat><b>Protect</b><span>Nightly snapshots of every node, Docker volumes, consistent database dumps, retention, verification, a dual-arch recovery stick for bare-metal restores.</span></div>
+    <div class=afeat><b>Watch</b><span>Live fleet: temperatures, power, tokens/s per model, alerts with LLM triage, a morning brief, hygiene with the space each fix frees.</span></div></div>
+   <div class=acard><h3>This site</h3>
+    <div class=arow><span>head node</span><b>${esc(S.head||'?')}</b></div>
+    <div class=arow><span>hosts</span><b>${esc(S.hosts)}</b></div>
+    <div class=arow><span>GPU slots · recipes</span><b>${esc(S.slots)} · ${esc(S.recipes)}</b></div>
+    <div class=arow><span>backup target</span><b>${esc(S.nas)}</b></div>
     <div class=arow><span>console build</span><b>${esc(d.build)}</b></div>
-    <div class=arow><span>Python</span><b>${esc(d.python)}</b></div>
-    <div class=arow><span>restic</span><b>${esc(d.restic)}</b></div>
-    <div class=arow><span>this site</span><b>${esc(S.head||'?')} · ${esc(S.hosts)} hosts · ${esc(S.slots)} GPU slots · NAS ${esc(S.nas)}</b></div></div>
+    <h3 style="margin-top:14px">Keys</h3>
+    <div class=akeys><kbd>1</kbd> dashboard <kbd>2</kbd> cluster <kbd>3</kbd> recipes <kbd>4</kbd> configuration <kbd>5</kbd> kiosk <kbd>Esc</kbd> close menus and the drawer · settings: the gear, or <code>/#settings</code></div></div>
+   <div class=acard><h3>Documentation</h3>
+    <div class=alinks><a href="${R}#readme" target=_blank rel=noopener>README and screenshots</a><a href="${R}/tree/main/docs/guide" target=_blank rel=noopener>Operator's guide</a>
+     <a href="${R}/blob/main/docs/guide/install.md" target=_blank rel=noopener>Install a head node and agents</a><a href="${R}/blob/main/docs/guide/restore.md" target=_blank rel=noopener>Restore a file, a node, the head</a>
+     <a href="${R}/blob/main/docs/guide/recipes.md" target=_blank rel=noopener>Deploy recipes</a><a href="${R}/blob/main/docs/guide/site-config.md" target=_blank rel=noopener>Site config reference</a>
+     <a href="${R}/blob/main/docs/spec/recipe-deploy.md" target=_blank rel=noopener>Recipe deploy spec (draft)</a></div></div>
    <div class=acard><h3>License</h3>
     <p>Source-available under the <b>Business Source License 1.1</b>.</p>
-    <p class=mut>Free for personal, hobby and home-lab use and for non-profit teaching and research, at any scale.
-     Evaluating, developing and testing are always free. Use by or for a company, or offering Noctyx as a hosted service,
-     needs a commercial license (COMMERCIAL.md).</p>
-    <p class=mut>Every release becomes Apache 2.0 four years after it ships${d.change_date?` — this one on <b>${esc(d.change_date)}</b>`:''}.</p></div>
+    <p class=mut>Free for personal, hobby and home-lab use and for non-profit teaching and research, at any scale. Evaluating, developing and
+     testing are always free. Use by or for a company, or offering Noctyx as a hosted service, needs a commercial license.</p>
+    <p class=mut>Every release becomes Apache 2.0 four years after it ships${d.change_date?` — this one on <b>${esc(d.change_date)}</b>`:''}.</p>
+    <div class=alinks><a href="${R}/blob/main/LICENSE" target=_blank rel=noopener>LICENSE</a><a href="${R}/blob/main/COMMERCIAL.md" target=_blank rel=noopener>Commercial licensing</a></div></div>
    <div class=acard><h3>Support Noctyx</h3>
-    <p class=mut>Donations keep the free tier going; commercial licenses are paid to the same address (quote, pay, send the txid and a message signed by the paying address).</p>
+    <p class=mut>Donations keep the free tier going. A commercial license is paid to the same address: ask for a quote, pay it, then send the
+     transaction id with a message signed by the paying address; you get a signed license file.</p>
     <div class=adonate><img src="/assets/donate-qr.png" alt="QR code: the bitcoin address" width=164 height=164>
      <div><div class=k>Bitcoin</div><button class=addr title="copy" onclick="copyAddr(this,'${esc(d.donate)}')">${esc(d.donate)}</button><div class="mut copied"></div></div></div></div>
   </div></div>`}
@@ -3050,7 +3108,7 @@ function rFleet(s){
  OVR=s;
  if(SEL&&!(s.hosts||[]).some(h=>h.name==SEL)){SEL=null;localStorage.removeItem(LS_SEL);history.replaceState(null,'',location.pathname);tick(PANELS.find(x=>x.id=='detail'))}
  $('hsrv').textContent=`${s.server} · ${s.hosts.length} nodes`;
- $('hauth').textContent=s.auth_required?'auth on':'dev mode';
+ $('hauth').textContent=s.demo?'demo · sample data':s.auth_required?'auth on':'dev mode';
  $('hauth').className='hpill'+(s.auth_required?'':' warn');
  const rows=((s.schedule&&s.schedule.rows)||[]).filter(r=>r.enabled),good=rows.filter(r=>r.health=='ok').length;
  $('hrpo').textContent=rows.length?`backups ${good}/${rows.length} on schedule`:'no schedule';
@@ -3505,7 +3563,7 @@ function hfSection(F){
 function asSection(A){
  const eps=(A.endpoints||[]).map((e,i)=>`<option value="${i}">${esc(e.host)} · ${esc(e.model||'?')} · ${esc(e.engine||'')} — ${esc(e.url)}</option>`).join('');
  return `<div class=cfgsec id=sec-assistant><h4>Assistant LLM</h4><p class=gnote>The model Noctyx asks to explain findings, triage alerts and write the morning brief. Text only: it never runs anything.</p>
-  <div class=setrow><label>Use the assistant</label><div><input type=checkbox class=sw id=as-on${A.enabled!==false?' checked':''} onchange="cfgDirty()"></div></div>
+  <div class=setrow><label>Use the assistant</label><div><input type=checkbox class=sw id=as-on${A.enabled===true?' checked':''} onchange="cfgDirty()"></div></div>
   <div class=setrow><label>Endpoint</label><div><input id=as-url class=asin value="${esc(A.url||'')}" placeholder="http://host:port/v1" oninput="cfgDirty()">
     ${eps?`<select id=as-pick onchange="asPick(this.value)" style="margin-top:6px"><option value="">or pick one Noctyx sees serving…</option>${eps}</select>`:''}</div>
    <div class=hint>An OpenAI-compatible base URL, ending in /v1.</div></div>
@@ -4049,6 +4107,9 @@ class H(BaseHTTPRequestHandler):
             if "?" in self.path else {}
         if p in ("/login", "/login/"):
             return self._send(login_page(), "text/html; charset=utf-8")
+        if DEMO and p.startswith("/api/"):
+            body = demo_answer(self.path)
+            return self._send(body, code=200) if body is not None else self._json({"error": "not in the demo"}, 404)
         if p == "/api/v1/me":
             w = self._who()
             return self._json({"mode": console_mode(), "user": w[0] if w else None, "role": w[1] if w else None,
@@ -4213,6 +4274,8 @@ class H(BaseHTTPRequestHandler):
         return self._json({"error": "not found"}, 404)
 
     def do_POST(self):
+        if DEMO:
+            return self._json({"error": "demo: read-only (nothing here acts on a real cluster)"}, 403)
         if self.path != "/api/v1/alert-hook" and not self._origin_ok():
             return self._json({"error": "cross-origin request refused"}, 403)
         if self.path in ("/api/v1/login", "/api/v1/logout", "/api/v1/settings/mine"):
@@ -4359,6 +4422,10 @@ def main():
         os._exit(0)
     for s in (_sig.SIGTERM, _sig.SIGHUP, _sig.SIGINT):
         _sig.signal(s, _bye)
+    if DEMO:                                   # plain HTTP on loopback: nothing real behind it
+        httpd = ThreadingHTTPServer(("127.0.0.1", PORT), H)
+        print(f"noctyx demo: http://127.0.0.1:{PORT}", flush=True)
+        return httpd.serve_forever()
     httpd = ThreadingHTTPServer(("0.0.0.0", PORT), H)
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.load_cert_chain(CERT, KEY)

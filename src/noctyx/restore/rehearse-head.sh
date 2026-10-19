@@ -5,7 +5,7 @@
 #            of the head's root disk; runs noctyx-restore-head.sh against the
 #            repository endpoint on the NAS (the path that works with the head dead)
 #   phase 2  boots ONLY the restored disk, NO network (a live copy of the head node
-#            must never reach the LAN: it would claim .242 and run the tick against
+#            must never reach the LAN: it would claim the head's address and run the tick against
 #            the real nodes); passes when a login prompt appears on the serial console
 #
 #   sudo noctyx tool rehearse-head                 # run (hours) — use systemd-run

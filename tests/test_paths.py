@@ -115,3 +115,17 @@ def test_accounts_passwords_sessions_roles(tmp_path, monkeypatch):
         ac.add("carol", "root", "long enough pw")
     with pytest.raises(ValueError):
         ac.add("carol", "viewer", "short")
+
+
+def test_demo_data_is_scrubbed_and_served():
+    import json, pathlib, re
+    from noctyx import console
+    d = pathlib.Path(console.__file__).parent / "demo"
+    blob = (d / "fixtures.json").read_text() + (d / "site.json").read_text()
+    for bad in (r"192\.168\.", r"\b10\.\d+\.\d+\.\d+\b", r"/home/(?!ops\b)", r"\.ts\.net"):
+        assert not re.search(bad, blob), bad
+    console.DEMO = str(d / "fixtures.json")
+    body = json.loads(console.demo_answer("/api/v1/overview"))
+    assert body["demo"] is True
+    assert console.demo_answer("/api/v1/metrics/spark-1?tab=gpu") is not None
+    assert console.demo_answer("/api/v1/no-such-report") is None

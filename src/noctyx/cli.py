@@ -8,6 +8,7 @@
   noctyx tool NAME [ARGS]     a script rendered for this site: install-node-metrics, install-mac-metrics,
                               install-alerting, install-llm-monitoring; recovery: build-stick, build-stick-single,
                               make-restore-usb, vm-boot-test, rehearse-head
+  noctyx demo [--port N]      the console on sample data (a scrubbed real site), read-only, http://127.0.0.1:N
   noctyx paths                the effective paths for this site (paths.py + the site config's "paths")
   noctyx banner               the banner
   noctyx <command> …          everything else: backup, tick, recipe-deploy, hf-harvest, … (`noctyx -h`)
@@ -76,6 +77,21 @@ def main(argv=None):
         from .paths import P, CONFIG
         print(json.dumps({"config": CONFIG, **P}, indent=1))
         return 0
+    if cmd == "demo":
+        port = argv[argv.index("--port") + 1] if "--port" in argv else "20993"
+        here = pathlib.Path(__file__).resolve().parent / "demo"
+        scratch = tempfile.mkdtemp(prefix="noctyx-demo-")
+        os.environ.update({"NOCTYX_CONFIG": str(here / "site.json"), "NOCTYX_DEMO": str(here / "fixtures.json"),
+                           "NOCTYX_CONSOLE_PORT": port, "NOCTYX_CONSOLE_AUTH": "0"})
+        for k in ("etc", "state", "locks", "job_logs", "console_state"):      # never the real site's files
+            os.environ[f"NOCTYX_PATH_{k.upper()}"] = f"{scratch}/{k}"
+        os.environ["NOCTYX_PATH_AUDIT"] = f"{scratch}/audit.jsonl"
+        os.environ["NOCTYX_PATH_UI_TOKEN"] = f"{scratch}/ui-token"
+        for k in ("etc", "state", "console_state"):
+            os.makedirs(f"{scratch}/{k}", exist_ok=True)
+        sys.argv = ["noctyx"]
+        from . import console
+        return console.main()
     if cmd == "tool":
         if len(argv) < 2:
             sys.exit(f"usage: noctyx tool NAME [ARGS]  (tools: {', '.join(TOOLS)})")
