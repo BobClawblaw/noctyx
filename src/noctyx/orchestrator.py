@@ -43,8 +43,15 @@ def cfg():
 
 
 def nas_name(c):
-    """Name of the NAS: its spindle key in the site config and its TLS name."""
-    return c["server"].get("nas_name", "nas")
+    """Name of the NAS: its spindle key in the site config (the lock every writer to it takes) and its TLS
+    name. Explicit server.nas_name, else the spindle whose mount holds the repositories, else "nas"."""
+    if c["server"].get("nas_name"):
+        return c["server"]["nas_name"]
+    root = (c["server"].get("repo_root") or "").rstrip("/") + "/"
+    best = max(((k, s["mount"].rstrip("/")) for k, s in (c.get("spindles") or {}).items()
+                if isinstance(s, dict) and s.get("mount") and root.startswith(s["mount"].rstrip("/") + "/")),
+               key=lambda x: len(x[1]), default=None)
+    return best[0] if best else "nas"
 
 
 def repo_root(c):

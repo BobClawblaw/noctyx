@@ -1170,6 +1170,32 @@ SYSTEM_PROMPT = ("You are the assistant inside Noctyx, a deployment, backup and 
 DIGEST_FILE = UI_STATE / "digest.json"
 
 
+ASSETS = {"favicon.svg": "image/svg+xml", "banner.svg": "image/svg+xml", "donate-qr.png": "image/png"}
+DONATE = "bc1q9echf820hapc04y0f636uxdry2ahyx32tkleff"
+
+
+def about_info():
+    """UI › About: what is running, under which license, and how to support it."""
+    from noctyx import __version__
+    c = CM.cfg()
+    change = None
+    for lic in (NX_HOME.parents[1] / "LICENSE", NX_HOME.parent / "LICENSE"):
+        try:
+            m = re.search(r"^Change Date:\s*(\S+)", lic.read_text(), re.M)
+            if m:
+                change = m.group(1)
+                break
+        except OSError:
+            pass
+    rc = CM.recipes_cfg(c)
+    return {"version": __version__, "build": UI_BUILD, "python": sys.version.split()[0],
+            "restic": str(c.get("restic_version") or "0.19.1"), "change_date": change,
+            "site": {"head": c["server"].get("hostname"), "nas": CM.nas_name(c),
+                     "hosts": len([h for h in c["hosts"] if h.get("enabled", True) is not False and h.get("address")]),
+                     "slots": len(rc["slots"]), "recipes": len(rc["catalog"])},
+            "donate": DONATE}
+
+
 def assistant_cfg():
     a = CM.cfg().get("assistant") or {}
     if not a.get("enabled", False):
@@ -1900,7 +1926,8 @@ a.brand{text-decoration:none;color:inherit;flex:0 0 auto}
 .menu{position:relative}
 .menu-title{background:none;border:1px solid transparent;color:var(--fg-dim);font:600 11px var(--sans);letter-spacing:.06em;text-transform:uppercase;padding:6px 10px;border-radius:var(--radius-sm);cursor:pointer}
 .menu-title:hover,.menu.open .menu-title{color:var(--fg);background:var(--bg-3)}
-.menu.cur .menu-title{color:var(--accent)}
+.menu.cur .menu-title,a.menu-title.cur{color:var(--accent)}
+a.menu-title{text-decoration:none;display:inline-flex;align-items:center;gap:6px} a.menu-title kbd{font:10px var(--mono);color:var(--fg-faint);border:1px solid var(--line);border-radius:4px;padding:0 4px}
 .menu-pop{position:absolute;top:calc(100% + 6px);left:0;min-width:190px;background:var(--bg-2);border:1px solid var(--line);border-radius:var(--radius);padding:5px;box-shadow:0 10px 30px rgba(0,0,0,.35);z-index:80}
 .menu-pop a{display:flex;align-items:center;gap:12px;padding:7px 10px;border-radius:var(--radius-sm);color:var(--fg);text-decoration:none;font:12.5px var(--sans)}
 .menu-pop a:hover,.menu-pop a.cur{background:var(--bg-3)} .menu-pop a.cur{color:var(--accent)}
@@ -1920,6 +1947,34 @@ a.brand{text-decoration:none;color:inherit;flex:0 0 auto}
 .setrow>label{font:600 12px var(--sans);padding-top:6px} .setrow .hint{grid-column:2;font:11px var(--sans);color:var(--fg-faint)}
 .setrow.dim{opacity:.45}
 .setrow>.seg{justify-self:start}
+/* About */
+.about{display:flex;flex-direction:column;gap:14px}
+.abanner{width:100%;max-width:1280px;border-radius:var(--radius);border:1px solid var(--line-soft);display:block;margin:0 auto}
+.acols{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
+.acard{background:var(--bg-2);border:1px solid var(--line-soft);border-radius:var(--radius);padding:14px 16px;font:12.5px/1.55 var(--sans)}
+.acard h3{margin:0 0 8px;font:700 11px var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim)}
+.acard p{margin:0 0 8px}
+.arow{display:flex;justify-content:space-between;gap:12px;padding:4px 0;border-bottom:1px solid var(--line-soft);font:12px var(--mono)} .arow span{color:var(--fg-dim)}
+.adonate{display:flex;gap:14px;align-items:center} .adonate img{border-radius:8px;background:#fff;padding:4px}
+.addr{background:var(--bg-0);border:1px solid var(--line);color:var(--fg);font:11.5px var(--mono);padding:6px 9px;border-radius:999px;cursor:pointer;word-break:break-all;text-align:left}
+.addr:hover{border-color:var(--accent)}
+/* Kiosk: no chrome, big type */
+body.kiosk header.top{display:none} body.kiosk .panel{border:0;background:transparent;box-shadow:none} body.kiosk .panel>.grip{display:none}
+.kiosk-wrap{display:flex;flex-direction:column;gap:18px;padding:6px 4px}
+.ktop{display:flex;align-items:center;gap:22px;flex-wrap:wrap}
+.kbrand{display:flex;align-items:center;gap:10px;text-decoration:none;margin-right:auto} .kbrand .mark{width:34px;height:34px} .kbrand .wordmark{font-size:22px}
+.kbig{display:flex;flex-direction:column;align-items:flex-end} .kbig b{font:800 44px/1 var(--mono)} .kbig span,.kclock span{font:11px var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim)}
+.kclock{display:flex;flex-direction:column;align-items:flex-end;padding-left:20px;border-left:1px solid var(--line)} .kclock b{font:700 44px/1 var(--mono)}
+.kslots{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
+.kslot,.knode{background:var(--bg-1);border:1px solid var(--line-soft);border-radius:var(--radius);padding:14px 16px}
+.kslot.down,.knode.down{border-color:color-mix(in srgb,var(--bad) 55%,var(--line))}
+.kh{display:flex;align-items:center;gap:10px;font:700 18px var(--sans)} .kh .mut{font:500 12px var(--sans)}
+.km{font:600 15px var(--mono);margin-top:8px;color:var(--accent)}
+.knodes{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}
+.kgrid{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:6px 10px;margin-top:10px;font:12px var(--sans);align-items:baseline}
+.kgrid span{color:var(--fg-dim)} .kgrid b{font:700 20px var(--mono)}
+.kllm{display:flex;justify-content:space-between;align-items:baseline;margin-top:10px;padding-top:8px;border-top:1px solid var(--line-soft);font:12px var(--mono);gap:8px}
+.kllm .mut{overflow:hidden;text-overflow:ellipsis;white-space:nowrap} .kllm b{font:800 22px var(--mono);color:var(--accent);white-space:nowrap;flex:0 0 auto} .kllm small{font:11px var(--sans);color:var(--fg-dim)}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden;background:var(--bg-0)}
 .seg button{background:none;border:0;border-right:1px solid var(--line);color:var(--fg-dim);font:600 11.5px var(--sans);padding:6px 12px;cursor:pointer}
 .seg button{white-space:nowrap}
@@ -2241,14 +2296,15 @@ td.acts{white-space:nowrap} td.acts a,td.acts button.lnk{margin-right:6px}
 </style></head><body>
 <div class=app>
 <header class=top>
-  <a class=brand href="/" title="Dashboard"><span class=mark></span><span class=wordmark>Noct<b>yx</b></span></a>
+  <a class=brand href="/about" title="About Noctyx"><span class=mark></span><span class=wordmark>Noct<b>yx</b></span></a>
   <nav class=pages id=nav aria-label="Pages">
    <div class=menu><button type=button class=menu-title aria-haspopup=true aria-expanded=false>Monitor</button>
     <div class="menu-pop hide" role=menu><a role=menuitem href="/" data-v=main>Dashboard<kbd>1</kbd></a><a role=menuitem href="/cluster" data-v=cluster>Cluster<kbd>2</kbd></a></div></div>
    <div class=menu><button type=button class=menu-title aria-haspopup=true aria-expanded=false>Deploy</button>
     <div class="menu-pop hide" role=menu><a role=menuitem href="/recipes" data-v=recipes>Recipes<kbd>3</kbd></a></div></div>
    <div class=menu><button type=button class=menu-title aria-haspopup=true aria-expanded=false>Configure</button>
-    <div class="menu-pop hide" role=menu><a role=menuitem href="/config#sec-backups" data-v=config>Backups<kbd>4</kbd></a><a role=menuitem href="/config#sec-mirror">Model mirror</a><a role=menuitem href="/config#sec-assistant">Assistant LLM</a></div></div>
+    <div class="menu-pop hide" role=menu><a role=menuitem href="/config#sec-backups" data-v=config>Backups<kbd>4</kbd></a><a role=menuitem href="/config#sec-retention">Retention</a><a role=menuitem href="/config#sec-mirror">Model mirror</a><a role=menuitem href="/config#sec-assistant">Assistant LLM</a></div></div>
+   <a class="menu-title direct" href="/kiosk" title="The wall display">Kiosk<kbd>5</kbd></a>
   </nav>
   <span class=pagename id=hpage></span>
   <span class=hstat id=hsrv></span>
@@ -2463,6 +2519,17 @@ if(VIEW=='recipes'){
   {id:'recipes',title:'Recipes',sp:12,h:0,int:20,render:rRecipes,api:()=>fetchJSON('/api/v1/recipes')});
  document.getElementById('desk').classList.add('stack');
 }
+if(VIEW=='about'){
+ PANELS.splice(0,PANELS.length,{id:'about',title:'About',sp:12,h:0,int:3600,render:rAbout,api:()=>fetchJSON('/api/v1/about')});
+ document.getElementById('desk').classList.add('stack');
+}
+/* /kiosk: the wall display — no chrome, big type, every source refreshed together every 10 s */
+if(VIEW=='kiosk'){
+ PANELS.splice(0,PANELS.length,{id:'kiosk',title:'Kiosk',sp:12,h:0,int:10,render:rKiosk,
+  api:()=>Promise.all([fetchJSON('/api/v1/metrics'),fetchJSON('/api/v1/recipes').catch(()=>({})),fetchJSON('/api/v1/overview').catch(()=>({})),fetchJSON('/api/v1/alerts').catch(()=>({}))])
+   .then(([m,r,o,a])=>({m,r,o,a}))});
+ document.body.classList.add('kiosk');document.getElementById('desk').classList.add('stack');
+}
 /* /cluster: only the systems. Both panels read the same fleet metrics call. */
 if(VIEW=='cluster'){
  PANELS.splice(0,PANELS.length,
@@ -2470,7 +2537,7 @@ if(VIEW=='cluster'){
  document.getElementById('desk').classList.add('stack');
 }
 /* ── navigation: menus in the header, the page name, 1–4 to jump ── */
-const PAGES={main:['/','Dashboard'],cluster:['/cluster','Cluster'],recipes:['/recipes','Recipes'],config:['/config','Configuration']};
+const PAGES={main:['/','Dashboard'],cluster:['/cluster','Cluster'],recipes:['/recipes','Recipes'],config:['/config','Configuration'],about:['/about','About'],kiosk:['/kiosk','Kiosk']};
 (function nav(){
  const name=(PAGES[VIEW]||PAGES.main)[1];const pn=$('hpage');if(pn)pn.textContent=name;document.title=`Noctyx · ${name}`;
  document.querySelectorAll('#nav .menu').forEach(m=>{
@@ -2484,7 +2551,7 @@ const PAGES={main:['/','Dashboard'],cluster:['/cluster','Cluster'],recipes:['/re
  document.addEventListener('keydown',e=>{
   if(e.key=='Escape'){closeMenus();setClose();return}
   if(e.ctrlKey||e.metaKey||e.altKey||/INPUT|TEXTAREA|SELECT/.test((document.activeElement||{}).tagName||''))return;
-  const go={'1':'/','2':'/cluster','3':'/recipes','4':'/config'}[e.key];if(go&&location.pathname!=go)location.href=go});
+  const go={'1':'/','2':'/cluster','3':'/recipes','4':'/config','5':'/kiosk'}[e.key];if(go&&location.pathname!=go)location.href=go});
  if(VIEW=='config'&&location.hash)setTimeout(()=>{const el=document.getElementById(location.hash.slice(1));if(el)el.scrollIntoView({behavior:'smooth',block:'start'})},900);
 })();
 function closeMenus(){document.querySelectorAll('#nav .menu.open').forEach(m=>{m.classList.remove('open');m.querySelector('.menu-pop').classList.add('hide');m.querySelector('.menu-title').setAttribute('aria-expanded','false')})}
@@ -2535,6 +2602,63 @@ async function setSaveSite(){const s=NXT.eff(),body={mode:s.mode,theme:s.theme,t
  if(m)m.textContent=r&&r.error?'✗ '+r.error:'✓ saved: browsers without their own settings use these';setTimeout(loadSiteSettings,2500)}
 loadSiteSettings();
 if(location.hash=='#settings')setOpen();
+
+/* ── About ── */
+function rAbout(d){
+ if(!d)return '<div class=empty>loading…</div>';
+ const S=d.site||{};
+ return `<div class=about>
+  <img class=abanner src="/assets/banner.svg" alt="Noctyx — the night-shift operator for your AI cluster">
+  <div class=acols>
+   <div class=acard><h3>Running</h3>
+    <div class=arow><span>Noctyx</span><b>${esc(d.version)}</b></div>
+    <div class=arow><span>console build</span><b>${esc(d.build)}</b></div>
+    <div class=arow><span>Python</span><b>${esc(d.python)}</b></div>
+    <div class=arow><span>restic</span><b>${esc(d.restic)}</b></div>
+    <div class=arow><span>this site</span><b>${esc(S.head||'?')} · ${esc(S.hosts)} hosts · ${esc(S.slots)} GPU slots · NAS ${esc(S.nas)}</b></div></div>
+   <div class=acard><h3>License</h3>
+    <p>Source-available under the <b>Business Source License 1.1</b>.</p>
+    <p class=mut>Free for personal, hobby and home-lab use and for non-profit teaching and research, at any scale.
+     Evaluating, developing and testing are always free. Use by or for a company, or offering Noctyx as a hosted service,
+     needs a commercial license (COMMERCIAL.md).</p>
+    <p class=mut>Every release becomes Apache 2.0 four years after it ships${d.change_date?` — this one on <b>${esc(d.change_date)}</b>`:''}.</p></div>
+   <div class=acard><h3>Support Noctyx</h3>
+    <p class=mut>Donations keep the free tier going; commercial licenses are paid to the same address (quote, pay, send the txid and a message signed by the paying address).</p>
+    <div class=adonate><img src="/assets/donate-qr.png" alt="QR code: the bitcoin address" width=164 height=164>
+     <div><div class=k>Bitcoin</div><button class=addr title="copy" onclick="copyAddr(this,'${esc(d.donate)}')">${esc(d.donate)}</button><div class="mut copied"></div></div></div></div>
+  </div></div>`}
+function copyAddr(btn,a){const ok=()=>{btn.nextElementSibling.textContent='copied ✓';setTimeout(()=>btn.nextElementSibling.textContent='',1800)};
+ try{navigator.clipboard.writeText(a).then(ok,()=>{})}catch(e){const r=document.createRange();r.selectNodeContents(btn);getSelection().removeAllRanges();getSelection().addRange(r)}}
+
+/* ── Kiosk ── */
+const lastV=s=>Array.isArray(s)&&s.length?+s[s.length-1][1]||0:0;
+function rKiosk(d){
+ if(!d||!d.m)return '<div class=empty>loading…</div>';
+ const M=d.m,H=M.hosts||{},order=M.order||Object.keys(H),I=(M.fleet||{}).infra||{},tok=((M.fleet||{}).series||{}).tokens||{};
+ const tps=Object.values(tok).reduce((a,s)=>a+lastV(s),0);
+ const gpuW=order.reduce((a,n)=>a+(+(H[n]||{}).gpu_power||0),0);
+ const act=(d.a.active||[]).length,crit=(d.a.active||[]).filter(x=>x.severity=='critical').length;
+ const slots=Object.entries((d.r||{}).slots||{}).map(([n,s])=>{const L=s.live||{};
+  return `<div class="kslot ${L.ok?'':'down'}"><div class=kh><span class="dot ${L.ok?'ok':'bad'}"></span><b>${esc(n)}</b><span class=mut>${esc(s.head)}${s.worker?' + '+esc(s.worker):''}</span></div>
+   <div class=km>${L.ok?esc((L.models||[]).join(', ')):'not serving'}</div>${L.connections!=null?`<div class=mut>${esc(L.connections)} connected</div>`:''}</div>`}).join('');
+ const nodes=order.map(n=>{const h=H[n]||{},srv=((h.llm||{}).servers||[])[0],g=srv&&srv.spark?lastV(srv.spark.gen_tps):null;
+  const mem=h.mem_total?Math.round(100*h.mem_used/h.mem_total):null,up=h.up!==0&&h.up!==false;
+  const t=(v,w)=>v==null?'—':`<b class="${v>=w?'bad':v>=w-10?'warn':''}">${fmtT(v)}</b>`;
+  return `<div class="knode ${up?'':'down'}"><div class=kh><span class="dot ${up?'ok':'bad'}"></span><b>${esc(n)}</b></div>
+   <div class=kgrid><span>GPU</span><b>${h.gpu_util!=null?Math.round(h.gpu_util)+'%':'—'}</b><span>GPU temp</span>${t(h.gpu_temp,85)}
+    <span>power</span><b>${h.gpu_power!=null?Math.round(h.gpu_power)+' W':'—'}</b><span>CPU temp</span>${t(h.sys_temp,90)}
+    <span>CPU</span><b>${h.cpu!=null?Math.round(h.cpu)+'%':'—'}</b><span>memory</span><b>${mem!=null?mem+'%':'—'}</b></div>
+   ${srv?`<div class=kllm><span class=mut>${esc(srv.model)}</span><b>${g!=null?g.toFixed(0):'—'}<small> tok/s</small></b></div>`:''}</div>`}).join('');
+ const now=new Date();
+ return `<div class=kiosk-wrap>
+  <div class=ktop><a class=kbrand href="/"><span class=mark></span><span class=wordmark>Noct<b>yx</b></span></a>
+   <div class=kbig><b>${tps.toFixed(0)}</b><span>tokens / second</span></div>
+   <div class=kbig><b>${Math.round(gpuW)}</b><span>GPU watts</span></div>
+   <div class=kbig><b class="${I.backups_ok<I.backups_total?'warn':'ok'}">${esc(I.backups_ok??'?')}/${esc(I.backups_total??'?')}</b><span>backups on schedule</span></div>
+   <div class=kbig><b class="${crit?'bad':act?'warn':'ok'}">${act}</b><span>alert${act==1?'':'s'}</span></div>
+   <div class=kclock><b>${now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}</b><span>${now.toLocaleDateString([], {weekday:'short',month:'short',day:'numeric'})}</span></div></div>
+  ${slots?`<div class=kslots>${slots}</div>`:''}
+  <div class=knodes>${nodes}</div></div>`}
 
 function llmStats(s){const ms=v=>v==null?'—':v<1?Math.round(v*1000)+'<span class=u> ms</span>':v.toFixed(1)+'<span class=u> s</span>';
  const kv=(k,v)=>`<div><span class=k>${k}</span><span class=v>${v}</span></div>`;
@@ -3783,7 +3907,8 @@ class H(BaseHTTPRequestHandler):
             if "?" in self.path else {}
         if p in ("/", "/index.html"):
             return self._send(page(), "text/html; charset=utf-8")
-        if p in ("/cluster", "/cluster/", "/config", "/config/", "/recipes", "/recipes/"):
+        if p in ("/cluster", "/cluster/", "/config", "/config/", "/recipes", "/recipes/", "/about", "/about/",
+                 "/kiosk", "/kiosk/"):
             # systems-only / config views: same page, different panel set (see VIEW in the JS)
             return self._send(page(p.strip("/")), "text/html; charset=utf-8")
         if p in ("/favicon.ico", "/favicon.svg"):
@@ -3809,6 +3934,11 @@ class H(BaseHTTPRequestHandler):
             except ValueError:
                 n = 15
             return self._json(audit_tail(min(max(n, 1), 200)))
+        if p.startswith("/assets/") and p[8:] in ASSETS:
+            f = NX_HOME / "assets" / p[8:]
+            return self._send(f.read_bytes(), ASSETS[p[8:]])
+        if p == "/api/v1/about":
+            return self._json(about_info())
         if p == "/api/v1/console-settings":
             return self._json({"settings": (CM.cfg().get("console") or {}).get("settings") or {}})
         if p == "/api/v1/recipes":

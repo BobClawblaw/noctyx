@@ -78,3 +78,12 @@ def test_console_defaults_validation():
     assert not errs and ok["custom"]["accent"] == "#abcdef"
     for bad in ({"mode": "dim"}, {"theme": "nope"}, {"tunit": "K"}, {"custom": {"bg": "red"}}, {"custom": {"x": "#000000"}}):
         assert o.validate_console(bad)[1], bad
+
+
+def test_nas_name_from_the_spindle_holding_the_repositories():
+    from noctyx import orchestrator as o
+    c = {"server": {"repo_root": "/mnt/store/backups"}, "spindles": {"hot": {"mount": "/mnt/nvme"}, "store": {"mount": "/mnt/store"}}}
+    assert o.nas_name(c) == "store"
+    c["server"]["nas_name"] = "explicit"
+    assert o.nas_name(c) == "explicit"
+    assert o.nas_name({"server": {}, "spindles": {}}) == "nas"
