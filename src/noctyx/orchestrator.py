@@ -3034,7 +3034,9 @@ HEAD_UNITS = ("console.service", "directory.service", "hf-mirror.service", "tick
 def render_unit(c, name):
     hc = hf_cfg(c)
     extra = {"NX_PY": sys.executable, "NX_PKG_PARENT": str(NX_HOME.parent), "NX_CONFIG": CFG_PATH,
-             "UI_PORT": str(c["server"].get("ui_port", 20996)), "HF_STORE": hc["store"], "HF_PORT": str(hc["port"])}
+             "UI_PORT": str(c["server"].get("ui_port", 20996)), "HF_STORE": hc["store"], "HF_PORT": str(hc["port"]),
+             "CONSOLE_AUTH": "0" if c["server"].get("console_auth", True) is False else "1",
+             "REPO_ROOT": c["server"].get("repo_root") or "/"}
     text = render((NX_HOME / "units" / name).read_text())
     for k, v in extra.items():
         text = text.replace(f"@{k}@", v)

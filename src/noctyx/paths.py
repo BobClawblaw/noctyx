@@ -34,7 +34,8 @@ DEFAULTS = {
     "repo_dir_prefix": "nx-",                     # <repo_root>/<prefix><repo>/<repo>
     "recipe_root": "~/.local/share/noctyx/recipes",
     "gpu_lock": "/var/lock/noctyx-gpu.lock",
-    "mirror_unit": "noctyx-hf-mirror",            # the HF mirror's service      # a slot's GPU lock when the slot names none
+    "mirror_unit": "noctyx-hf-mirror",            # the HF mirror's service
+    "restore_script": "",                         # what /api/v1/restore-script serves ("" = the packaged one)      # a slot's GPU lock when the slot names none
     # Prometheus wiring (the console's queries and the alert rules use these names)
     "prom_node_targets": "/etc/prometheus/noctyx-targets.json",   # file_sd for node_exporter on every node
     "prom_llm_targets": "/etc/prometheus/llm-targets.json",        # file_sd for LLM servers (llm-discover)

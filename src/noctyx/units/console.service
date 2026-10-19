@@ -7,6 +7,8 @@ Wants=network-online.target
 Type=simple
 User=root
 Environment=NOCTYX_CONFIG=@NX_CONFIG@ PYTHONPATH=@NX_PKG_PARENT@ NOCTYX_CONSOLE_PORT=@UI_PORT@
+# site config server.console_auth (default true): false only on a LAN you trust
+Environment=NOCTYX_CONSOLE_AUTH=@CONSOLE_AUTH@
 ExecStart=@NX_PY@ -m noctyx.cli console
 Restart=on-failure
 RestartSec=3

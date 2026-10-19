@@ -98,7 +98,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json({"error": str(e)}, 500)
 
         if p == "/api/v1/restore-script":
-            f = NX_HOME / "restore" / "noctyx-restore.sh"   # the bare-metal restore image (being ported)
+            f = pathlib.Path(P["restore_script"] or NX_HOME / "restore" / "noctyx-restore.sh")   # restore image script
             try:
                 return self._send(f.read_bytes(), "text/x-shellscript")
             except Exception as e:

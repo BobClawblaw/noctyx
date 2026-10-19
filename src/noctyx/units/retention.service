@@ -2,6 +2,7 @@
 Description=Noctyx retention: forget + prune per the site config, gated by restic check (monthly)
 After=network-online.target remote-fs.target
 Wants=network-online.target
+RequiresMountsFor=@REPO_ROOT@
 
 [Service]
 Type=oneshot
