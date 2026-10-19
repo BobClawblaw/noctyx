@@ -1990,13 +1990,34 @@ const NXT=(()=>{
  const mix=(a,b,t)=>{const x=rgb(a),y=rgb(b);return x&&y?hex(x.map((v,i)=>v+(y[i]-v)*t)):a};
  const lum=h=>{const c=rgb(h);if(!c)return 0;const l=v=>{v/=255;return v<=.03928?v/12.92:((v+.055)/1.055)**2.4};return .2126*l(c[0])+.7152*l(c[1])+.0722*l(c[2])};
  const BASE=['bg','panel','text','muted','accent','line','ok','warn','bad'];
+ const PHL={bg:'#e9eef1',panel:'#f8fafb',bg2:'#f1f5f7',bg3:'#e3eaee',bg0:'#dde5ea',line:'#c3d0d8',lineSoft:'#d5dfe5',text:'#0c1a22',muted:'#4a6170',faint:'#7d919e',ok:'#0f9d58',warn:'#c77700',bad:'#d1293d',info:'#1f5fe0'};
+ const PH=(label,blurb,d)=>({label,blurb,style:'phosphor',dark:d,light:{...PHL,accent:mix(d.accent,'#000000',.4),accentDim:mix(d.accent,'#000000',.55),accent2:mix(d.accent2,'#000000',.4)}});
+ const KK=['cpu','gpu','temp','mem','net','disk','power','llm','ok','alert'];
  const PRESETS={
   noctyx:{label:'Noctyx',blurb:'Night console — navy and neon cyan',
    dark:{bg:'#070913',panel:'#0d1020',bg2:'#121629',bg3:'#191e36',bg0:'#05060d',line:'#242a47',lineSoft:'#1a1f38',text:'#e2e8f6',muted:'#97a3c2',faint:'#67718f',accent:'#3fe6ff',accentDim:'#1f93b3',accent2:'#b45cff',ok:'#2ecc8f',warn:'#f0b429',bad:'#ef5a5a',info:'#58a6ff'},
    light:{bg:'#eef1f8',panel:'#ffffff',bg2:'#f5f7fc',bg3:'#e7ebf5',bg0:'#e3e8f2',line:'#cfd6e6',lineSoft:'#e0e5f0',text:'#121729',muted:'#525d78',faint:'#8790a6',accent:'#0a9cc0',accentDim:'#077a96',accent2:'#8a3fe0',ok:'#1b9460',warn:'#a87a08',bad:'#d13c3c',info:'#2f6fd6'}},
-  phosphor:{label:'Phosphor',blurb:'Instrument panel — LED meters, scope traces, LCD numerals',
-   dark:{bg:'#04070a',panel:'#0a1015',bg2:'#0d151b',bg3:'#132029',bg0:'#020406',line:'#1a2a35',lineSoft:'#12202a',text:'#e4f1f7',muted:'#8ba3b3',faint:'#587083',accent:'#1fd1ff',accentDim:'#118aab',accent2:'#3dff8f',ok:'#3dff8f',warn:'#ffb020',bad:'#ff4d5e',info:'#3b8cff'},
-   light:{bg:'#e9eef1',panel:'#f8fafb',bg2:'#f1f5f7',bg3:'#e3eaee',bg0:'#dde5ea',line:'#c3d0d8',lineSoft:'#d5dfe5',text:'#0c1a22',muted:'#4a6170',faint:'#7d919e',accent:'#0a8fc0',accentDim:'#086f95',accent2:'#0f9d58',ok:'#0f9d58',warn:'#c77700',bad:'#d1293d',info:'#1f5fe0'}},
+  phosphor:{label:'Phosphor',blurb:'Instrument panel — LED meters, scope traces, LCD numerals',style:'phosphor',
+   dark:{k:{cpu:'#3dff8f',gpu:'#3b8cff',temp:'#ffb020',mem:'#b45cff',net:'#22d3ee',disk:'#2ee6a6',power:'#ffd60a',llm:'#ff4fd8',ok:'#3dff8f',alert:'#ff4d5e'},bg:'#04070a',panel:'#0a1015',bg2:'#0d151b',bg3:'#132029',bg0:'#020406',line:'#1a2a35',lineSoft:'#12202a',text:'#e4f1f7',muted:'#8ba3b3',faint:'#587083',accent:'#1fd1ff',accentDim:'#118aab',accent2:'#3dff8f',ok:'#3dff8f',warn:'#ffb020',bad:'#ff4d5e',info:'#3b8cff'},
+   light:{...PHL,accent:'#0a8fc0',accentDim:'#086f95',accent2:'#0f9d58'}},
+  p1green:PH('Phosphor · P1 Green','Green-phosphor CRT: lime, mint and teal on black',
+   {bg:'#020804',panel:'#06100a',bg2:'#08150d',bg3:'#0d1f14',bg0:'#010402',line:'#133621',lineSoft:'#0c2417',text:'#c8ffd8',muted:'#6fbf8c',faint:'#3f7a55',accent:'#33ff77',accentDim:'#1a9944',accent2:'#b6ff4d',ok:'#33ff77',warn:'#e8ff4d',bad:'#ff5c5c',info:'#4dffc3',
+    k:{cpu:'#33ff77',gpu:'#4dffc3',temp:'#e8ff4d',mem:'#9dff4d',net:'#22e6a8',disk:'#7dffa8',power:'#d4ff33',llm:'#00ffb3',ok:'#33ff77',alert:'#ff5c5c'}}),
+  p3amber:PH('Phosphor · P3 Amber','Amber terminal: gold, orange and honey',
+   {bg:'#0a0602',panel:'#120b04',bg2:'#170e05',bg3:'#221507',bg0:'#050301',line:'#3a2410',lineSoft:'#2a1a0b',text:'#ffe2b8',muted:'#c79a62',faint:'#8a6a42',accent:'#ffb000',accentDim:'#a87100',accent2:'#ffd27a',ok:'#ffc94d',warn:'#ff8a1f',bad:'#ff4a3d',info:'#ffd27a',
+    k:{cpu:'#ffb000',gpu:'#ffd27a',temp:'#ff8a1f',mem:'#ff9e5e',net:'#ffe08a',disk:'#ffc94d',power:'#fff07a',llm:'#ff7a3d',ok:'#ffc94d',alert:'#ff4a3d'}}),
+  nixie:PH('Phosphor · Nixie','Neon tubes behind smoked glass, green indicator lamps',
+   {bg:'#0b0706',panel:'#140d0a',bg2:'#1a110d',bg3:'#241712',bg0:'#060403',line:'#3b2419',lineSoft:'#2a1912',text:'#ffd9c2',muted:'#c4917a',faint:'#87604f',accent:'#ff6a1a',accentDim:'#b2440a',accent2:'#ffa15c',ok:'#6fe36f',warn:'#ffb347',bad:'#ff3b30',info:'#ff9a5c',
+    k:{cpu:'#ff6a1a',gpu:'#ff9a3d',temp:'#ffc04d',mem:'#ff4f6e',net:'#ffb37a',disk:'#ff8c42',power:'#ffd166',llm:'#ff5a36',ok:'#6fe36f',alert:'#ff3b30'}}),
+  synthwave:PH('Phosphor · Synthwave','Magenta, violet and cyan on midnight purple',
+   {bg:'#0d0518',panel:'#150a26',bg2:'#1b0e30',bg3:'#24133f',bg0:'#07020e',line:'#3a1f5c',lineSoft:'#2a1645',text:'#f4e8ff',muted:'#b49ad6',faint:'#7a62a0',accent:'#ff2fd0',accentDim:'#a3188a',accent2:'#2de2ff',ok:'#2dffb3',warn:'#ffcc33',bad:'#ff3d6e',info:'#2de2ff',
+    k:{cpu:'#2dffb3',gpu:'#2de2ff',temp:'#ffcc33',mem:'#a96bff',net:'#5ab0ff',disk:'#39f5d0',power:'#ffe14d',llm:'#ff2fd0',ok:'#2dffb3',alert:'#ff3d6e'}}),
+  arctic:PH('Phosphor · Arctic','Ice blue, glacier cyan and frost on cold navy',
+   {bg:'#050a12',panel:'#0a1220',bg2:'#0e1828',bg3:'#132134',bg0:'#03060b',line:'#1c2e47',lineSoft:'#142338',text:'#e8f4ff',muted:'#92aac6',faint:'#5d7591',accent:'#7fdcff',accentDim:'#3a95c2',accent2:'#d6f3ff',ok:'#6ff5d2',warn:'#ffd36b',bad:'#ff6b8a',info:'#8fb8ff',
+    k:{cpu:'#6ff5d2',gpu:'#8fb8ff',temp:'#ffd36b',mem:'#c3a6ff',net:'#7fdcff',disk:'#a8f0ff',power:'#fff2a8',llm:'#d6f3ff',ok:'#6ff5d2',alert:'#ff6b8a'}}),
+  redops:PH('Phosphor · Red Ops','All red, for a dark room: keeps your night vision',
+   {bg:'#070202',panel:'#0e0404',bg2:'#130505',bg3:'#1c0808',bg0:'#040101',line:'#3a0f0f',lineSoft:'#280a0a',text:'#ffb3b3',muted:'#c46a6a',faint:'#874343',accent:'#ff2a2a',accentDim:'#a31616',accent2:'#ff6b6b',ok:'#d94a4a',warn:'#ff8a5c',bad:'#ffd0d0',info:'#ff5c5c',
+    k:{cpu:'#ff3b3b',gpu:'#ff6b5c',temp:'#ff8a5c',mem:'#e04870',net:'#ff5c7a',disk:'#ff4d4d',power:'#ff9466',llm:'#ff2a55',ok:'#d94a4a',alert:'#ffd0d0'}}),
   ember:{label:'Ember',blurb:'Charcoal and amber',
    dark:{bg:'#0b0d10',panel:'#12151a',bg2:'#171b21',bg3:'#1e232b',bg0:'#0c0e11',line:'#262c36',lineSoft:'#1d222a',text:'#dfe5ee',muted:'#96a0b0',faint:'#6a7484',accent:'#f7931a',accentDim:'#b06c10',accent2:'#ffb85c',ok:'#2ecc8f',warn:'#f0b429',bad:'#ef5a5a',info:'#58a6ff'},
    light:{bg:'#f3f1ec',panel:'#ffffff',bg2:'#f8f6f2',bg3:'#eeeae3',bg0:'#ebe7e0',line:'#d8d2c8',lineSoft:'#e6e1d8',text:'#1c1f26',muted:'#5b6470',faint:'#8a929e',accent:'#d97706',accentDim:'#b8690a',accent2:'#a8640d',ok:'#1f9d63',warn:'#c48a08',bad:'#d63f3f',info:'#2f6fd6'}},
@@ -2024,12 +2045,14 @@ const NXT=(()=>{
  const light=()=>{try{return matchMedia('(prefers-color-scheme: light)').matches}catch(e){return false}};
  function face(s){s=s||eff();if(s.theme=='custom')return{id:'custom',...derive(s.custom)};
   const p=PRESETS[s.theme]||PRESETS.noctyx,sc=s.mode=='system'?(light()?'light':'dark'):s.mode=='light'?'light':'dark';
-  return{id:PRESETS[s.theme]?s.theme:'noctyx',...derive(p[sc])}}
+  const k=p.style?(p[sc].k||Object.fromEntries(Object.entries(p.dark.k).map(([a,b])=>[a,mix(b,'#000000',.4)]))):null;
+  return{id:PRESETS[s.theme]?s.theme:'noctyx',style:p.style||'',k,...derive(p[sc])}}
  const VARS={bg:'--bg',panel:'--bg-1',bg2:'--bg-2',bg3:'--bg-3',bg0:'--bg-0',line:'--line',lineSoft:'--line-soft',text:'--fg',muted:'--fg-dim',faint:'--fg-faint',
   accent:'--accent',accentDim:'--accent-dim',accent2:'--accent-2',accentInk:'--accent-ink',ok:'--ok',warn:'--warn',bad:'--bad',info:'--info',scrim:'--scrim',glow:'--glow',dots:'--dots'};
  function apply(s){const f=face(s),r=document.documentElement;
   for(const[k,v]of Object.entries(VARS))if(f[k])r.style.setProperty(v,f[k]);
-  r.style.setProperty('color-scheme',f.scheme);r.dataset.theme=f.scheme;r.dataset.palette=f.id;return f}
+  for(const k of KK){if(f.k&&f.k[k])r.style.setProperty('--k-'+k,f.k[k]);else r.style.removeProperty('--k-'+k)}
+  r.style.setProperty('color-scheme',f.scheme);r.dataset.theme=f.scheme;r.dataset.palette=f.id;r.dataset.style=f.style||'';return f}
  function save(patch){const l={...local(),...patch};if(patch.custom)l.custom={...(local().custom||{}),...patch.custom};
   try{localStorage.setItem(LS,JSON.stringify(l))}catch(e){};apply();return l}
  function clearLocal(){try{localStorage.removeItem(LS)}catch(e){};apply()}
@@ -2486,129 +2509,133 @@ td.acts{white-space:nowrap} td.acts a,td.acts button.lnk{margin-right:6px}
    their unlit 8s; glow tuned per mode (--gl). Fonts ship with the console (assets/fonts, OFL). ── */
 @font-face{font-family:Michroma;src:url(/assets/fonts/michroma.woff2) format('woff2');font-display:swap}
 @font-face{font-family:DSEG7;src:url(/assets/fonts/dseg7.woff2) format('woff2');font-display:block}
-html[data-palette=phosphor]{
+html[data-style=phosphor]{
  --k-cpu:#3dff8f;--k-gpu:#3b8cff;--k-temp:#ffb020;--k-mem:#b45cff;--k-net:#22d3ee;--k-disk:#2ee6a6;--k-power:#ffd60a;--k-llm:#ff4fd8;--k-ok:#3dff8f;--k-alert:#ff4d5e;
  --k:var(--accent);--gl:1;--display:Michroma,var(--sans);--lcd:DSEG7,var(--mono);--radius:9px;--radius-sm:6px;
- --c0:#3b8cff;--c1:#ff7a3d;--c2:#3dff8f;--c3:#ffd60a;--c4:#ff4fd8;--c5:#2ee6a6;--c6:#b45cff;--c7:#ff4d5e}
-html[data-palette=phosphor][data-theme=light]{--gl:.35;
+ --c0:var(--k-gpu);--c1:var(--k-temp);--c2:var(--k-cpu);--c3:var(--k-power);--c4:var(--k-llm);--c5:var(--k-disk);--c6:var(--k-mem);--c7:var(--k-alert)}
+html[data-style=phosphor][data-theme=light]{--gl:.35;
  --k-cpu:#0b9b55;--k-gpu:#1f5fe0;--k-temp:#c77700;--k-mem:#8a3fe0;--k-net:#0891b2;--k-disk:#0d9b6c;--k-power:#a87d00;--k-llm:#c026a0;--k-ok:#0b9b55;--k-alert:#d1293d}
-html[data-palette=phosphor] [data-k=cpu]{--k:var(--k-cpu)} html[data-palette=phosphor] [data-k=gpu]{--k:var(--k-gpu)}
-html[data-palette=phosphor] [data-k=temp]{--k:var(--k-temp)} html[data-palette=phosphor] [data-k=mem]{--k:var(--k-mem)}
-html[data-palette=phosphor] [data-k=net]{--k:var(--k-net)} html[data-palette=phosphor] [data-k=disk]{--k:var(--k-disk)}
-html[data-palette=phosphor] [data-k=power]{--k:var(--k-power)} html[data-palette=phosphor] [data-k=llm]{--k:var(--k-llm)}
-html[data-palette=phosphor] [data-k=ok]{--k:var(--k-ok)} html[data-palette=phosphor] [data-k=alert]{--k:var(--k-alert)}
+html[data-style=phosphor] [data-k=cpu]{--k:var(--k-cpu)} html[data-style=phosphor] [data-k=gpu]{--k:var(--k-gpu)}
+html[data-style=phosphor] [data-k=temp]{--k:var(--k-temp)} html[data-style=phosphor] [data-k=mem]{--k:var(--k-mem)}
+html[data-style=phosphor] [data-k=net]{--k:var(--k-net)} html[data-style=phosphor] [data-k=disk]{--k:var(--k-disk)}
+html[data-style=phosphor] [data-k=power]{--k:var(--k-power)} html[data-style=phosphor] [data-k=llm]{--k:var(--k-llm)}
+html[data-style=phosphor] [data-k=ok]{--k:var(--k-ok)} html[data-style=phosphor] [data-k=alert]{--k:var(--k-alert)}
 
 /* the room: deep glass, two coloured light sources, a faint graticule */
-html[data-palette=phosphor] body{background:
+html[data-style=phosphor] body{background:
  radial-gradient(1100px 620px at 100% -8%,color-mix(in srgb,var(--k-net) calc(10% * var(--gl)),transparent),transparent 62%),
  radial-gradient(900px 560px at -6% 108%,color-mix(in srgb,var(--k-cpu) calc(8% * var(--gl)),transparent),transparent 60%),
  linear-gradient(color-mix(in srgb,var(--fg) 2.6%,transparent) 1px,transparent 1px) 0 0/44px 44px,
  linear-gradient(90deg,color-mix(in srgb,var(--fg) 2.6%,transparent) 1px,transparent 1px) 0 0/44px 44px,var(--bg)}
-html[data-palette=phosphor] header.top{background:linear-gradient(180deg,color-mix(in srgb,var(--bg-1) 94%,transparent),color-mix(in srgb,var(--bg) 88%,transparent));
+html[data-style=phosphor] header.top{background:linear-gradient(180deg,color-mix(in srgb,var(--bg-1) 94%,transparent),color-mix(in srgb,var(--bg) 88%,transparent));
  border-bottom:1px solid color-mix(in srgb,var(--accent) 22%,var(--line));backdrop-filter:blur(10px);
  box-shadow:0 1px 0 color-mix(in srgb,var(--accent) calc(14% * var(--gl)),transparent),0 10px 34px rgba(0,0,0,calc(.4 * var(--gl)))}
-html[data-palette=phosphor] .wordmark{font-family:var(--display);font-weight:400;letter-spacing:.2em;
+html[data-style=phosphor] .wordmark{font-family:var(--display);font-weight:400;letter-spacing:.2em;
  text-shadow:0 0 calc(14px * var(--gl)) color-mix(in srgb,var(--accent) 55%,transparent)}
-html[data-palette=phosphor] .menu-title{font-family:var(--display);font-weight:400;letter-spacing:.06em;font-size:9px}
-html[data-palette=phosphor] .hpill{box-shadow:inset 0 0 12px color-mix(in srgb,currentColor calc(12% * var(--gl)),transparent),0 0 calc(10px * var(--gl)) color-mix(in srgb,currentColor calc(14% * var(--gl)),transparent)}
+html[data-style=phosphor] .menu-title{font-family:var(--display);font-weight:400;letter-spacing:.06em;font-size:9px}
+html[data-style=phosphor] .hpill{box-shadow:inset 0 0 12px color-mix(in srgb,currentColor calc(12% * var(--gl)),transparent),0 0 calc(10px * var(--gl)) color-mix(in srgb,currentColor calc(14% * var(--gl)),transparent)}
 
 /* panels: machined glass with a lit top edge */
-html[data-palette=phosphor] .panel{background:linear-gradient(180deg,color-mix(in srgb,var(--bg-1) 96%,var(--fg)),var(--bg-1) 40px);
+html[data-style=phosphor] .panel{background:linear-gradient(180deg,color-mix(in srgb,var(--bg-1) 96%,var(--fg)),var(--bg-1) 40px);
  border-color:color-mix(in srgb,var(--accent) 9%,var(--line-soft));
  box-shadow:inset 0 1px 0 color-mix(in srgb,var(--accent) calc(20% * var(--gl)),transparent),0 12px 36px rgba(0,0,0,calc(.45 * var(--gl)))}
-html[data-palette=phosphor] .grip{border-bottom:1px solid color-mix(in srgb,var(--accent) 8%,var(--line-soft))}
-html[data-palette=phosphor] .grip h2{font-family:var(--display);font-weight:400;font-size:10px;letter-spacing:.2em;color:var(--fg)}
-html[data-palette=phosphor] th,html[data-palette=phosphor] .card .l,html[data-palette=phosphor] .ring .rl{font-family:var(--display);font-weight:400;letter-spacing:.14em}
-html[data-palette=phosphor] th{font-size:8.5px}
+html[data-style=phosphor] .grip{border-bottom:1px solid color-mix(in srgb,var(--accent) 8%,var(--line-soft))}
+html[data-style=phosphor] .grip h2{font-family:var(--display);font-weight:400;font-size:10px;letter-spacing:.2em;color:var(--fg)}
+html[data-style=phosphor] th,html[data-style=phosphor] .card .l,html[data-style=phosphor] .ring .rl{font-family:var(--display);font-weight:400;letter-spacing:.14em}
+html[data-style=phosphor] th{font-size:8.5px}
 
 /* LED meters: lit segments glow, unlit ones stay visible; disk and temperature run green → amber → red */
-html[data-palette=phosphor] .bar{height:11px;border-radius:2px;padding:1px;
+html[data-style=phosphor] .bar{height:11px;border-radius:2px;padding:1px;
  border:1px solid color-mix(in srgb,var(--k) 24%,var(--line-soft));
  background:repeating-linear-gradient(90deg,color-mix(in srgb,var(--k) 15%,var(--bg-0)) 0 5px,var(--bg-0) 5px 7px)}
-html[data-palette=phosphor] .bar i{border-radius:1px;
+html[data-style=phosphor] .bar i{border-radius:1px;
  background:repeating-linear-gradient(90deg,transparent 0 5px,var(--bg-0) 5px 7px),var(--k);
  filter:drop-shadow(0 0 calc(4px * var(--gl)) color-mix(in srgb,var(--k) 75%,transparent))}
-html[data-palette=phosphor] .bar:not(.n){border-color:color-mix(in srgb,var(--k-ok) 22%,var(--line-soft));
+html[data-style=phosphor] .bar:not(.n){border-color:color-mix(in srgb,var(--k-ok) 22%,var(--line-soft));
  background:repeating-linear-gradient(90deg,transparent 0 5px,var(--bg-0) 5px 7px),
   linear-gradient(90deg,color-mix(in srgb,var(--k-ok) 15%,var(--bg-0)) 55%,color-mix(in srgb,var(--k-temp) 18%,var(--bg-0)) 80%,color-mix(in srgb,var(--k-alert) 20%,var(--bg-0)))}
-html[data-palette=phosphor] .bar:not(.n) i{
+html[data-style=phosphor] .bar:not(.n) i{
  background:repeating-linear-gradient(90deg,transparent 0 5px,var(--bg-0) 5px 7px),
   linear-gradient(90deg,var(--k-ok) 55%,var(--k-temp) 80%,var(--k-alert)) 0 0/calc(10000% / var(--p,100)) 100% no-repeat;
  filter:drop-shadow(0 0 calc(4px * var(--gl)) color-mix(in srgb,var(--k-ok) 55%,transparent))}
-html[data-palette=phosphor] .bar.w i{filter:drop-shadow(0 0 calc(5px * var(--gl)) color-mix(in srgb,var(--k-temp) 70%,transparent))}
-html[data-palette=phosphor] .bar.b i{filter:drop-shadow(0 0 calc(6px * var(--gl)) color-mix(in srgb,var(--k-alert) 80%,transparent))}
+html[data-style=phosphor] .bar.w i{filter:drop-shadow(0 0 calc(5px * var(--gl)) color-mix(in srgb,var(--k-temp) 70%,transparent))}
+html[data-style=phosphor] .bar.b i{filter:drop-shadow(0 0 calc(6px * var(--gl)) color-mix(in srgb,var(--k-alert) 80%,transparent))}
 
 /* oscilloscope traces */
-html[data-palette=phosphor] .spk{border-radius:3px;border:1px solid color-mix(in srgb,var(--k) 16%,var(--line-soft));
+html[data-style=phosphor] .spk{border-radius:3px;border:1px solid color-mix(in srgb,var(--k) 16%,var(--line-soft));
  background:linear-gradient(color-mix(in srgb,var(--k) 9%,transparent) 1px,transparent 1px) 0 0/100% 6px,
   linear-gradient(90deg,color-mix(in srgb,var(--k) 9%,transparent) 1px,transparent 1px) 0 0/10px 100%,var(--bg-0)}
-html[data-palette=phosphor] .spk polyline,html[data-palette=phosphor] .spk polyline.a,html[data-palette=phosphor] .spk polyline.dim{stroke:var(--k)}
-html[data-palette=phosphor] .spk polyline{stroke-width:1.6;filter:drop-shadow(0 0 calc(2.5px * var(--gl)) var(--k))}
-html[data-palette=phosphor] .spk polyline.g{stroke:var(--k-cpu)} html[data-palette=phosphor] .spk polyline.c0{stroke:var(--k-net)}
-html[data-palette=phosphor] .chart svg{border:1px solid color-mix(in srgb,var(--accent) 12%,var(--line-soft));border-radius:5px;
+html[data-style=phosphor] .spk polyline,html[data-style=phosphor] .spk polyline.a,html[data-style=phosphor] .spk polyline.dim{stroke:var(--k)}
+html[data-style=phosphor] .spk polyline{stroke-width:1.6;filter:drop-shadow(0 0 calc(2.5px * var(--gl)) var(--k))}
+html[data-style=phosphor] .spk polyline.g{stroke:var(--k-cpu)} html[data-style=phosphor] .spk polyline.c0{stroke:var(--k-net)}
+html[data-style=phosphor] .chart svg{border:1px solid color-mix(in srgb,var(--accent) 12%,var(--line-soft));border-radius:5px;
  background:linear-gradient(color-mix(in srgb,var(--accent) 6%,transparent) 1px,transparent 1px) 0 0/100% 12px,
   linear-gradient(90deg,color-mix(in srgb,var(--accent) 6%,transparent) 1px,transparent 1px) 0 0/24px 100%,
   radial-gradient(120% 140% at 50% 0%,color-mix(in srgb,var(--accent) calc(5% * var(--gl)),transparent),transparent 70%),var(--bg-0);
  box-shadow:inset 0 0 28px rgba(0,0,0,calc(.55 * var(--gl)))}
-html[data-palette=phosphor] .chart .ln{--g:var(--info);stroke-width:2.2;filter:drop-shadow(0 0 calc(3px * var(--gl)) var(--g))}
-html[data-palette=phosphor] .chart .ln.a{--g:var(--accent)} html[data-palette=phosphor] .chart .ln.g{--g:var(--ok)} html[data-palette=phosphor] .chart .ln.w{--g:var(--warn)}
-html[data-palette=phosphor] .chart .ln.c0{--g:var(--c0)} html[data-palette=phosphor] .chart .ln.c1{--g:var(--c1)} html[data-palette=phosphor] .chart .ln.c2{--g:var(--c2)} html[data-palette=phosphor] .chart .ln.c3{--g:var(--c3)}
-html[data-palette=phosphor] .chart .ln.c4{--g:var(--c4)} html[data-palette=phosphor] .chart .ln.c5{--g:var(--c5)} html[data-palette=phosphor] .chart .ln.c6{--g:var(--c6)} html[data-palette=phosphor] .chart .ln.c7{--g:var(--c7)}
-html[data-palette=phosphor] .chart .wash{opacity:.16}
-html[data-palette=phosphor] .chart .gl{stroke:color-mix(in srgb,var(--accent) 12%,var(--line-soft));stroke-dasharray:2 3}
+html[data-style=phosphor] .chart .ln{--g:var(--info);stroke-width:2.2;filter:drop-shadow(0 0 calc(3px * var(--gl)) var(--g))}
+html[data-style=phosphor] .chart .ln.a{--g:var(--accent)} html[data-style=phosphor] .chart .ln.g{--g:var(--ok)} html[data-style=phosphor] .chart .ln.w{--g:var(--warn)}
+html[data-style=phosphor] .chart .ln.c0{--g:var(--c0)} html[data-style=phosphor] .chart .ln.c1{--g:var(--c1)} html[data-style=phosphor] .chart .ln.c2{--g:var(--c2)} html[data-style=phosphor] .chart .ln.c3{--g:var(--c3)}
+html[data-style=phosphor] .chart .ln.c4{--g:var(--c4)} html[data-style=phosphor] .chart .ln.c5{--g:var(--c5)} html[data-style=phosphor] .chart .ln.c6{--g:var(--c6)} html[data-style=phosphor] .chart .ln.c7{--g:var(--c7)}
+html[data-style=phosphor] .chart .wash{opacity:.16}
+html[data-style=phosphor] .chart .gl{stroke:color-mix(in srgb,var(--accent) 12%,var(--line-soft));stroke-dasharray:2 3}
 
 /* LED rings */
-html[data-palette=phosphor] .ring .track{stroke:color-mix(in srgb,var(--k) 16%,var(--bg-3));stroke-dasharray:2.4 1.3}
-html[data-palette=phosphor] .ring .fill:not(.ok):not(.warn):not(.bad){stroke:var(--k)}
-html[data-palette=phosphor] .ring .fill{stroke-linecap:butt;filter:drop-shadow(0 0 calc(3px * var(--gl)) var(--k))}
+html[data-style=phosphor] .ring .track{stroke:color-mix(in srgb,var(--k) 16%,var(--bg-3));stroke-dasharray:2.4 1.3}
+html[data-style=phosphor] .ring .fill:not(.ok):not(.warn):not(.bad){stroke:var(--k)}
+html[data-style=phosphor] .ring .fill{stroke-linecap:butt;filter:drop-shadow(0 0 calc(3px * var(--gl)) var(--k))}
 
 /* stat cards wear their subsystem's colour */
-html[data-palette=phosphor] .stat{border-color:color-mix(in srgb,var(--k) 30%,var(--line-soft));
+html[data-style=phosphor] .stat{border-color:color-mix(in srgb,var(--k) 30%,var(--line-soft));
  background:linear-gradient(180deg,color-mix(in srgb,var(--k) 9%,var(--bg-2)),color-mix(in srgb,var(--k) 2%,var(--bg-2)));
  box-shadow:inset 0 1px 0 color-mix(in srgb,var(--k) 28%,transparent)}
-html[data-palette=phosphor] .card[data-k]{border-color:color-mix(in srgb,var(--k) 26%,var(--line-soft));
+html[data-style=phosphor] .card[data-k]{border-color:color-mix(in srgb,var(--k) 26%,var(--line-soft));
  background:linear-gradient(180deg,color-mix(in srgb,var(--k) 7%,var(--bg-2)),var(--bg-2));box-shadow:inset 0 1px 0 color-mix(in srgb,var(--k) 24%,transparent)}
-html[data-palette=phosphor] .card[data-k] .l{color:var(--k)}
-html[data-palette=phosphor] .card[data-k] .v{text-shadow:0 0 calc(10px * var(--gl)) color-mix(in srgb,var(--k) 35%,transparent)}
-html[data-palette=phosphor] .stat .l{font-family:var(--display);font-weight:400;font-size:8.5px;letter-spacing:.16em;color:var(--k)}
-html[data-palette=phosphor] .stat .v{color:var(--k);text-shadow:0 0 calc(12px * var(--gl)) color-mix(in srgb,var(--k) 45%,transparent)}
+html[data-style=phosphor] .card[data-k] .l{color:var(--k)}
+html[data-style=phosphor] .card[data-k] .v{text-shadow:0 0 calc(10px * var(--gl)) color-mix(in srgb,var(--k) 35%,transparent)}
+html[data-style=phosphor] .stat .l{font-family:var(--display);font-weight:400;font-size:8.5px;letter-spacing:.16em;color:var(--k)}
+html[data-style=phosphor] .stat .v{color:var(--k);text-shadow:0 0 calc(12px * var(--gl)) color-mix(in srgb,var(--k) 45%,transparent)}
 
 /* fleet tiles: label in its colour, selection lit */
-html[data-palette=phosphor] .tile{background:linear-gradient(180deg,var(--bg-2),color-mix(in srgb,var(--bg-2) 60%,var(--bg-0)));border-color:color-mix(in srgb,var(--accent) 7%,var(--line-soft))}
-html[data-palette=phosphor] .tile .nm{font-family:var(--display);font-weight:400;letter-spacing:.06em}
-html[data-palette=phosphor] .tile.sel{border-color:var(--accent);box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 60%,transparent),0 0 calc(26px * var(--gl)) color-mix(in srgb,var(--accent) 28%,transparent)}
-html[data-palette=phosphor] .mcell>span:first-child,html[data-palette=phosphor] .gauge>span:first-child{color:var(--k);font-weight:700;text-transform:uppercase;letter-spacing:.06em}
-html[data-palette=phosphor] .dot.ok{box-shadow:0 0 calc(9px * var(--gl)) var(--ok),0 0 2px var(--ok)}
-html[data-palette=phosphor] .dot{box-shadow:0 0 calc(9px * var(--gl)) color-mix(in srgb,var(--bad) 80%,transparent)}
+html[data-style=phosphor] .tile{background:linear-gradient(180deg,var(--bg-2),color-mix(in srgb,var(--bg-2) 60%,var(--bg-0)));border-color:color-mix(in srgb,var(--accent) 7%,var(--line-soft))}
+html[data-style=phosphor] .tile .nm{font-family:var(--display);font-weight:400;letter-spacing:.06em}
+html[data-style=phosphor] .tile.sel{border-color:var(--accent);box-shadow:0 0 0 1px color-mix(in srgb,var(--accent) 60%,transparent),0 0 calc(26px * var(--gl)) color-mix(in srgb,var(--accent) 28%,transparent)}
+html[data-style=phosphor] .mcell>span:first-child,html[data-style=phosphor] .gauge>span:first-child{color:var(--k);font-weight:700;text-transform:uppercase;letter-spacing:.06em}
+html[data-style=phosphor] .dot.ok{box-shadow:0 0 calc(9px * var(--gl)) var(--ok),0 0 2px var(--ok)}
+html[data-style=phosphor] .dot{box-shadow:0 0 calc(9px * var(--gl)) color-mix(in srgb,var(--bad) 80%,transparent)}
 
 /* LCD numerals: digits lit over their unlit 8s */
-html[data-palette=phosphor] .hero .hv,html[data-palette=phosphor] .kbig b,html[data-palette=phosphor] .kclock b{
+html[data-style=phosphor] .hero .hv,html[data-style=phosphor] .kbig b,html[data-style=phosphor] .kclock b{
  font-family:var(--lcd);font-weight:700;letter-spacing:.04em;position:relative;z-index:0}
-html[data-palette=phosphor] .hero .hv{font-size:clamp(34px,3vw,50px);color:var(--accent);
+html[data-style=phosphor] .hero .hv{font-size:clamp(34px,3vw,50px);color:var(--accent);
  text-shadow:0 0 calc(20px * var(--gl)) color-mix(in srgb,var(--accent) 55%,transparent),0 0 2px color-mix(in srgb,var(--accent) 80%,transparent)}
-html[data-palette=phosphor] [data-ghost]::before{content:attr(data-ghost);position:absolute;left:0;top:0;z-index:-1;
+html[data-style=phosphor] [data-ghost]::before{content:attr(data-ghost);position:absolute;left:0;top:0;z-index:-1;
  color:color-mix(in srgb,currentColor 9%,transparent);text-shadow:none;pointer-events:none;white-space:pre}
-html[data-palette=phosphor] .kbig b:not(.ok):not(.warn):not(.bad){color:var(--k)}
-html[data-palette=phosphor] .kbig b,html[data-palette=phosphor] .kclock b{font-size:44px;
+html[data-style=phosphor] .kbig b:not(.ok):not(.warn):not(.bad){color:var(--k)}
+html[data-style=phosphor] .kbig b,html[data-style=phosphor] .kclock b{font-size:44px;
  text-shadow:0 0 calc(18px * var(--gl)) color-mix(in srgb,currentColor 55%,transparent),0 0 2px color-mix(in srgb,currentColor 80%,transparent)}
-html[data-palette=phosphor] .kclock b{color:var(--accent)}
-html[data-palette=phosphor] .kbig span,html[data-palette=phosphor] .kclock span{font-family:var(--display);font-size:9px;letter-spacing:.18em;margin-top:6px}
-html[data-palette=phosphor] .kmeters .bar{height:13px}
+html[data-style=phosphor] .kclock b{color:var(--accent)}
+html[data-style=phosphor] .kbig span,html[data-style=phosphor] .kclock span{font-family:var(--display);font-size:9px;letter-spacing:.18em;margin-top:6px}
+html[data-style=phosphor] .kmeters .bar{height:13px}
 
 /* kiosk cards and the CRT */
-html[data-palette=phosphor] .kslot,html[data-palette=phosphor] .knode{background:linear-gradient(180deg,color-mix(in srgb,var(--bg-1) 94%,var(--fg)),var(--bg-1) 44px);
+html[data-style=phosphor] .kslot,html[data-style=phosphor] .knode{background:linear-gradient(180deg,color-mix(in srgb,var(--bg-1) 94%,var(--fg)),var(--bg-1) 44px);
  border-color:color-mix(in srgb,var(--accent) 10%,var(--line-soft));box-shadow:inset 0 1px 0 color-mix(in srgb,var(--accent) calc(22% * var(--gl)),transparent),0 12px 30px rgba(0,0,0,calc(.45 * var(--gl)))}
-html[data-palette=phosphor] .kslot.down,html[data-palette=phosphor] .knode.down{border-color:color-mix(in srgb,var(--bad) 60%,var(--line));
+html[data-style=phosphor] .kslot.down,html[data-style=phosphor] .knode.down{border-color:color-mix(in srgb,var(--bad) 60%,var(--line));
  box-shadow:inset 0 1px 0 color-mix(in srgb,var(--bad) 40%,transparent),0 0 calc(26px * var(--gl)) color-mix(in srgb,var(--bad) 18%,transparent)}
-html[data-palette=phosphor] .kh b{font-family:var(--display);font-weight:400;letter-spacing:.06em}
-html[data-palette=phosphor] .km,html[data-palette=phosphor] .kllm b{color:var(--k-llm);text-shadow:0 0 calc(10px * var(--gl)) color-mix(in srgb,var(--k-llm) 45%,transparent)}
-html[data-palette=phosphor] .kmeters>span{font-family:var(--display);font-weight:400;font-size:8.5px;letter-spacing:.14em}
-html[data-palette=phosphor] .kmeters>span:nth-child(1){color:var(--k-gpu)} html[data-palette=phosphor] .kmeters>span:nth-child(3){color:var(--k-cpu)}
-html[data-palette=phosphor] .kmeters>span:nth-child(5){color:var(--k-mem)} html[data-palette=phosphor] .kmeters>span:nth-child(7){color:var(--k-temp)}
-html[data-palette=phosphor][data-theme=dark] body.kiosk::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:60;
+html[data-style=phosphor] .kh b{font-family:var(--display);font-weight:400;letter-spacing:.06em}
+html[data-style=phosphor] .km,html[data-style=phosphor] .kllm b{color:var(--k-llm);text-shadow:0 0 calc(10px * var(--gl)) color-mix(in srgb,var(--k-llm) 45%,transparent)}
+html[data-style=phosphor] .kmeters>span{font-family:var(--display);font-weight:400;font-size:8.5px;letter-spacing:.14em}
+html[data-style=phosphor] .kmeters>span:nth-child(1){color:var(--k-gpu)} html[data-style=phosphor] .kmeters>span:nth-child(3){color:var(--k-cpu)}
+html[data-style=phosphor] .kmeters>span:nth-child(5){color:var(--k-mem)} html[data-style=phosphor] .kmeters>span:nth-child(7){color:var(--k-temp)}
+html[data-style=phosphor][data-theme=dark] body.kiosk::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:60;
  background:repeating-linear-gradient(0deg,rgba(0,0,0,.16) 0 1px,transparent 1px 3px),
   radial-gradient(130% 120% at 50% 50%,transparent 62%,rgba(0,0,0,.45))}
-html[data-palette=phosphor] button.act:hover{box-shadow:0 0 calc(14px * var(--gl)) color-mix(in srgb,var(--accent) 35%,transparent)}
+/* the eye takes the variant's colour (Red Ops above all: one cyan light spoils night vision) */
+html[data-palette=p1green] .mark{filter:hue-rotate(-50deg) saturate(1.3)} html[data-palette=p3amber] .mark{filter:hue-rotate(-150deg) saturate(1.6)}
+html[data-palette=nixie] .mark{filter:hue-rotate(-170deg) saturate(1.8)} html[data-palette=synthwave] .mark{filter:hue-rotate(115deg) saturate(1.4)}
+html[data-palette=redops] .mark{filter:grayscale(1) sepia(1) hue-rotate(-50deg) saturate(6) brightness(.85)}
+html[data-style=phosphor] button.act:hover{box-shadow:0 0 calc(14px * var(--gl)) color-mix(in srgb,var(--accent) 35%,transparent)}
 </style></head><body>
 <div class=app>
 <header class=top>
@@ -2909,7 +2936,7 @@ function setRender(){
  const sch=s.mode=='light'?'light':s.mode=='system'?(f.scheme):'dark';
  const cards=Object.entries(NXT.PRESETS).map(([id,p])=>{const x=NXT.derive(p[sch=='light'?'light':'dark']);
    return `<button type=button class="tcard${s.theme==id?' on':''}" onclick="setTheme('${id}')"><b>${esc(p.label)}</b><small>${esc(p.blurb)}</small>
-    <span class=swatch>${['bg','panel','accent','accent2','ok','warn','bad'].map(k=>`<i style="background:${x[k]}"></i>`).join('')}</span></button>`}).join('')
+    <span class=swatch>${p.style?[x.bg,...['cpu','gpu','mem','net','power','llm','temp'].map(k=>p.dark.k[k])].map(c=>`<i style="background:${c}"></i>`).join(''):['bg','panel','accent','accent2','ok','warn','bad'].map(k=>`<i style="background:${x[k]}"></i>`).join('')}</span></button>`}).join('')
   +`<button type=button class="tcard${s.theme=='custom'?' on':''}" onclick="setTheme('custom')"><b>Custom</b><small>Your nine colours; the rest is mixed from them</small>
     <span class=swatch>${['bg','panel','accent','ok','warn','bad'].map(k=>`<i style="background:${s.custom[k]}"></i>`).join('')}</span></button>`;
  const names={bg:'Background',panel:'Panels',text:'Text',muted:'Muted text',accent:'Accent',line:'Lines',ok:'Good',warn:'Warning',bad:'Bad'};

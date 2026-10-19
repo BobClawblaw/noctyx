@@ -178,7 +178,9 @@ def test_write_block_without_a_schedule_block(tmp_path, monkeypatch):
 def test_phosphor_theme_is_a_valid_site_default_and_ships_its_fonts():
     import pathlib
     from noctyx import orchestrator as o, console
-    assert not o.validate_console({"theme": "phosphor", "mode": "dark"})[1]
+    for v in ("phosphor", "p1green", "p3amber", "nixie", "synthwave", "arctic", "redops"):
+        assert not o.validate_console({"theme": v, "mode": "dark"})[1]
+        assert f"{v}:" in console.PAGE
     for f in ("michroma.woff2", "dseg7.woff2", "LICENSES.txt"):
         assert f"fonts/{f}" in console.ASSETS and (o.NX_HOME / "assets" / "fonts" / f).stat().st_size > 1000
-    assert "phosphor:{label:'Phosphor'" in console.PAGE and "html[data-palette=phosphor]" in console.PAGE
+    assert "phosphor:{label:'Phosphor'" in console.PAGE and "html[data-style=phosphor]" in console.PAGE

@@ -15,7 +15,9 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 OUT = ROOT / "docs" / "screenshots"
 W, H = 1500, 900
 
-# name: (path, [js steps run after load; "sleep:N" waits], full-page height or None)
+FAMILY = ["phosphor", "p1green", "p3amber", "nixie", "synthwave", "arctic", "redops"]
+# name: (path, [js steps run after load; "sleep:N" waits], full-page height or None); "_" names are
+# intermediate (the Phosphor family's kiosks, tiled into phosphor-family.png and then removed)
 SHOTS = {
     "dashboard": ("/", ["sleep:3"], None),
     "cluster": ("/cluster", ["sleep:3"], None),
@@ -30,6 +32,8 @@ SHOTS = {
     "phosphor-node": ("/", ["NXT.save({theme:'phosphor',mode:'dark'})", "location.reload()", "sleep:3",
                             "selectHost('spark-1')", "sleep:4"], None),
     "phosphor-kiosk": ("/kiosk", ["NXT.save({theme:'phosphor',mode:'dark'})", "location.reload()", "sleep:5"], None),
+    **{f"_family-{v}": ("/kiosk", [f"NXT.save({{theme:'{v}',mode:'dark'}})", "location.reload()", "sleep:5"], None)
+       for v in FAMILY},
     "about": ("/about", ["sleep:3"], None),
     "login": ("/login", ["sleep:1"], None),
 }
@@ -100,6 +104,25 @@ def main():
     ch = subprocess.Popen([browser(), "--headless=new", "--no-sandbox", "--hide-scrollbars", f"--remote-debugging-port={dbg}",
                            f"--user-data-dir={prof}", f"--window-size={W},{H}", "about:blank"],
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    def family_sheet():
+        try:
+            from PIL import Image, ImageDraw
+        except ImportError:
+            return
+        parts = [OUT / f"_family-{v}.png" for v in FAMILY]
+        if not all(f.exists() for f in parts):
+            return
+        w, h, gap = 1000, 480, 8
+        sheet = Image.new("RGB", (2 * w + gap, 4 * h + 3 * gap), (0, 0, 0))
+        for i, (v, f) in enumerate(zip(FAMILY, parts)):
+            im = Image.open(f).convert("RGB")
+            im = im.crop((0, 0, im.width, int(im.width * h / w))).resize((w, h), Image.LANCZOS)   # the kiosk's top: no empty floor
+            ImageDraw.Draw(im).rectangle((w - 150, h - 30, w, h), fill=(0, 0, 0))
+            ImageDraw.Draw(im).text((w - 140, h - 22), v, fill=(235, 235, 235))
+            sheet.paste(im, ((i % 2) * (w + gap), (i // 2) * (h + gap)))
+            f.unlink()
+        sheet.save(OUT / "phosphor-family.jpg", quality=90, optimize=True)   # seven palettes: 256 colours wash them out
+        print("wrote", (OUT / "phosphor-family.jpg").relative_to(ROOT))
     try:
         for _ in range(40):
             try:
@@ -107,6 +130,7 @@ def main():
             except OSError:
                 time.sleep(0.25)
         asyncio.run(shoot(f"http://127.0.0.1:{port}", dbg, only))
+        family_sheet()
     finally:
         ch.terminate(); demo.terminate(); ch.wait(); demo.wait(); shutil.rmtree(prof, ignore_errors=True)
 
