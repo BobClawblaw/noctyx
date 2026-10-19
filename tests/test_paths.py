@@ -69,3 +69,12 @@ def test_restore_templates_render_completely():
             assert not re.search(r"@[A-Z_]+@", out), f.name
     seed = (o.NX_HOME / "restore" / "cidata" / "user-data").read_text()
     assert "bootcmd:" in seed and "noctyx-menu.sh" in seed
+
+
+def test_console_defaults_validation():
+    from noctyx import orchestrator as o
+    ok, errs = o.validate_console({"mode": "system", "theme": "catppuccin", "tunit": "C",
+                                   "custom": {"bg": "#101010", "accent": "#ABCDEF"}})
+    assert not errs and ok["custom"]["accent"] == "#abcdef"
+    for bad in ({"mode": "dim"}, {"theme": "nope"}, {"tunit": "K"}, {"custom": {"bg": "red"}}, {"custom": {"x": "#000000"}}):
+        assert o.validate_console(bad)[1], bad

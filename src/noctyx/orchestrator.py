@@ -2957,6 +2957,47 @@ def cmd_recipe_discover(a):
     audit("recipe-discover", found=len(d["items"]), deployable=sum(1 for x in d["items"] if x["slots"]))
 
 
+# ── the console's display defaults (site config "console") ─────────────────────
+CONSOLE_THEMES = ("noctyx", "ember", "mono", "github", "catppuccin", "custom")
+_HEXCOL = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def validate_console(s):
+    """-> (clean, errors): the display settings every browser without its own starts from."""
+    if not isinstance(s, dict):
+        return None, ["settings: an object"]
+    out, errs = {}, []
+    if "mode" in s:
+        if s["mode"] not in ("dark", "light", "system"):
+            errs.append("mode: dark, light or system")
+        out["mode"] = s["mode"]
+    if "theme" in s:
+        if s["theme"] not in CONSOLE_THEMES:
+            errs.append(f"theme: one of {', '.join(CONSOLE_THEMES)}")
+        out["theme"] = s["theme"]
+    if "tunit" in s:
+        if s["tunit"] not in ("F", "C"):
+            errs.append("tunit: F or C")
+        out["tunit"] = s["tunit"]
+    if "custom" in s:
+        cu = s["custom"]
+        keys = ("bg", "panel", "text", "muted", "accent", "line", "ok", "warn", "bad")
+        if not isinstance(cu, dict) or any(k not in keys or not _HEXCOL.match(str(v)) for k, v in cu.items()):
+            errs.append("custom: #rrggbb colours for " + ", ".join(keys))
+        else:
+            out["custom"] = {k: cu[k].lower() for k in keys if k in cu}
+    return out, errs
+
+
+def cmd_console_set(a):
+    new, errs = validate_console(json.loads(a.json))
+    if errs:
+        sys.exit("invalid: " + "; ".join(errs))
+    _write_block("console", {"settings": new})
+    audit("console-set", **{k: v for k, v in new.items() if k != "custom"})
+    print(f"console defaults: {new.get('theme', '?')} · {new.get('mode', '?')} · °{new.get('tunit', 'F')}")
+
+
 # ── the UI's assistant LLM (the site config `assistant`) ───────────────────────
 ASSISTANT_KEYS = ("enabled", "url", "model", "timeout_seconds", "fallback", "key_host")
 _URL = re.compile(r"^https?://[A-Za-z0-9.:\[\]_-]+(/[A-Za-z0-9._~/-]*)?$")
@@ -3235,6 +3276,8 @@ def main():
     g2.add_argument("--json"); g2.add_argument("--remove", action="store_true")
     rdi = sub.add_parser("recipe-discover", help="search GitHub for recipes that fit this cluster; rank by measured speed or recency")
     rdi.add_argument("--sort", choices=["fastest", "newest"], default="fastest")
+    css = sub.add_parser("console-set", help="the console's display defaults (JSON: mode, theme, tunit, custom)")
+    css.add_argument("--json", required=True)
     sub.add_parser("nightly", help="maintenance after the backup window (mirror harvest, recipe discovery, weekly prune dry-run + verify)")
     ih = sub.add_parser("install-head", help="render the head node's systemd units for this site (--apply installs them)")
     ih.add_argument("--apply", action="store_true")
@@ -3262,7 +3305,7 @@ def main():
                "policy-show": cmd_policy_show, "dumps": cmd_dumps, "hf-harvest": cmd_hf_harvest,
                "recipe-deploy": cmd_recipe_deploy, "recipe-stop": cmd_recipe_stop, "recipe-start": cmd_recipe_start,
                "recipe-rollback": cmd_recipe_rollback, "recipe-status": cmd_recipe_status,
-               "recipe-catalog": cmd_recipe_catalog, "recipe-discover": cmd_recipe_discover, "nightly": cmd_nightly, "install-head": cmd_install_head, "assistant-set": cmd_assistant_set}[a.cmd]
+               "recipe-catalog": cmd_recipe_catalog, "recipe-discover": cmd_recipe_discover, "nightly": cmd_nightly, "install-head": cmd_install_head, "console-set": cmd_console_set, "assistant-set": cmd_assistant_set}[a.cmd]
     rc = 0
     try:
         handler(a)

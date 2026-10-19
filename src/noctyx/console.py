@@ -107,6 +107,7 @@ ACTIONS = {
                                                                        "hf_mirror": p.get("hf_mirror")})],
     "hfHarvest":  lambda: [ORCH, "hf-harvest"],
     "setAssistant": lambda p: [ORCH, "assistant-set", "--json", json.dumps(p["assistant"])],
+    "setConsoleDefaults": lambda p: [ORCH, "console-set", "--json", json.dumps(p["settings"])],
     # recipe deployment (UI › /recipes): slot/recipe/ref validated against the site config here; the
     # orchestrator plans again, takes the slot + GPU locks, and switches back if the new one fails
     "recipeDeploy": lambda p: [ORCH, "recipe-deploy", "--slot", p["slot"], "--recipe", p["recipe"]]
@@ -131,7 +132,7 @@ VALID_PROFILES = set(CFG.get("profiles", {}).keys())
 # host-REQUIRED actions: their builders index p["host"] directly; missing would KeyError
 HOST_REQUIRED = {"backupHost", "verifyHost", "reboot", "rebootFinish"}
 RECIPE_ACTIONS = {"recipeDeploy", "recipeStop", "recipeStart", "recipeRollback", "recipeCatalog"}
-PARAM_ACTIONS = HOST_REQUIRED | RECIPE_ACTIONS | {"setAssistant", "setSchedule", "restore", "hygieneFix", "setPolicy", "dumpsNow"}
+PARAM_ACTIONS = HOST_REQUIRED | RECIPE_ACTIONS | {"setAssistant", "setConsoleDefaults", "setSchedule", "restore", "hygieneFix", "setPolicy", "dumpsNow"}
 # Only these wait for the one-long-job slot; everything else (status, schedule
 # edits, probes) runs at once instead of queueing silently behind a 3-hour seed.
 LONG_ACTIONS = {"backup", "verify", "copy", "prune", "backupHost", "verifyHost", "restore", "hygieneFix"}
@@ -243,6 +244,8 @@ def valid_params(name: str, p: dict) -> bool:
             return False
         if p.get("to", "staging") not in ("staging", "host"):
             return False
+    if name == "setConsoleDefaults":
+        return not CM.validate_console(p.get("settings"))[1]
     if name == "setAssistant":
         a = p.get("assistant")
         if not isinstance(a, dict) or "key_host" in a or CM.validate_assistant(a)[1]:
@@ -1786,6 +1789,66 @@ def page(view=None):
 
 UI_BUILD = str(int(os.path.getmtime(__file__)))   # changes whenever this file is edited and the UI restarted
 PAGE = r"""<!doctype html><html><head><meta charset=utf-8>
+<script>
+/* ── appearance: themes, modes, custom colours ────────────────────────────────
+   The page draws only from the CSS custom properties below (:root), so a theme is a set of values
+   for them, written onto <html>. Each preset has a dark and a light face; the mode (dark, light,
+   system) picks one. Custom is nine colours; every other shade is mixed from them. Settings are
+   this browser's (localStorage), over the site's defaults (site config "console", cached here so
+   the first paint is already right). Runs in <head>: no flash of the wrong colours. */
+const NXT=(()=>{
+ const rgb=h=>{const m=/^#([0-9a-f]{6})$/i.exec(String(h||'').trim());if(!m)return null;const n=parseInt(m[1],16);return[n>>16&255,n>>8&255,n&255]};
+ const hex=c=>'#'+c.map(v=>Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0')).join('');
+ const mix=(a,b,t)=>{const x=rgb(a),y=rgb(b);return x&&y?hex(x.map((v,i)=>v+(y[i]-v)*t)):a};
+ const lum=h=>{const c=rgb(h);if(!c)return 0;const l=v=>{v/=255;return v<=.03928?v/12.92:((v+.055)/1.055)**2.4};return .2126*l(c[0])+.7152*l(c[1])+.0722*l(c[2])};
+ const BASE=['bg','panel','text','muted','accent','line','ok','warn','bad'];
+ const PRESETS={
+  noctyx:{label:'Noctyx',blurb:'Night console — navy and neon cyan',
+   dark:{bg:'#070913',panel:'#0d1020',bg2:'#121629',bg3:'#191e36',bg0:'#05060d',line:'#242a47',lineSoft:'#1a1f38',text:'#e2e8f6',muted:'#97a3c2',faint:'#67718f',accent:'#3fe6ff',accentDim:'#1f93b3',accent2:'#b45cff',ok:'#2ecc8f',warn:'#f0b429',bad:'#ef5a5a',info:'#58a6ff'},
+   light:{bg:'#eef1f8',panel:'#ffffff',bg2:'#f5f7fc',bg3:'#e7ebf5',bg0:'#e3e8f2',line:'#cfd6e6',lineSoft:'#e0e5f0',text:'#121729',muted:'#525d78',faint:'#8790a6',accent:'#0a9cc0',accentDim:'#077a96',accent2:'#8a3fe0',ok:'#1b9460',warn:'#a87a08',bad:'#d13c3c',info:'#2f6fd6'}},
+  ember:{label:'Ember',blurb:'Charcoal and amber',
+   dark:{bg:'#0b0d10',panel:'#12151a',bg2:'#171b21',bg3:'#1e232b',bg0:'#0c0e11',line:'#262c36',lineSoft:'#1d222a',text:'#dfe5ee',muted:'#96a0b0',faint:'#6a7484',accent:'#f7931a',accentDim:'#b06c10',accent2:'#ffb85c',ok:'#2ecc8f',warn:'#f0b429',bad:'#ef5a5a',info:'#58a6ff'},
+   light:{bg:'#f3f1ec',panel:'#ffffff',bg2:'#f8f6f2',bg3:'#eeeae3',bg0:'#ebe7e0',line:'#d8d2c8',lineSoft:'#e6e1d8',text:'#1c1f26',muted:'#5b6470',faint:'#8a929e',accent:'#d97706',accentDim:'#b8690a',accent2:'#a8640d',ok:'#1f9d63',warn:'#c48a08',bad:'#d63f3f',info:'#2f6fd6'}},
+  mono:{label:'Mono',blurb:'Grayscale — quiet and focused',
+   dark:{bg:'#0f0f0f',panel:'#161616',bg2:'#1b1b1b',bg3:'#232323',line:'#2c2c2c',text:'#e8e8e8',muted:'#9a9a9a',faint:'#6b6b6b',accent:'#f2f2f2',accentDim:'#9a9a9a',ok:'#9ccfae',warn:'#d9c48a',bad:'#d99090',info:'#a9b9c9'},
+   light:{bg:'#f4f4f4',panel:'#ffffff',bg2:'#f8f8f8',bg3:'#ececec',line:'#d5d5d5',text:'#151515',muted:'#5a5a5a',faint:'#8c8c8c',accent:'#111111',accentDim:'#555555',ok:'#2f8f5b',warn:'#a37a12',bad:'#c04747',info:'#3a5f8a'}},
+  github:{label:'GitHub',blurb:'GitHub Dark and Light Default',
+   dark:{bg:'#0d1117',panel:'#161b22',bg2:'#1c2128',bg3:'#21262d',bg0:'#010409',line:'#30363d',lineSoft:'#262c34',text:'#e6edf3',muted:'#8b949e',faint:'#6e7681',accent:'#58a6ff',accentDim:'#1f6feb',accent2:'#a371f7',ok:'#3fb950',warn:'#d29922',bad:'#f85149',info:'#79c0ff'},
+   light:{bg:'#f6f8fa',panel:'#ffffff',bg2:'#f6f8fa',bg3:'#eaeef2',bg0:'#eff2f5',line:'#d0d7de',lineSoft:'#e1e6eb',text:'#1f2328',muted:'#656d76',faint:'#8c959f',accent:'#0969da',accentDim:'#0a4fb5',accent2:'#8250df',ok:'#1a7f37',warn:'#9a6700',bad:'#cf222e',info:'#0969da'}},
+  catppuccin:{label:'Catppuccin',blurb:'Soft pastels — Mocha and Latte',
+   dark:{bg:'#181825',panel:'#1e1e2e',bg2:'#242438',bg3:'#313244',bg0:'#11111b',line:'#45475a',lineSoft:'#313244',text:'#cdd6f4',muted:'#a6adc8',faint:'#6c7086',accent:'#89dceb',accentDim:'#5fa8b6',accent2:'#cba6f7',ok:'#a6e3a1',warn:'#f9e2af',bad:'#f38ba8',info:'#89b4fa'},
+   light:{bg:'#e6e9ef',panel:'#eff1f5',bg2:'#e9ecf2',bg3:'#dce0e8',bg0:'#dce0e8',line:'#bcc0cc',lineSoft:'#ccd0da',text:'#4c4f69',muted:'#6c6f85',faint:'#9ca0b0',accent:'#209fb5',accentDim:'#1a7f91',accent2:'#8839ef',ok:'#40a02b',warn:'#df8e1d',bad:'#d20f39',info:'#1e66f5'}},
+ };
+ const DEF={mode:'dark',theme:'noctyx',tunit:'F',custom:{bg:'#0b0e1a',panel:'#121629',text:'#e2e8f6',muted:'#97a3c2',accent:'#3fe6ff',line:'#242a47',ok:'#2ecc8f',warn:'#f0b429',bad:'#ef5a5a'}};
+ function derive(b){const f={...b},dark=lum(f.bg)<.4;f.scheme=dark?'dark':'light';
+  f.bg0??=mix(f.bg,dark?'#000000':'#ffffff',.25);f.bg2??=mix(f.panel,f.text,dark?.04:.03);f.bg3??=mix(f.panel,f.text,dark?.09:.07);
+  f.lineSoft??=mix(f.line,f.bg,.4);f.faint??=mix(f.muted,f.bg,.3);f.accentDim??=mix(f.accent,f.bg,.35);f.accent2??=f.accent;
+  f.accentInk??=lum(f.accent)>.45?'#0a0d14':'#ffffff';f.info??=dark?'#58a6ff':'#2f6fd6';
+  f.scrim??=dark?'rgba(2,4,10,.62)':'rgba(20,24,34,.38)';f.glow??=mix(f.bg,f.accent,dark?.07:.05);f.dots??=mix(f.bg,f.text,dark?.07:.08);
+  return f}
+ const LS='nx_settings_v1',LSS='nx_site_settings_v1';
+ const read=k=>{try{return JSON.parse(localStorage.getItem(k)||'null')}catch(e){return null}};
+ const local=()=>read(LS)||{},site=()=>read(LSS)||{};
+ const eff=()=>{const s=site(),l=local();return{...DEF,...s,...l,custom:{...DEF.custom,...(s.custom||{}),...(l.custom||{})}}};
+ const light=()=>{try{return matchMedia('(prefers-color-scheme: light)').matches}catch(e){return false}};
+ function face(s){s=s||eff();if(s.theme=='custom')return{id:'custom',...derive(s.custom)};
+  const p=PRESETS[s.theme]||PRESETS.noctyx,sc=s.mode=='system'?(light()?'light':'dark'):s.mode=='light'?'light':'dark';
+  return{id:PRESETS[s.theme]?s.theme:'noctyx',...derive(p[sc])}}
+ const VARS={bg:'--bg',panel:'--bg-1',bg2:'--bg-2',bg3:'--bg-3',bg0:'--bg-0',line:'--line',lineSoft:'--line-soft',text:'--fg',muted:'--fg-dim',faint:'--fg-faint',
+  accent:'--accent',accentDim:'--accent-dim',accent2:'--accent-2',accentInk:'--accent-ink',ok:'--ok',warn:'--warn',bad:'--bad',info:'--info',scrim:'--scrim',glow:'--glow',dots:'--dots'};
+ function apply(s){const f=face(s),r=document.documentElement;
+  for(const[k,v]of Object.entries(VARS))if(f[k])r.style.setProperty(v,f[k]);
+  r.style.setProperty('color-scheme',f.scheme);r.dataset.theme=f.scheme;r.dataset.palette=f.id;return f}
+ function save(patch){const l={...local(),...patch};if(patch.custom)l.custom={...(local().custom||{}),...patch.custom};
+  try{localStorage.setItem(LS,JSON.stringify(l))}catch(e){};apply();return l}
+ function clearLocal(){try{localStorage.removeItem(LS)}catch(e){};apply()}
+ function setSite(s){try{localStorage.setItem(LSS,JSON.stringify(s||{}))}catch(e){};apply()}
+ apply();
+ try{matchMedia('(prefers-color-scheme: light)').addEventListener('change',()=>{if(eff().mode=='system')apply()})}catch(e){}
+ return{PRESETS,BASE,DEF,derive,face,eff,local,site,apply,save,clearLocal,setSite,mix}
+})();
+</script>
+
 <link rel="icon" type="image/svg+xml" href="__FAVICON__">
 <title>Noctyx</title><style>
 /* Noctyx console — instrument-panel language:
@@ -1798,6 +1861,7 @@ PAGE = r"""<!doctype html><html><head><meta charset=utf-8>
   --accent:#3fe6ff; --accent-dim:#1f93b3; --accent-2:#b45cff;
   --ok:#2ecc8f; --warn:#f0b429; --bad:#ef5a5a; --info:#58a6ff;
   --bg-0:#05060d; --radius:10px; --radius-sm:6px;
+  --accent-ink:#0a0d14; --scrim:rgba(2,4,10,.62); --glow:#0b1124; --dots:#151a2a;
   --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
   --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
   --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.28);
@@ -1806,7 +1870,7 @@ PAGE = r"""<!doctype html><html><head><meta charset=utf-8>
 *{box-sizing:border-box}
 html,body{height:100%}
 body{margin:0;color:var(--fg);font:13px/1.5 var(--sans);-webkit-font-smoothing:antialiased;
-  overflow:hidden;background:radial-gradient(1200px 600px at 80% -10%,#131a24 0%,transparent 60%),var(--bg)}
+  overflow:hidden;background:radial-gradient(1200px 600px at 80% -10%,var(--glow) 0%,transparent 60%),var(--bg)}
 .app{display:grid;grid-template-rows:auto 1fr;height:100vh;grid-template-columns:minmax(0,1fr)}
 header.top{display:flex;align-items:center;gap:14px;flex-wrap:nowrap;white-space:nowrap;
   min-width:0;overflow:hidden;padding:0 14px;height:46px;
@@ -1816,7 +1880,7 @@ header.top{display:flex;align-items:center;gap:14px;flex-wrap:nowrap;white-space
   background:url("__FAVICON__") center/contain no-repeat;
   box-shadow:0 0 14px color-mix(in srgb,var(--accent) 35%,transparent)}
 .wordmark{letter-spacing:.14em;font-weight:800;text-transform:uppercase;
-  background:linear-gradient(90deg,var(--accent),#7f8bff 55%,var(--accent-2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  background:linear-gradient(90deg,var(--accent),color-mix(in srgb,var(--accent),var(--accent-2)) 55%,var(--accent-2));-webkit-background-clip:text;background-clip:text;color:transparent}
 .wordmark b{font-weight:800}
 .hstat{font:12px var(--mono);color:var(--fg-dim);font-variant-numeric:tabular-nums}
 .hpill{font:600 10.5px var(--sans);letter-spacing:.06em;text-transform:uppercase;
@@ -1831,6 +1895,45 @@ header.top .brand{flex:0 0 auto}
 .hbtn{background:var(--bg-3);border:1px solid var(--line);color:var(--fg-dim);border-radius:var(--radius-sm);
   padding:5px 11px;font:600 11px var(--sans);letter-spacing:.05em;cursor:pointer;text-transform:uppercase;flex:0 0 auto}
 .hbtn:hover{border-color:var(--accent);color:var(--accent)}
+a.brand{text-decoration:none;color:inherit;flex:0 0 auto}
+.pages{display:flex;gap:2px;flex:0 0 auto}
+.menu{position:relative}
+.menu-title{background:none;border:1px solid transparent;color:var(--fg-dim);font:600 11px var(--sans);letter-spacing:.06em;text-transform:uppercase;padding:6px 10px;border-radius:var(--radius-sm);cursor:pointer}
+.menu-title:hover,.menu.open .menu-title{color:var(--fg);background:var(--bg-3)}
+.menu.cur .menu-title{color:var(--accent)}
+.menu-pop{position:absolute;top:calc(100% + 6px);left:0;min-width:190px;background:var(--bg-2);border:1px solid var(--line);border-radius:var(--radius);padding:5px;box-shadow:0 10px 30px rgba(0,0,0,.35);z-index:80}
+.menu-pop a{display:flex;align-items:center;gap:12px;padding:7px 10px;border-radius:var(--radius-sm);color:var(--fg);text-decoration:none;font:12.5px var(--sans)}
+.menu-pop a:hover,.menu-pop a.cur{background:var(--bg-3)} .menu-pop a.cur{color:var(--accent)}
+.menu-pop kbd{margin-left:auto;font:10.5px var(--mono);color:var(--fg-faint);border:1px solid var(--line);border-radius:4px;padding:0 5px}
+.pagename{font:600 12px var(--sans);color:var(--fg);padding-left:10px;border-left:1px solid var(--line);flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.hbtn.gear{display:inline-flex;align-items:center;padding:5px 8px}
+.setwrap{position:fixed;inset:0;z-index:200} .setwrap.hide{display:none}
+.setscrim{position:absolute;inset:0;background:var(--scrim)}
+.setpanel{position:absolute;top:0;right:0;bottom:0;width:min(520px,100vw);overflow:auto;background:var(--bg-1);border-left:1px solid var(--line);padding:18px 20px 40px;box-shadow:-12px 0 40px rgba(0,0,0,.35)}
+.setpanel h2{display:flex;align-items:center;gap:8px;margin:0 0 4px;font:700 15px var(--sans)} .setpanel h2 .sp{flex:1}
+.setnote{margin:0 0 14px;font:12px var(--sans);color:var(--fg-dim)}
+.setstore{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font:12px var(--sans);padding:9px 11px;background:var(--bg-0);border:1px solid var(--line-soft);border-radius:var(--radius-sm);margin-bottom:6px}
+.setgrp{border-top:1px solid var(--line-soft);padding:14px 0 6px}
+.setgrp h3{margin:0 0 4px;font:700 11px var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim)}
+.setgrp .gnote{margin:0 0 10px;font:11.5px var(--sans);color:var(--fg-faint)}
+.setrow{display:grid;grid-template-columns:150px 1fr;gap:6px 14px;align-items:start;padding:8px 0}
+.setrow>label{font:600 12px var(--sans);padding-top:6px} .setrow .hint{grid-column:2;font:11px var(--sans);color:var(--fg-faint)}
+.setrow.dim{opacity:.45}
+.setrow>.seg{justify-self:start}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden;background:var(--bg-0)}
+.seg button{background:none;border:0;border-right:1px solid var(--line);color:var(--fg-dim);font:600 11.5px var(--sans);padding:6px 12px;cursor:pointer}
+.seg button{white-space:nowrap}
+.hpill:empty{display:none}
+.seg button:last-child{border-right:0} .seg button:hover{color:var(--fg);background:var(--bg-3)}
+.seg button.on{background:var(--accent);color:var(--accent-ink)}
+.tcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.tcard{text-align:left;background:var(--bg-2);border:1px solid var(--line);border-radius:var(--radius-sm);padding:8px 9px;cursor:pointer;color:var(--fg)}
+.tcard:hover{border-color:var(--fg-faint)} .tcard.on{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.tcard b{font:700 12px var(--sans);display:block} .tcard small{display:block;font:10.5px var(--sans);color:var(--fg-faint);margin-top:2px;min-height:26px}
+.swatch{display:flex;height:16px;border-radius:4px;overflow:hidden;margin-top:6px;border:1px solid var(--line-soft)} .swatch i{flex:1}
+.cpick{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.cpick label{display:flex;align-items:center;gap:6px;font:11px var(--sans);color:var(--fg-dim)}
+.cpick input[type=color]{width:30px;height:24px;padding:0;border:1px solid var(--line);border-radius:4px;background:none;cursor:pointer}
 
 /* desktop: a snapping grid, not a floating canvas (operator, 2026-09-26:
    "windows floating over other windows — they should never do that; snap into
@@ -1840,7 +1943,7 @@ header.top .brand{flex:0 0 auto}
 #desk{position:relative;overflow:auto;min-width:0;padding:12px;display:grid;
   grid-template-columns:repeat(12,1fr);grid-auto-rows:auto;gap:10px;
   grid-auto-flow:dense;align-content:start;
-  background-image:radial-gradient(circle at 1px 1px,#181d24 1px,transparent 0);background-size:28px 28px}
+  background-image:radial-gradient(circle at 1px 1px,var(--dots) 1px,transparent 0);background-size:28px 28px}
 .panel{background:var(--bg-1);border:1px solid var(--line-soft);
   border-radius:var(--radius);box-shadow:var(--shadow);min-width:0;min-height:64px;
   display:flex;flex-direction:column;overflow:hidden;resize:vertical;position:relative}
@@ -2138,19 +2241,25 @@ td.acts{white-space:nowrap} td.acts a,td.acts button.lnk{margin-right:6px}
 </style></head><body>
 <div class=app>
 <header class=top>
-  <div class=brand><span class=mark></span><span class=wordmark>Noct<b>yx</b></span></div>
+  <a class=brand href="/" title="Dashboard"><span class=mark></span><span class=wordmark>Noct<b>yx</b></span></a>
+  <nav class=pages id=nav aria-label="Pages">
+   <div class=menu><button type=button class=menu-title aria-haspopup=true aria-expanded=false>Monitor</button>
+    <div class="menu-pop hide" role=menu><a role=menuitem href="/" data-v=main>Dashboard<kbd>1</kbd></a><a role=menuitem href="/cluster" data-v=cluster>Cluster<kbd>2</kbd></a></div></div>
+   <div class=menu><button type=button class=menu-title aria-haspopup=true aria-expanded=false>Deploy</button>
+    <div class="menu-pop hide" role=menu><a role=menuitem href="/recipes" data-v=recipes>Recipes<kbd>3</kbd></a></div></div>
+   <div class=menu><button type=button class=menu-title aria-haspopup=true aria-expanded=false>Configure</button>
+    <div class="menu-pop hide" role=menu><a role=menuitem href="/config#sec-backups" data-v=config>Backups<kbd>4</kbd></a><a role=menuitem href="/config#sec-mirror">Model mirror</a><a role=menuitem href="/config#sec-assistant">Assistant LLM</a></div></div>
+  </nav>
+  <span class=pagename id=hpage></span>
   <span class=hstat id=hsrv></span>
   <span class=hstat id=hclock></span>
   <span class=hpill id=hauth></span>
   <span class="hpill go" id=hrpo onclick="goTo({panel:'schedule'})" title="open Schedule"></span>
   <span class="hpill go" id=halert onclick="goTo({panel:'alerts'})" title="open Alerts"></span>
   <span class=hspacer></span>
-  <button class=hbtn id=htu onclick="setTU(TU=='F'?'C':'F')" title="temperature unit: click for °F / °C">°F</button>
-  <a class=hbtn id=hrec href="/recipes" style="text-decoration:none" title="what each GPU slot serves; deploy, stop, roll back recipes">recipes</a>
-  <a class=hbtn id=hcfg href="/config" style="text-decoration:none" title="what the backups cover: docker volumes, database dumps, excludes, retention">config</a>
-  <a class=hbtn id=hview href="/cluster" style="text-decoration:none">cluster view</a>
-  <button class=hbtn onclick="layoutReset()">reset layout</button>
+  <button type=button class="hbtn gear" id=hgear title="Display settings: theme, units, layout" aria-label="Display settings" onclick="setOpen()"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="currentColor"><path fill-rule="evenodd" d="M13.9 2c.5 0 .9.4 1 .9l.3 1.8c.5.2 1 .4 1.4.7l1.7-.7c.5-.2 1 0 1.3.4l1.4 2.5c.3.5.2 1-.2 1.3l-1.5 1.2v1.6l1.5 1.2c.4.3.5.8.2 1.3l-1.4 2.5c-.3.4-.8.6-1.3.4l-1.7-.7c-.4.3-.9.5-1.4.7l-.3 1.8c-.1.5-.5.9-1 .9h-2.9c-.5 0-.9-.4-1-.9l-.3-1.8c-.5-.2-1-.4-1.4-.7l-1.7.7c-.5.2-1 0-1.3-.4l-1.4-2.5c-.3-.5-.2-1 .2-1.3l1.5-1.2v-1.6L3.6 9c-.4-.3-.5-.8-.2-1.3l1.4-2.5c.3-.4.8-.6 1.3-.4l1.7.7c.4-.3.9-.5 1.4-.7l.3-1.8c.1-.5.5-.9 1-.9zM12 8.4a3.6 3.6 0 1 0 0 7.2 3.6 3.6 0 0 0 0-7.2z"/></svg></button>
 </header>
+<div class="setwrap hide" id=setwrap role=dialog aria-modal=true aria-labelledby=setTitle><div class=setscrim onclick="setClose()"></div><section class=setpanel id=setpanel></section></div>
 <div id=desk></div>
 </div>
 <script>
@@ -2227,14 +2336,12 @@ function setTab(t){DTAB=t;try{localStorage.setItem(LS_TAB,t)}catch(e){}
  const p=PANELS.find(x=>x.id=='detail');if(p._data)p._data._m={loading:true};repaint('detail',p._data);tick(p)}
 const $=id=>document.getElementById(id);
 const esc=t=>String(t??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-/* temperature unit: per viewer (header °F/°C button), °F unless changed. Data and alert
+/* temperature unit: a display setting (Display settings › Units), °F unless changed. Data and alert
    thresholds stay in °C; only what is DISPLAYED converts. */
-const LS_TU='cm_tunit_v1';let TU='F';try{TU=localStorage.getItem(LS_TU)||'F'}catch(e){}
-{const b=document.getElementById('htu');if(b)b.textContent='°'+TU}   /* the header is above this script */
+let TU=NXT.eff().tunit=='C'?'C':'F';
 const tval=c=>TU=='F'?c*9/5+32:c;
 const fmtT=(c,short)=>c==null||isNaN(c)?'—':Math.round(tval(+c))+'°'+(short?'':TU);
-function setTU(u){TU=u;try{localStorage.setItem(LS_TU,u)}catch(e){}
- const b=document.getElementById('htu');if(b)b.textContent='°'+TU;
+function setTU(u){TU=u;NXT.save({tunit:u});setRender();
  PANELS.forEach(p=>{if(p._data!==undefined&&p.id!='config')repaint(p.id,p._data)})}
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 function bar(pct,neutral){const p=clamp(parseInt(pct)||0,0,100);
@@ -2349,24 +2456,86 @@ const PANELS=[
 if(VIEW=='config'){
  PANELS.splice(0,PANELS.length,
   {id:'config',title:'Backup Config',sp:12,h:0,int:300,render:rConfig,api:()=>fetchJSON('/api/v1/policy')});
- const hv=document.getElementById('hview');if(hv){hv.textContent='◂ dashboard';hv.href='/'}
- const hc=document.getElementById('hcfg');if(hc)hc.style.display='none';
  document.getElementById('desk').classList.add('stack');
 }
 if(VIEW=='recipes'){
  PANELS.splice(0,PANELS.length,
   {id:'recipes',title:'Recipes',sp:12,h:0,int:20,render:rRecipes,api:()=>fetchJSON('/api/v1/recipes')});
- const hv=document.getElementById('hview');if(hv){hv.textContent='◂ dashboard';hv.href='/'}
- const hr=document.getElementById('hrec');if(hr)hr.style.display='none';
  document.getElementById('desk').classList.add('stack');
 }
 /* /cluster: only the systems. Both panels read the same fleet metrics call. */
 if(VIEW=='cluster'){
  PANELS.splice(0,PANELS.length,
   {id:'cluster',title:'Cluster',sp:12,h:0,int:15,render:rControl,api:()=>fetchJSON('/api/v1/metrics')});
- const hv=document.getElementById('hview');if(hv){hv.textContent='◂ dashboard';hv.href='/'}
  document.getElementById('desk').classList.add('stack');
 }
+/* ── navigation: menus in the header, the page name, 1–4 to jump ── */
+const PAGES={main:['/','Dashboard'],cluster:['/cluster','Cluster'],recipes:['/recipes','Recipes'],config:['/config','Configuration']};
+(function nav(){
+ const name=(PAGES[VIEW]||PAGES.main)[1];const pn=$('hpage');if(pn)pn.textContent=name;document.title=`Noctyx · ${name}`;
+ document.querySelectorAll('#nav .menu').forEach(m=>{
+  if(m.querySelector(`a[data-v="${VIEW}"]`))m.classList.add('cur');
+  m.querySelectorAll('a[data-v]').forEach(a=>{if(a.dataset.v==VIEW)a.classList.add('cur')});
+  const b=m.querySelector('.menu-title'),pop=m.querySelector('.menu-pop');
+  b.addEventListener('click',e=>{e.stopPropagation();const open=!m.classList.contains('open');closeMenus();if(open){m.classList.add('open');pop.classList.remove('hide');b.setAttribute('aria-expanded','true')}});
+  m.addEventListener('mouseenter',()=>{if(document.querySelector('#nav .menu.open')&&!m.classList.contains('open'))b.click()});
+ });
+ document.addEventListener('click',closeMenus);
+ document.addEventListener('keydown',e=>{
+  if(e.key=='Escape'){closeMenus();setClose();return}
+  if(e.ctrlKey||e.metaKey||e.altKey||/INPUT|TEXTAREA|SELECT/.test((document.activeElement||{}).tagName||''))return;
+  const go={'1':'/','2':'/cluster','3':'/recipes','4':'/config'}[e.key];if(go&&location.pathname!=go)location.href=go});
+ if(VIEW=='config'&&location.hash)setTimeout(()=>{const el=document.getElementById(location.hash.slice(1));if(el)el.scrollIntoView({behavior:'smooth',block:'start'})},900);
+})();
+function closeMenus(){document.querySelectorAll('#nav .menu.open').forEach(m=>{m.classList.remove('open');m.querySelector('.menu-pop').classList.add('hide');m.querySelector('.menu-title').setAttribute('aria-expanded','false')})}
+
+/* ── display settings (the gear): appearance, units, layout. This browser's, over the site's
+   defaults (site config "console", saved by an operator with "save as site default"). ── */
+let SITESET=null;
+async function loadSiteSettings(){try{SITESET=await fetchJSON('/api/v1/console-settings');NXT.setSite(SITESET.settings||{});
+ const t=NXT.eff().tunit=='C'?'C':'F';if(t!=TU){TU=t;PANELS.forEach(p=>{if(p._data!==undefined&&p.id!='config')repaint(p.id,p._data)})}}catch(e){}
+ setRender()}
+function setOpen(){$('setwrap').classList.remove('hide');setRender();loadSiteSettings()}
+function setClose(){$('setwrap').classList.add('hide')}
+const segH=(cur,opts,fn)=>`<div class=seg>${opts.map(([v,l])=>`<button type=button class="${v==cur?'on':''}" onclick="${fn}('${v}')">${l}</button>`).join('')}</div>`;
+function setRender(){
+ const P=$('setpanel');if(!P||$('setwrap').classList.contains('hide'))return;
+ const s=NXT.eff(),L=NXT.local(),own=Object.keys(L).length>0,f=NXT.face();
+ const sch=s.mode=='light'?'light':s.mode=='system'?(f.scheme):'dark';
+ const cards=Object.entries(NXT.PRESETS).map(([id,p])=>{const x=NXT.derive(p[sch=='light'?'light':'dark']);
+   return `<button type=button class="tcard${s.theme==id?' on':''}" onclick="setTheme('${id}')"><b>${esc(p.label)}</b><small>${esc(p.blurb)}</small>
+    <span class=swatch>${['bg','panel','accent','accent2','ok','warn','bad'].map(k=>`<i style="background:${x[k]}"></i>`).join('')}</span></button>`}).join('')
+  +`<button type=button class="tcard${s.theme=='custom'?' on':''}" onclick="setTheme('custom')"><b>Custom</b><small>Your nine colours; the rest is mixed from them</small>
+    <span class=swatch>${['bg','panel','accent','ok','warn','bad'].map(k=>`<i style="background:${s.custom[k]}"></i>`).join('')}</span></button>`;
+ const names={bg:'Background',panel:'Panels',text:'Text',muted:'Muted text',accent:'Accent',line:'Lines',ok:'Good',warn:'Warning',bad:'Bad'};
+ const picks=NXT.BASE.map(k=>`<label><input type=color value="${esc(s.custom[k])}" oninput="setCustom('${k}',this.value)">${names[k]}</label>`).join('');
+ const site=SITESET&&SITESET.settings&&Object.keys(SITESET.settings).length;
+ P.innerHTML=`<h2 id=setTitle>Display settings <span class=sp></span><button class=hbtn onclick="setReset()" title="Back to the site's defaults (or the shipped look)">reset</button><button class=hbtn onclick="setClose()">close</button></h2>
+ <p class=setnote>Applied as you change them. They change how the console looks, never what it measures or does.</p>
+ <div class=setstore>${own?'<b>This browser</b> has its own settings':'Using <b>'+(site?'the site\'s defaults':'the shipped look')+'</b>'}
+  <span class=hspacer></span><button class=hbtn onclick="setSaveSite()" title="Every browser without its own settings gets these">save as site default</button>${own?'<button class=hbtn onclick="setReset()">use site default</button>':''}</div>
+ <div id=setmsg class=setnote></div>
+ <div class=setgrp><h3>Appearance</h3><p class=gnote>The colours of the console: page, panels, text, lines, accent and the good / warning / bad states.</p>
+  <div class=setrow><label>Mode</label>${segH(s.mode,[['light','Light'],['dark','Dark'],['system','System']],'setMode')}<div class=hint>Light or dark, or whatever the operating system asks for (System follows it as it changes).</div></div>
+  <div class=setrow><label>Theme</label><div class=tcards>${cards}</div><div class=hint>Each has a light and a dark face; the mode picks which. Custom uses the nine colours below.</div></div>
+  <div class="setrow${s.theme=='custom'?'':' dim'}"><label>Custom colours</label><div class=cpick>${picks}</div><div class=hint>Only used by the Custom theme. Its mode comes from the background you pick.</div></div></div>
+ <div class=setgrp><h3>Units</h3>
+  <div class=setrow><label>Temperature</label>${segH(TU,[['F','°F'],['C','°C']],'setTU')}<div class=hint>Readings and alert thresholds stay in °C underneath; only the display converts.</div></div></div>
+ <div class=setgrp><h3>Layout</h3>
+  <div class=setrow><label>Panels</label><div><button class=hbtn onclick="layoutReset()">reset panel layout</button></div><div class=hint>Puts every dashboard panel back where it started (this browser).</div></div></div>`}
+function setMode(m){NXT.save({mode:m});setRender()}
+function setTheme(id){NXT.save({theme:id});setRender()}
+function setCustom(k,v){NXT.save({theme:'custom',custom:{[k]:v}});
+ /* re-render only the cards/swatches when the pickers settle: keep the open picker */
+ clearTimeout(setCustom._t);setCustom._t=setTimeout(setRender,400)}
+function setReset(){NXT.clearLocal();TU=NXT.eff().tunit=='C'?'C':'F';PANELS.forEach(p=>{if(p._data!==undefined&&p.id!='config')repaint(p.id,p._data)});setRender()}
+async function setSaveSite(){const s=NXT.eff(),body={mode:s.mode,theme:s.theme,tunit:TU,custom:s.custom};
+ const m=$('setmsg');if(m)m.textContent='saving as the site default…';
+ const r=await act('setConsoleDefaults',{settings:body});
+ if(m)m.textContent=r&&r.error?'✗ '+r.error:'✓ saved: browsers without their own settings use these';setTimeout(loadSiteSettings,2500)}
+loadSiteSettings();
+if(location.hash=='#settings')setOpen();
+
 function llmStats(s){const ms=v=>v==null?'—':v<1?Math.round(v*1000)+'<span class=u> ms</span>':v.toFixed(1)+'<span class=u> s</span>';
  const kv=(k,v)=>`<div><span class=k>${k}</span><span class=v>${v}</span></div>`;
  return `<div class=llms>
@@ -3051,9 +3220,10 @@ async function saveSched(host,profile,mode){
 let CFGDIRTY=false,CFGJOB=null;
 const lines=v=>(v||'').split('\n').map(x=>x.trim()).filter(Boolean);
 function cfgDirty(){CFGDIRTY=true;const b=$('cf-state');if(b){b.textContent='unsaved changes';b.className='warn'}}
-function triSel(id,val,eff){return `<select id="${id}" onchange="cfgDirty()">
-  <option value=""${val==null?' selected':''}>default (${eff?'on':'off'})</option>
-  <option value="on"${val===true?' selected':''}>on</option><option value="off"${val===false?' selected':''}>off</option></select>`}
+/* tri-state as a segmented control: the fleet default, or on / off for this host (data-v holds it) */
+function triSel(id,val,eff){const v=val===true?'on':val===false?'off':'';
+ return `<div class=seg id="${id}" data-v="${v}">${[['',`default (${eff?'on':'off'})`],['on','on'],['off','off']].map(([k,l])=>`<button type=button class="${k==v?'on':''}" onclick="segPick(this,'${k}')">${l}</button>`).join('')}</div>`}
+function segPick(btn,v){const s=btn.parentElement;s.dataset.v=v;s.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b===btn));cfgDirty()}
 function rConfig(d){
  if(!d)return '<div class=empty>loading…</div>';
  if(d.error)return `<div class="empty bad">${esc(d.error)}</div>`;
@@ -3080,7 +3250,7 @@ function rConfig(d){
   <button class=act onclick="cfgRun('policyApply',{},'apply')" title="push the saved policy to every host again and rescan databases">re-apply</button>
   <button class=act onclick="cfgRun('dumpsNow',{},'dump')" title="dump every enabled database now, without a backup">dump databases now</button>
   <button class=lnk onclick="CFGDIRTY=false;tick(PANELS.find(x=>x.id=='config'))">discard / reload</button></div>
- <div class=cfgsec><h4>All hosts</h4>
+ <div class=cfgsec id=sec-backups><h4>All hosts</h4>
   <label class=tog><input type=checkbox id=cf-dv${P.docker_volumes?' checked':''} onchange="cfgDirty()"> back up Docker volumes <span class=mut>(/var/lib/docker/volumes — image layers and container filesystems stay excluded)</span></label>
   <label class=tog><input type=checkbox id=cf-db${P.db_dumps?' checked':''} onchange="cfgDirty()"> dump databases before each <b>system</b> backup <span class=mut>(postgres, mariadb/mysql, redis/valkey SAVE, sqlite — found automatically, into __NODE_LIB__/dumps)</span></label>
   <div class=cfgcols>
@@ -3108,7 +3278,7 @@ function hfSection(F){
  const hosts=(F.sources||[]).map(n=>{const h=HS[n]||{};
   const last=h.error?`<span class=bad title="${esc(h.error)}">failed</span>`:h.ts?`${esc(agoS(h.ts))} · +${h.new_blobs||0} files (${esc(fmtBytes(h.new_bytes||0))})${h.bad_hash?` · <span class=bad>${h.bad_hash} bad hash</span>`:''}`:'<span class=mut>never</span>';
   return `<label class=dbc title="harvest model files from ${esc(n)}"><input type=checkbox data-hfhost="${esc(n)}"${ex.has(n)?'':' checked'} onchange="cfgDirty()"><b>${esc(n)}</b> <span class=mut>${last}</span></label>`}).join('');
- return `<div class=cfgsec><h4>Hugging Face model mirror <span class=mut>— one copy of every model on the cluster, on __NAS__; hosts download from it instead of huggingface.co</span></h4>
+ return `<div class=cfgsec id=sec-mirror><h4>Hugging Face model mirror <span class=mut>— one copy of every model on the cluster, on __NAS__; hosts download from it instead of huggingface.co</span></h4>
   <div class=hfline>endpoint <code>HF_ENDPOINT=${esc(F.endpoint||'')}</code> · server <b class="${F.service=='active'?'ok':'bad'}">${esc(F.service||'?')}</b>
    · store <b>${T.repos??0}</b> repos, <b>${T.blobs??0}</b> files, <b>${esc(fmtBytes(T.bytes||0))}</b>${S.ts?` · harvested ${esc(agoS(S.ts))}`:''}
    ${F.harvesting?' · <span class=warn>harvest running</span>':''}
@@ -3119,7 +3289,7 @@ function hfSection(F){
   <div class=hint>Use it: <code>export HF_ENDPOINT=${esc(F.endpoint||'')}</code> (or <code>-e HF_ENDPOINT=…</code> on a container). Files the store has at that commit come from __NAS__; anything else passes through to huggingface.co. If huggingface.co is unreachable, the store's copy is served.</div></div>`}
 function asSection(A){
  const eps=(A.endpoints||[]).map((e,i)=>`<option value="${i}">${esc(e.host)} · ${esc(e.model||'?')} · ${esc(e.engine||'')} — ${esc(e.url)}</option>`).join('');
- return `<div class=cfgsec><h4>Assistant LLM <span class=mut>— the model Noctyx asks to explain findings, triage alerts and write the morning brief (text only; it never runs anything)</span></h4>
+ return `<div class=cfgsec id=sec-assistant><h4>Assistant LLM <span class=mut>— the model Noctyx asks to explain findings, triage alerts and write the morning brief (text only; it never runs anything)</span></h4>
   <label class=tog><input type=checkbox id=as-on${A.enabled!==false?' checked':''} onchange="cfgDirty()"> use the assistant</label>
   <div class=cfgcols>
    <div><div class=k>endpoint <span class=mut>OpenAI-compatible base URL, ending in /v1</span></div>
@@ -3160,7 +3330,7 @@ function cfgCollect(){
  const pol={docker_volumes:$('cf-dv').checked,db_dumps:$('cf-db').checked,exclude:lines($('cf-ex').value),
   sqlite:lines($('cf-sq').value),skip_dumps:P.skip_dumps||[],hosts:{}};
  for(const n of d.hosts||[]){const o={},old=HP[n]||{};
-  const dv=tri($(`cf-dv-${n}`).value),db=tri($(`cf-db-${n}`).value);if(dv!==undefined)o.docker_volumes=dv;if(db!==undefined)o.db_dumps=db;
+  const dv=tri($(`cf-dv-${n}`).dataset.v),db=tri($(`cf-db-${n}`).dataset.v);if(dv!==undefined)o.docker_volumes=dv;if(db!==undefined)o.db_dumps=db;
   const ex=lines($(`cf-ex-${n}`).value);if(ex.length)o.exclude=ex;
   const seen=new Set(),skip=[];document.querySelectorAll(`input[data-host="${CSS.escape(n)}"][data-db]`).forEach(c=>{seen.add(c.dataset.db);if(!c.checked)skip.push(c.dataset.db)});
   (old.skip_dumps||[]).forEach(x=>{if(!seen.has(x))skip.push(x)});   /* keep skips for databases not running right now */
@@ -3639,6 +3809,8 @@ class H(BaseHTTPRequestHandler):
             except ValueError:
                 n = 15
             return self._json(audit_tail(min(max(n, 1), 200)))
+        if p == "/api/v1/console-settings":
+            return self._json({"settings": (CM.cfg().get("console") or {}).get("settings") or {}})
         if p == "/api/v1/recipes":
             try:
                 return self._json(CM.recipe_summary(CM.cfg()))
