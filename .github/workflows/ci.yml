@@ -14,3 +14,22 @@ jobs:
           NOCTYX_PRIVACY_PATTERNS: /var/lib/gh-runner/privacy-patterns
       - name: tests
         run: PYTHONPATH=src python3 -m pytest -q -p no:cacheprovider
+      - name: the package builds
+        run: python3 -m pip wheel --no-deps -q -w "$RUNNER_TEMP/wheel" . && ls "$RUNNER_TEMP/wheel"/noctyx-*.whl
+  test-macos:
+    # the head runs on macOS too (launchd, dscl): the same tree, tested on a Mac
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: privacy check (generic patterns)
+        run: python3 tools/privacy_check.py
+      - name: tests
+        run: python3 -m pip install -q pytest && PYTHONPATH=src python3 -m pytest -q -p no:cacheprovider
+      - name: the package builds
+        run: python3 -m pip wheel --no-deps -q -w "$RUNNER_TEMP/wheel" . && ls "$RUNNER_TEMP/wheel"/noctyx-*.whl
+      - name: bash 3.2 can parse the agent
+        run: /bin/bash -n src/noctyx/agent/noctyx-agent.sh && /bin/bash -n src/noctyx/agent/install-agent.sh

@@ -51,6 +51,7 @@ if __package__ in (None, ""):
 from noctyx import orchestrator as CM                # noqa: E402  the console never disagrees with `tick`
 from noctyx.paths import P, CONFIG                   # noqa: E402
 from noctyx import accounts as AC                    # noqa: E402
+from noctyx import hostos                            # noqa: E402
 
 NX_HOME = pathlib.Path(__file__).resolve().parent
 CFG_PATH = CONFIG
@@ -166,13 +167,11 @@ def hf_summary(c):
         st = json.loads((pathlib.Path(hc["store"]) / "status.json").read_text())
     except Exception:
         st = {}
-    run = subprocess.run(["systemctl", "list-units", "--no-legend", "--plain", f"{UNIT}-hf-harvest-*"],
-                         capture_output=True, text=True).stdout.split()
+    run = [u for u in CM._active_job_units() if u.startswith(f"{UNIT}-hf-harvest-")]
     return {**hc, "status": st, "sources": [h["name"] for h in c["hosts"] if h.get("enabled", True) is not False
                                             and h.get("address")],
             "endpoint": f"http://{c['server']['address']}:{hc['port']}",
-            "service": subprocess.run(["systemctl", "is-active", P["mirror_unit"]], capture_output=True,
-                                      text=True).stdout.strip(),
+            "service": "active" if hostos.service_active(f"{P['mirror_unit']}.service", P["launchd_prefix"]) else "inactive",
             "harvesting": bool(run)}
 
 
@@ -697,6 +696,15 @@ def _audited_snapshot_ids():
 
 
 def _systemd_prop(unit, prop):
+    if hostos.IS_MAC:        # launchd keeps no such properties: a job is running or not, a timer installed or not
+        if prop != "ActiveState":
+            return ""
+        if unit.endswith(".timer"):
+            return "active" if hostos.service_installed(unit.replace(".timer", ".service"), P["launchd_prefix"]) else ""
+        if hostos.job_running(str(CM.JOB_LOG_DIR / f"{unit.removesuffix('.service')}.log")) or \
+                hostos.service_active(unit, P["launchd_prefix"]):
+            return "active"
+        return "inactive"
     try:
         return subprocess.run(["systemctl", "show", "-p", prop, "--value", unit],
                               capture_output=True, text=True, timeout=5).stdout.strip()
@@ -1775,13 +1783,14 @@ echo "==lsblk=="; diskutil list physical 2>/dev/null | awk '/^\/dev\//{d=$1} /^ 
 echo "==gpu=="; system_profiler SPDisplaysDataType 2>/dev/null | awk -F': ' '/Chipset Model/{m=$2} /Total Number of Cores/{c=$2} END{if(m) print m", "c" GPU cores"}'
 echo "==gputmp=="; echo ""
 echo "==ip=="; ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null
-echo "==agent=="; echo ""
-echo "==lastjobs=="; echo ""
+echo "==agent=="; if [ -x @AGENT_BIN@ ]; then md5 -q @AGENT_BIN@ | cut -c1-8; fi; (sudo -n ls @NODE_ETC@/ 2>/dev/null || ls @NODE_ETC@/ 2>/dev/null) | grep -o 'profile-[a-z]*\.d' | paste -sd, -
+echo "==lastjobs=="; sudo -n tail -3 @NODE_LIB@/audit.jsonl 2>/dev/null || tail -3 @NODE_LIB@/audit.jsonl 2>/dev/null
 echo "==load=="; sysctl -n vm.loadavg | tr -d '{}' | awk '{print $1,$2,$3}'
-echo "==agentbusy=="; echo 0
-echo "==progress=="; echo ""
-echo "==backuplog=="; echo ""
+echo "==agentbusy=="; sudo -n lsof -t @NODE_LIB@/agent.lock 2>/dev/null | wc -w
+echo "==progress=="; sudo -n cat @NODE_LIB@/progress 2>/dev/null
+echo "==backuplog=="; sudo -n stat -f %m @NODE_LIB@/last-backup.log 2>/dev/null; sudo -n tail -n 8 @NODE_LIB@/last-backup.log 2>/dev/null
 """
+FACTS_MAC = CM.render(FACTS_MAC)
 FACTS_MAC_B64 = base64.b64encode(FACTS_MAC.encode()).decode()
 
 
@@ -1866,10 +1875,12 @@ def host_facts(name, max_age=120):
     s = CFG["server"]["ssh"]
     try:
         payload = FACTS_MAC_B64 if h.get("os") == "macos" else FACTS_B64
+        remote = f"echo {payload} | base64 -d | bash"
         r = subprocess.run(
+            ["sh", "-c", remote] if h.get("local") else
             ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
              "-o", "StrictHostKeyChecking=accept-new", "-i", s["key"],
-             f"{h.get('ssh_user') or s['user']}@{_addr(h)}", f"echo {payload} | base64 -d | bash"],
+             f"{h.get('ssh_user') or s['user']}@{_addr(h)}", remote],
             capture_output=True, text=True, timeout=30)
         facts = _parse_facts(r.stdout or "")
         if not facts.get("os_lines") and not facts.get("blockdevs"):

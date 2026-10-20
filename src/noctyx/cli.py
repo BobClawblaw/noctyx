@@ -1,5 +1,8 @@
 """noctyx — the night-shift operator for your AI cluster.
 
+  noctyx init                 first-time setup: the assistant first, then a site config from questions
+  noctyx setup [STEP|all|verify]  set the head up step by step, and prove it works end to end
+  noctyx ask QUESTION         the setup assistant (the site's LLM), grounded in the install guide
   noctyx console              the web console (head node)
   noctyx directory-service    discovery + read-only inventory for restore images
   noctyx mirror               the Hugging Face mirror server (HF_ENDPOINT)
@@ -92,6 +95,12 @@ def main(argv=None):
         sys.argv = ["noctyx"]
         from . import console
         return console.main()
+    if cmd == "init":
+        from . import firstrun
+        return firstrun.main(argv[1:])
+    if cmd == "ask":
+        from . import llm
+        return llm.cmd_ask(argv[1:])
     if cmd == "tool":
         if len(argv) < 2:
             sys.exit(f"usage: noctyx tool NAME [ARGS]  (tools: {', '.join(TOOLS)})")

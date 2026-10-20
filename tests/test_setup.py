@@ -1,0 +1,138 @@
+"""First-time setup on both platforms: launchd made from the systemd units, mounts, the LLM link, noctyx init."""
+import http.server
+import json
+import plistlib
+import threading
+
+import pytest
+
+from noctyx import hostos, llm, setup
+from noctyx import orchestrator as cm
+
+
+def _units():
+    c = cm.cfg()
+    return {f"{cm.UNIT}-{n}": cm.render_unit(c, n) for n in cm.HEAD_UNITS + ("rest-server.service",)}
+
+
+def test_every_head_unit_has_a_launchd_form():
+    units = _units()
+    for n, txt in units.items():
+        if not n.endswith(".service"):
+            continue
+        timer = units.get(n.replace(".service", ".timer"))
+        if not timer and "Type=oneshot" in txt:
+            continue
+        p = plistlib.loads(hostos.launchd_plist(hostos.launchd_label(n, "dev.noctyx"), txt, timer).encode())
+        assert p["Label"].startswith("dev.noctyx.") and p["ProgramArguments"][0].startswith("/")
+        assert "@" not in json.dumps(p["ProgramArguments"]), n          # every template value filled in
+        if timer:
+            assert "StartCalendarInterval" in p or "StartInterval" in p
+        else:
+            assert p["RunAtLoad"] and p["KeepAlive"]
+
+
+def test_launchd_keeps_user_env_and_schedule():
+    units = _units()
+    d = plistlib.loads(hostos.launchd_plist("dev.noctyx.directory", units[f"{cm.UNIT}-directory.service"]).encode())
+    assert d["UserName"] == "noctyx" and d["EnvironmentVariables"]["NOCTYX_CONFIG"]
+    rs = plistlib.loads(hostos.launchd_plist("dev.noctyx.rest-server", units[f"{cm.UNIT}-rest-server.service"]).encode())
+    assert "--private-repos" in rs["ProgramArguments"] and "--append-only" in rs["ProgramArguments"]
+    t = plistlib.loads(hostos.launchd_plist("dev.noctyx.retention", units[f"{cm.UNIT}-retention.service"],
+                                            units[f"{cm.UNIT}-retention.timer"]).encode())
+    assert t["StartCalendarInterval"] == {"Hour": 8, "Minute": 0, "Day": 1}
+    assert "KeepAlive" not in t
+
+
+@pytest.mark.parametrize("spec,want", [("*:0/15", {"StartInterval": 900}),
+                                       ("*-*-* 07:30:00", {"StartCalendarInterval": {"Hour": 7, "Minute": 30}}),
+                                       ("*-*-01 08:00:00", {"StartCalendarInterval": {"Hour": 8, "Minute": 0, "Day": 1}})])
+def test_calendar(spec, want):
+    assert hostos._calendar(spec) == want
+
+
+def test_labels():
+    assert hostos.launchd_label("noctyx-console.service", "dev.noctyx") == "dev.noctyx.console"
+    assert hostos.launchd_label("noctyx-hf-mirror.service", "dev.noctyx") == "dev.noctyx.hf-mirror"
+
+
+@pytest.mark.parametrize("mac", [True, False])
+def test_mount_commands(monkeypatch, mac):
+    monkeypatch.setattr(hostos, "IS_MAC", mac)
+    nfs = setup.mount_argv({"proto": "nfs", "server": "192.0.2.5", "path": "/volume1/b"}, "/mnt/x")
+    assert nfs[-2:] == ["192.0.2.5:/volume1/b", "/mnt/x"] and ("resvport" in nfs[4]) == mac
+    smb = setup.mount_argv({"proto": "smb", "server": "192.0.2.5", "path": "b/noctyx", "user": "u"}, "/mnt/x",
+                           "/etc/noctyx/smb-nas.cred")
+    assert not any("password" in x for x in smb)                     # never on a command line
+    assert smb[0] == ("mount_smbfs" if mac else "mount")
+
+
+@pytest.mark.parametrize("mac", [True, False])
+def test_as_user(monkeypatch, mac):
+    monkeypatch.setattr(hostos, "IS_MAC", mac)
+    argv = hostos.as_user("noctyx", ["restic", "init"])
+    assert argv[-2:] == ["restic", "init"] and (argv[0] == "setpriv") != mac
+
+
+class _LLM(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def _send(self, d):
+        b = json.dumps(d).encode()
+        self.send_response(200); self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
+
+    def do_GET(self):
+        self._send({"data": [{"id": "tiny-model"}]})
+
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        assert body["model"] == "tiny-model"
+        self._send({"model": "tiny-model", "choices": [{"message": {"content": "Noctyx assistant OK"}}]})
+
+
+@pytest.fixture()
+def fake_llm():
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _LLM)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield srv.server_address[1]
+    srv.shutdown()
+
+
+def test_llm_discover_and_test(fake_llm):
+    found = llm.discover(["127.0.0.1"], ports=(fake_llm, 1))
+    assert [f["url"] for f in found] == [f"http://127.0.0.1:{fake_llm}/v1"] and found[0]["models"] == ["tiny-model"]
+    t = llm.test(found[0]["url"])
+    assert t["ok"] and t["model"] == "tiny-model"
+    assert not llm.test("http://127.0.0.1:1/v1")["ok"]
+
+
+def test_init_writes_a_working_site(tmp_path, monkeypatch, fake_llm):
+    from noctyx import firstrun
+    cfg = tmp_path / "site.json"
+    monkeypatch.setattr(firstrun, "CONFIG", str(cfg))
+    monkeypatch.setattr(firstrun.os, "geteuid", lambda: 0)
+    monkeypatch.setitem(firstrun.P, "llm_keys", str(tmp_path / "keys"))
+    rc = firstrun.main(["--yes", "--assistant", f"http://127.0.0.1:{fake_llm}/v1", "--hostname", "head-01",
+                        "--address", "192.0.2.10", "--storage", "nfs", "--nas-server", "192.0.2.5",
+                        "--nas-path", "/volume1/backups", "--mount", "/mnt/nas", "--owner-uid", "1026", "--no-auth"])
+    assert rc == 0
+    c = json.loads(cfg.read_text())
+    assert c["assistant"]["url"].endswith(f":{fake_llm}/v1") and c["assistant"]["model"] == "tiny-model"
+    assert c["spindles"]["nas"]["share"] == {"proto": "nfs", "server": "192.0.2.5", "path": "/volume1/backups"}
+    assert c["server"]["repo_root"] == "/mnt/nas/noctyx/repos" and c["server"]["repo_owner_uid"] == 1026
+    head = c["hosts"][0]
+    assert head["local"] and head["repo"] == "head-01" and c["repositories"] == [{"id": "head-01", "spindle": "nas"}]
+    assert cm.nas_name(c) == "nas" and {"system", "config"} <= set(c["profiles"])
+    assert (cfg.stat().st_mode & 0o777) == 0o600
+    # re-running keeps the site: its values are the defaults
+    assert firstrun.main(["--yes", "--assistant", f"http://127.0.0.1:{fake_llm}/v1", "--no-auth"]) == 0
+    c2 = json.loads(cfg.read_text())
+    assert c2["spindles"] == c["spindles"] and c2["server"]["address"] == "192.0.2.10" and len(c2["hosts"]) == 1
+
+
+def test_local_hosts_run_here_not_over_ssh():
+    c = cm.cfg()
+    assert cm._ssh_argv(c, {"name": "h", "address": "192.0.2.10", "local": True}, "true") == ["sh", "-c", "true"]
+    assert cm._ssh_argv(c, {"name": "h", "address": "192.0.2.21"}, "true")[0] == "ssh"

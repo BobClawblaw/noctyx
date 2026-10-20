@@ -18,6 +18,7 @@ import argparse, base64, json, os, re, shlex, shutil, subprocess, sys, time, fcn
 if __package__ in (None, ""):                       # run as a file (detached jobs, the console's actions)
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from noctyx.paths import P, render, CONFIG           # noqa: E402
+from noctyx import hostos                            # noqa: E402
 
 # the package directory: node-side templates (agent/), metrics/, assets/
 NX_HOME = pathlib.Path(__file__).resolve().parent
@@ -168,8 +169,7 @@ def cmd_nas_rest(a):
 def as_owner(argv):
     """Run argv as the repo owner. Anything root writes into a live repo is
     unreadable to rest-server (the repository owner) and wedges client backups."""
-    o = P["repo_owner"]
-    return ["setpriv", f"--reuid={o}", f"--regid={o}", "--clear-groups"] + argv
+    return hostos.as_user(P["repo_owner"], argv)
 
 
 def hosts(cfg_, only_enabled=True):
@@ -214,10 +214,17 @@ def addr(h):
         return a
 
 
-def ssh(cfg_, h, remote_cmd, timeout=86400, capture=True):
+def _ssh_argv(cfg_, h, remote_cmd):
+    """ssh to h with root's sudo there, or for a `"local": true` host (the head backing itself up) the same
+    command run here: Noctyx already runs as root, and a head need not authorise its own key."""
+    if h.get("local"):
+        return ["sh", "-c", remote_cmd]
     s = cfg_["server"]["ssh"]
-    cmd = ["ssh", *SSH_OPTS, "-i", s["key"],
-           f"{h.get('ssh_user') or s['user']}@{addr(h)}", f"sudo -n {remote_cmd}"]
+    return ["ssh", *SSH_OPTS, "-i", s["key"], f"{h.get('ssh_user') or s['user']}@{addr(h)}", f"sudo -n {remote_cmd}"]
+
+
+def ssh(cfg_, h, remote_cmd, timeout=86400, capture=True):
+    cmd = _ssh_argv(cfg_, h, remote_cmd)
     return subprocess.run(cmd, capture_output=capture, text=True, timeout=timeout)
 
 
@@ -230,9 +237,7 @@ def ssh_stream(cfg_, h, remote_cmd):
     the UI see transfer status in real time. stdout (the agent's RESULT
     line) is still captured for parsing; both are returned for inspection.
     """
-    s = cfg_["server"]["ssh"]
-    cmd = ["ssh", *SSH_OPTS, "-i", s["key"],
-           f"{s['user']}@{addr(h)}", f"sudo -n {remote_cmd}"]
+    cmd = _ssh_argv(cfg_, h, remote_cmd)
     # stderr MUST be binary+read1: TextIOWrapper.read(n) blocks until n chars
     # or EOF, which withheld the whole stream until the job ENDED — the exact
     # "no transfer status" bug this function exists to fix (probe tests hid it
@@ -494,7 +499,7 @@ def _sweep_root_owned_repo_files(c):
     # the repository owner, head-side reads are --no-lock). locks/keys/index/snapshots
     # are small and are where a stray root file actually wedges rest-server.
     roots = {repo_root(c)}
-    sel = "-path '*/data' -prune -o \\( -user root -o -group root \\)"
+    sel = f"-path '*/data' -prune -o \\( -user root -o -group {hostos.ROOT_GROUP} \\)"
     for root in roots:
         try:
             subprocess.run(["sudo", "sh", "-c",
@@ -735,7 +740,7 @@ def _on(c, h, cmd, timeout=30):
 
 def boot_id(c, h, timeout=15):
     try:
-        r = _on(c, h, "cat /proc/sys/kernel/random/boot_id", timeout=timeout)
+        r = _on(c, h, hostos.BOOT_ID_CMD, timeout=timeout)
         v = (r.stdout or "").strip()
         return v if r.returncode == 0 and re.fullmatch(r"[0-9a-f-]{36}", v) else None
     except Exception:
@@ -747,6 +752,9 @@ _TIMER_JOBS = tuple(f"{UNIT}-{j}.service" for j in ("tick", "nightly", "retentio
 
 
 def _active_job_units(timer_jobs=False):
+    if hostos.IS_MAC:        # a detached job is a pid file next to its log; timer jobs are launchd's own
+        return sorted(f.name[:-8] + ".service" for f in JOB_LOG_DIR.glob("*.log.pid")
+                      if hostos.job_running(str(f)[:-4]))
     r = subprocess.run(["systemctl", "list-units", "--type=service", "--state=active,activating",
                         "--plain", "--no-legend", f"{UNIT}-*"], capture_output=True, text=True)
     names = [l.split()[0] for l in (r.stdout or "").splitlines() if l.split()]
@@ -817,7 +825,7 @@ def reboot_plan(c, name):
     try:
         r = _on(c, h, f"fuser {P['node_lib']}/agent.lock 2>/dev/null; echo '|';"
                       " fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock 2>/dev/null; echo '|';"
-                      " cat /proc/sys/kernel/random/boot_id", timeout=25)
+                      f" {hostos.BOOT_ID_CMD}", timeout=25)
         parts = (r.stdout or "").split("|")
         if r.returncode != 0 or len(parts) < 3:
             raise RuntimeError((r.stderr or f"rc={r.returncode}").strip()[-120:])
@@ -857,7 +865,7 @@ def _wait_llm(c, models, budget=600):
         return [], []
     t0 = time.time()
     while True:
-        subprocess.run(["systemctl", "start", "llm-discover.service"], capture_output=True, timeout=300)
+        _llm_refresh(wait=True)
         try:
             topo = json.loads(LLM_TOPO.read_text())
         except Exception:
@@ -918,7 +926,7 @@ def cmd_reboot(a):
         if now_id and now_id == rec.get("boot_id"):
             sys.exit(f"{h['name']} has not rebooted yet (same boot_id)")
         try:
-            booted = float(open("/proc/stat").read().split("btime ")[1].split()[0]) if is_head(c, h) else None
+            booted = hostos.boot_time() if is_head(c, h) else None
         except Exception:
             booted = None
         if booted and booted >= rec["ts"]:
@@ -947,8 +955,11 @@ def cmd_reboot(a):
     REBOOT_DIR.mkdir(parents=True, exist_ok=True)
     (REBOOT_DIR / f"{h['name']}.json").write_text(json.dumps(rec, indent=1))
     unit = f"{UNIT}-host-reboot-{int(time.time())}"
-    r = _on(c, h, f"systemd-run --quiet --collect --unit={unit} --on-active={delay} "
-                  f"--description='Noctyx: reboot requested from the console/CLI' systemctl reboot", timeout=30)
+    if h.get("os") == "macos":
+        r = _on(c, h, f"nohup sh -c 'sleep {delay}; shutdown -r now' >/dev/null 2>&1 &", timeout=30)
+    else:
+        r = _on(c, h, f"systemd-run --quiet --collect --unit={unit} --on-active={delay} "
+                      f"--description='Noctyx: reboot requested from the console/CLI' systemctl reboot", timeout=30)
     if r.returncode != 0:
         (REBOOT_DIR / f"{h['name']}.json").unlink()
         audit("reboot", host=h["name"], rc=1, error=(r.stderr or "").strip()[-200:])
@@ -1240,7 +1251,7 @@ def _inline():
 
 def detach(a):
     if os.geteuid() != 0:
-        sys.exit("noctyx must run as root (ssh key, locks, systemd-run) — use sudo")
+        sys.exit("noctyx must run as root (ssh key, locks, detached jobs) — use sudo")
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     tgt = getattr(a, "host", None) or getattr(a, "slot", None)
     target = f"-{tgt}" if tgt else ""
@@ -1249,6 +1260,14 @@ def detach(a):
     log = JOB_LOG_DIR / f"{unit}.log"
     env = [f"--setenv={k}={os.environ[k]}" for k in
            ("NOCTYX_CONFIG",) + tuple(f"NOCTYX_PATH_{x.upper()}" for x in P) if k in os.environ]
+    if hostos.IS_MAC:
+        hostos.spawn_detached(unit, [sys.executable, "-u", os.path.realpath(__file__), *sys.argv[1:]], log,
+                              {**os.environ, "NOCTYX_DETACHED": "1", "HOME": "/var/root"})
+        print(f"DETACHED unit={unit} log={log}", flush=True)
+        audit("job-detached", unit=unit, argv=sys.argv[1:])
+        if a.no_follow:
+            sys.exit(0)
+        sys.exit(follow(unit, log))
     cmd = ["systemd-run", "--quiet", "--collect", f"--unit={unit}",
            "--property=Type=exec",
            f"--property=StandardOutput=append:{log}", f"--property=StandardError=append:{log}",
@@ -1266,6 +1285,8 @@ def detach(a):
 
 
 def _unit_running(unit):
+    if hostos.IS_MAC:
+        return hostos.job_running(str(JOB_LOG_DIR / f"{unit.removesuffix('.service')}.log"))
     r = subprocess.run(["systemctl", "show", "-p", "ActiveState", "--value", unit],
                        capture_output=True, text=True)
     return (r.stdout or "").strip() in ("active", "activating", "deactivating", "reloading")
@@ -2528,8 +2549,13 @@ echo "NX_MODELS $(curl -s -m 5 http://127.0.0.1:{port}/v1/models | python3 -c 'i
     return rc, (m[-1].split() if m else [])
 
 
-def _llm_refresh():
-    subprocess.run(["systemctl", "start", "--no-block", "llm-discover.service"], capture_output=True)
+def _llm_refresh(wait=False):
+    if shutil.which("systemctl"):
+        subprocess.run(["systemctl", "start", *([] if wait else ["--no-block"]), "llm-discover.service"],
+                       capture_output=True, timeout=300)
+    else:
+        subprocess.run([sys.executable, "-m", "noctyx.cli", "llm-discover"], capture_output=True, timeout=300,
+                       env={**os.environ, "PYTHONPATH": str(NX_HOME.parent)})
 
 
 def recipe_plan(c, slot, name=None, ref=None):
@@ -3253,238 +3279,32 @@ def render_unit(c, name):
 
 
 def cmd_install_head(a):
-    """Render the head node's units (console, directory, mirror, the four timers) for this site; with
-    --apply write them to /etc/systemd/system and enable the timers and services."""
+    """Render the head node's services (console, directory, mirror, the four timers) for this site: systemd
+    units on Linux, launchd daemons made from them on macOS. --apply installs and starts them."""
+    from noctyx import setup
     c = cfg()
-    out = {f"{UNIT}-{n}": render_unit(c, n) for n in HEAD_UNITS}
+    out = setup.head_units(c)
     if not a.apply:
         for n, txt in out.items():
-            print(f"### /etc/systemd/system/{n}\n{txt}")
+            path = hostos.service_path(n, P["launchd_prefix"])
+            if hostos.IS_MAC:
+                if not n.endswith(".service") or (n.replace(".service", ".timer") not in out and "Type=oneshot" in txt):
+                    continue
+                txt = hostos.launchd_plist(path.stem, txt, out.get(n.replace(".service", ".timer")))
+            print(f"### {path}\n{txt}")
         print("(dry run: nothing written — --apply installs and enables them)")
         return
-    for n, txt in out.items():
-        pathlib.Path(f"/etc/systemd/system/{n}").write_text(txt)
-    subprocess.run(["systemctl", "daemon-reload"], check=True)
-    enable = [n for n in out if n.endswith(".timer")] + [f"{UNIT}-{n}" for n in ("console.service", "directory.service", "hf-mirror.service")]
-    subprocess.run(["systemctl", "enable", "--now", *enable], check=False)
-    audit("install-head", units=list(out))
-    print(f"installed and enabled: {', '.join(enable)}")
-
-
-# ── first-time setup of a site: service user, TLS, repositories, escrow, the endpoint ──────────
-def _run(argv, **kw):
-    r = subprocess.run(argv, capture_output=True, text=True, **kw)
-    if r.returncode:
-        sys.exit(f"{argv[0]} failed: {(r.stderr or r.stdout).strip()[-300:]}")
-    return r
-
-
-def _owner_exists():
-    import pwd
-    try:
-        pwd.getpwnam(P["repo_owner"])
-        return True
-    except KeyError:
-        return False
-
-
-def setup_owner(c):
-    """The local user that owns the repositories on the NAS mount and runs the endpoint and the directory.
-    server.repo_owner_uid pins its uid: a NAS's NFS share ACLs often refuse unknown uids, even as owner."""
-    if not _owner_exists():
-        uid = c["server"].get("repo_owner_uid")
-        _run(["useradd", "--system", *(["--uid", str(uid)] if uid else []), "--home-dir", P["state"],
-              "--shell", "/usr/sbin/nologin", P["repo_owner"]])
-        print(f"  created user {P['repo_owner']}")
-    for d, mode in ((P["etc"], 0o750), (P["repo_keys"], 0o700), (P["repo_creds"], 0o700), (P["state"], 0o755)):
-        pathlib.Path(d).mkdir(parents=True, exist_ok=True)
-        os.chmod(d, mode)
-    shutil.chown(P["state"], P["repo_owner"], P["repo_owner"])
-    shutil.chown(P["etc"], "root", P["repo_owner"])
-    print(f"  {P['repo_owner']}: ok; {P['etc']}, {P['repo_keys']}, {P['repo_creds']}, {P['state']}")
-
-
-def setup_tls(c, force=False):
-    """A small CA and the head's server certificate (endpoint, directory, console). Never replaces an
-    existing CA without --force: every node trusts it, and a new one breaks them all until re-installed."""
-    tls = c["server"]["tls"]
-    crt, key, ca = pathlib.Path(tls["cert"]), pathlib.Path(tls["key"]), pathlib.Path(tls["ca"])
-    ca_key = ca.with_name("ca.key")
-    ca.parent.mkdir(parents=True, exist_ok=True)
-    s = c["server"]
-    if ca_key.exists() and not force:
-        print(f"  CA exists ({ca}): kept (--force replaces it, and every node must then be re-installed)")
-    else:
-        _run(["openssl", "genrsa", "-out", str(ca_key), "4096"])
-        os.chmod(ca_key, 0o600)
-        _run(["openssl", "req", "-x509", "-new", "-nodes", "-key", str(ca_key), "-sha256", "-days", "3650",
-              "-subj", "/O=Noctyx/CN=Noctyx site CA", "-out", str(ca)])
-        print(f"  CA made: {ca}")
-        force = True
-    if force or not crt.exists() or subprocess.run(["openssl", "x509", "-in", str(crt), "-noout", "-checkend",
-                                                    str(30 * 86400)], capture_output=True).returncode:
-        san = [f"IP:{s['address']}", f"DNS:{s.get('hostname') or 'head'}", "DNS:localhost", "IP:127.0.0.1",
-               *[str(x) for x in (tls.get("san") or [])]]
-        ext = crt.with_suffix(".ext")
-        ext.write_text("basicConstraints = CA:FALSE\nkeyUsage = critical, digitalSignature, keyEncipherment\n"
-                       f"extendedKeyUsage = serverAuth\nsubjectAltName = {','.join(dict.fromkeys(san))}\n")
-        csr = crt.with_suffix(".csr")
-        _run(["openssl", "req", "-new", "-newkey", "rsa:3072", "-nodes", "-keyout", str(key),
-              "-subj", f"/O=Noctyx/CN={s.get('hostname') or 'head'}", "-out", str(csr)])
-        # 825 days: the longest a modern TLS client accepts for a leaf
-        _run(["openssl", "x509", "-req", "-in", str(csr), "-CA", str(ca), "-CAkey", str(ca_key), "-CAcreateserial",
-              "-days", "825", "-sha256", "-extfile", str(ext), "-out", str(crt)])
-        csr.unlink(); ext.unlink()
-        print(f"  server certificate: {crt} ({', '.join(dict.fromkeys(san))})")
-    else:
-        print(f"  server certificate valid for 30+ days: kept ({crt})")
-    os.chmod(ca.parent, 0o750)
-    for f in ca.parent.glob("*.crt"):
-        os.chmod(f, 0o644)
-    if _owner_exists():          # the endpoint and the directory run as the repository owner
-        shutil.chown(ca.parent, "root", P["repo_owner"]); shutil.chown(key, "root", P["repo_owner"])
-        os.chmod(key, 0o640)
-    else:
-        os.chmod(key, 0o600)
-        print(f"  note: no user {P['repo_owner']} yet; run `noctyx setup owner`, then this again")
-    # the CA is public: put it where curl and friends look, so --cacert is not needed on the head
-    anchor = pathlib.Path(f"/usr/local/share/ca-certificates/{P['unit_prefix']}-ca.crt")
-    if anchor.parent.is_dir():
-        shutil.copyfile(ca, anchor); os.chmod(anchor, 0o644)
-        subprocess.run(["update-ca-certificates"], capture_output=True)
-    end = _run(["openssl", "x509", "-in", str(crt), "-noout", "-enddate"]).stdout.strip().split("=", 1)[-1]
-    print(f"  the certificate expires {end}: `noctyx setup tls` again renews it (the CA stays)")
-
-
-def setup_repos(c):
-    """One restic repository per entry in "repositories": its key (32 random bytes), its endpoint login
-    (hex: it goes into a rest: URL, where base64's + / = break parsing) and a bcrypt htpasswd line
-    (rest-server refuses htpasswd's default MD5-crypt and every request 401s). Existing ones are kept."""
-    for tool in ("restic", "htpasswd"):
-        if not shutil.which(tool):
-            sys.exit(f"{tool} is not installed" + (" (apt install apache2-utils)" if tool == "htpasswd" else ""))
-    if not _owner_exists():
-        sys.exit(f"no user {P['repo_owner']}: run `noctyx setup owner` first")
-    root = pathlib.Path(repo_root(c))
-    if not root.is_dir():
-        sys.exit(f"repo_root {root} is not there: is the NAS mounted?")
-    htp = pathlib.Path(P["etc"]) / "htpasswd"
-    if not htp.exists():
-        htp.touch(mode=0o640)
-    shutil.chown(htp, "root", P["repo_owner"]); os.chmod(htp, 0o640)
-    made = kept = 0
-    for r in c["repositories"]:
-        rid, user = r["id"], f"{P['repo_dir_prefix']}{r['id']}"
-        path = pathlib.Path(repo_dir(c, rid))
-        keyf = pathlib.Path(P["repo_keys"]) / f"{rid}.key"
-        passf = pathlib.Path(P["repo_creds"]) / f"{user}.pass"
-        if not keyf.exists():
-            fd = os.open(keyf, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            os.write(fd, (base64.b64encode(os.urandom(32)).decode() + "\n").encode()); os.close(fd)
-        if (path / "config").exists():
-            kept += 1
-        else:
-            # as the repository owner (an NFS share often squashes root); the root-only key goes in the
-            # environment (readable by that user and root only), not a file the owner could not open
-            _run(["setpriv", f"--reuid={P['repo_owner']}", f"--regid={P['repo_owner']}", "--clear-groups",
-                  "sh", "-c", 'mkdir -p "$1" && exec restic init --repo "$1"', "_", str(path)],
-                 env={**os.environ, "RESTIC_PASSWORD": keyf.read_text().strip(), "HOME": "/tmp"})
-            made += 1
-            print(f"  {rid}: repository made at {path}")
-        if not passf.exists():
-            fd = os.open(passf, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            os.write(fd, os.urandom(24).hex().encode()); os.close(fd)
-        if not any(l.split(":", 1)[0] == user for l in htp.read_text().splitlines()):
-            # -i: the password on stdin, never a command line; no trailing newline, or it is hashed too
-            r_ = subprocess.run(["htpasswd", "-B", "-i", str(htp), user], input=passf.read_text().strip(),
-                                capture_output=True, text=True)
-            if r_.returncode:
-                sys.exit(f"htpasswd {user}: {r_.stderr.strip()}")
-    audit("setup-repos", made=made, kept=kept)
-    print(f"  repositories: {made} made, {kept} already there")
-    if made:
-        print("  NEXT: `noctyx setup escrow` and keep the bundle OFF this machine. Without these keys every\n"
-              "  backup is unreadable, permanently.")
-
-
-def setup_escrow(c):
-    """An encrypted bundle of every key and credential (AES-256, PBKDF2), its passphrase typed by you and
-    stored nowhere. Copy it off this machine and off the NAS."""
-    out = pathlib.Path(P["etc"]) / "escrow"
-    out.mkdir(mode=0o700, exist_ok=True)
-    bundle = out / f"noctyx-keys-{datetime.date.today():%Y%m%d}.tar.gz.enc"
-    etc = pathlib.Path(P["etc"])
-    parts = [str(pathlib.Path(p).relative_to(etc)) for p in (P["repo_keys"], P["repo_creds"], P["tls"],
-                                                              f"{P['etc']}/htpasswd")
-             if pathlib.Path(p).exists() and pathlib.Path(p).is_relative_to(etc)]
-    tar = subprocess.Popen(["tar", "-C", str(etc), "-czf", "-", *parts], stdout=subprocess.PIPE)
-    enc = subprocess.run(["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-iter", "200000", "-salt", "-out", str(bundle)],
-                         stdin=tar.stdout)      # openssl asks for the passphrase on the terminal, twice
-    tar.wait()
-    if enc.returncode or tar.returncode:
-        sys.exit("escrow failed")
-    os.chmod(bundle, 0o600)
-    audit("setup-escrow", bundle=str(bundle))
-    print(f"  {bundle}\n  1. copy it off this machine and off the NAS\n"
-          f"  2. check it opens somewhere else:  openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in {bundle.name} | tar tz")
-
-
-def setup_rest_server(c):
-    """The repository endpoint on the head (when server.rest_host is empty or the head's own address).
-    On a NAS it is `noctyx nas-rest deploy` instead."""
-    if rest_on_nas(c):
-        sys.exit(f"the endpoint runs on the NAS ({c['server']['rest_host']}): use `noctyx nas-rest deploy`")
-    if not shutil.which("rest-server") and not pathlib.Path("/usr/local/bin/rest-server").exists():
-        sys.exit("rest-server is not installed: put the release binary at /usr/local/bin/rest-server "
-                 "(github.com/restic/rest-server/releases: the asset names use underscores, rest-server_<v>_linux_amd64)")
-    name = f"{UNIT}-rest-server.service"
-    pathlib.Path(f"/etc/systemd/system/{name}").write_text(render_unit(c, "rest-server.service"))
-    subprocess.run(["systemctl", "daemon-reload"], check=True)
-    subprocess.run(["systemctl", "enable", "--now", name], check=False)
-    time.sleep(2)
-    up = rest_up(c)
-    audit("setup-rest-server", up=up)
-    print(f"  {name}: endpoint {rest_url(c)} {'UP' if up else 'DOWN: journalctl -u ' + name}")
+    setup.setup_units(c)
 
 
 def setup_status(c):
-    """Where a site is in its setup, and the next step."""
-    s, tls = c["server"], c["server"]["tls"]
-    def crt_ok(f):
-        return pathlib.Path(f).exists() and not subprocess.run(
-            ["openssl", "x509", "-in", f, "-noout", "-checkend", str(30 * 86400)], capture_output=True).returncode
-    repos = c.get("repositories") or []
-    inited = [r["id"] for r in repos if pathlib.Path(repo_dir(c, r["id"]), "config").exists()]
-    escrow = sorted((pathlib.Path(P["etc"]) / "escrow").glob("*.enc")) if (pathlib.Path(P["etc"]) / "escrow").is_dir() else []
-    newest = max((f.stat().st_mtime for f in escrow), default=0)
-    kd = pathlib.Path(P["repo_keys"])
-    stale = [f for f in (kd.glob("*.key") if escrow and kd.is_dir() else []) if f.stat().st_mtime > newest]
-    steps = [
-        ("owner", _owner_exists(), f"the repository owner {P['repo_owner']}", "noctyx setup owner"),
-        ("tls", pathlib.Path(tls["ca"]).exists() and crt_ok(tls["cert"]), "the site CA and the head's certificate", "noctyx setup tls"),
-        ("repos", bool(repos) and len(inited) == len(repos), f"repositories ({len(inited)}/{len(repos)} made)", "noctyx setup repos"),
-        ("escrow", bool(escrow) and not stale, "an escrow bundle of the keys" + (f" (newest {escrow[-1].name})" if escrow else "")
-         + (f": {len(stale)} key(s) made since, re-run it" if stale else ""), "noctyx setup escrow"),
-        ("endpoint", rest_up(c), f"the repository endpoint {rest_url(c)}",
-         "noctyx nas-rest deploy" if rest_on_nas(c) else "noctyx setup rest-server"),
-        ("units", bool(shutil.which("systemctl")) and subprocess.run(
-            ["systemctl", "is-active", "--quiet", f"{UNIT}-console.service"]).returncode == 0,
-         "the head's services (console, directory, mirror, timers)", "noctyx install-head --apply"),
-    ]
-    nxt = None
-    for name, ok, what, cmd in steps:
-        print(f"  {'✓' if ok else '·'} {name:<9} {what}")
-        nxt = nxt or (None if ok else cmd)
-    print(f"\nnext: sudo {nxt}" if nxt else "\nthe head is set up: add nodes with  sudo noctyx install-agent --host <name>")
+    from noctyx import setup
+    setup.status(c)
 
 
 def cmd_setup(a):
-    c = cfg()
-    if a.step != "status" and os.geteuid() != 0:
-        sys.exit("run as root (sudo)")
-    {"status": lambda: setup_status(c), "owner": lambda: setup_owner(c), "tls": lambda: setup_tls(c, a.force),
-     "repos": lambda: setup_repos(c), "escrow": lambda: setup_escrow(c),
-     "rest-server": lambda: setup_rest_server(c)}[a.step]()
+    from noctyx import setup
+    setup.cmd_setup(a)
 
 
 SCHED_STATE = STATE_DIR / "schedule-state.json"
@@ -3652,12 +3472,16 @@ def main():
     us_.add_argument("--role", choices=["viewer", "operator", "admin"], default="viewer")
     us_.add_argument("--password-stdin", action="store_true", help="read the password as one line on stdin")
     stp = sub.add_parser("setup", help="first-time setup of the head, step by step (no step: where the site is, and what is next)")
-    stp.add_argument("step", nargs="?", default="status", choices=["status", "owner", "tls", "repos", "escrow", "rest-server"])
-    stp.add_argument("--force", action="store_true", help="tls: replace the CA too (every node must then be re-installed)")
+    stp.add_argument("step", nargs="?", default="status",
+                     choices=["status", "all", "verify", "tools", "owner", "mount", "tls", "repos", "endpoint",
+                              "rest-server", "units", "escrow"])
+    stp.add_argument("--force", action="store_true", help="tls: replace the CA too (every node must then be re-installed); "
+                     "tools: download even if installed")
+    stp.add_argument("--no-canary", action="store_true", help="verify: skip the backup+restore round trip")
     css = sub.add_parser("console-set", help="the console's display defaults (JSON: mode, theme, tunit, custom)")
     css.add_argument("--json", required=True)
     sub.add_parser("nightly", help="maintenance after the backup window (mirror harvest, recipe discovery, weekly prune dry-run + verify)")
-    ih = sub.add_parser("install-head", help="render the head node's systemd units for this site (--apply installs them)")
+    ih = sub.add_parser("install-head", help="render the head node's services for this site: systemd or launchd (--apply installs them)")
     ih.add_argument("--apply", action="store_true")
     asg = sub.add_parser("assistant-set", help="set the UI assistant's LLM endpoint (JSON: enabled, url, model, timeout_seconds, fallback)")
     asg.add_argument("--json", required=True)
