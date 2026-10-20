@@ -154,6 +154,7 @@ def status(comp, installed, pinned, upstream, want_agent=None):
 
 def upgrade_cmd(comp, host, is_head, source="noctyx"):
     if source == "distro":
+        # the distro's archive may lag upstream: this takes what it carries
         return f"sudo apt-get install --only-upgrade {comp.get('pkg', comp['name'])}" + ("" if is_head else f"   (on {host['name']})")
     if source == "brew":
         return f"brew upgrade {comp.get('pkg', comp['name'])}" + ("" if is_head else f"   (on {host['name']})")

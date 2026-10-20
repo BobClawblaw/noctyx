@@ -3279,14 +3279,15 @@ def cmd_versions(a):
     for host, rows in inv["hosts"].items():
         if a.host and host != a.host:
             continue
-        print(host)
+        print(host + ("" if rows else "   monitored: nothing Noctyx installs runs here"))
         for r in rows:
             print(f"  {mark.get(r['state'], '?')} {r['component']:<14} {r['installed'] or '—':<14} "
                   f"pin {r['pinned'] or '—':<9} latest {r['latest'] or '—':<9} {r['detail']}")
             if r["state"] in ("behind", "missing", "upgrade") and r["upgrade"]:
                 todo.append((host, r))
     if todo:
-        print("\nto upgrade:")
+        print("\nto upgrade (apt takes what the distro carries, which can lag the upstream release):"
+              if any(r.get("source") == "distro" for _, r in todo) else "\nto upgrade:")
         for host, r in todo:
             print(f"  {host:<12} {r['component']:<14} {r['upgrade']}"
                   + ("   (after moving the pin in components.py)" if r["state"] == "upgrade" and r["pinned"] else ""))
