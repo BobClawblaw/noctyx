@@ -20,6 +20,7 @@ import subprocess
 import sys
 
 from . import hostos, llm
+from .setup import spindles
 from .paths import CONFIG, P
 
 INTERACTIVE = True
@@ -105,8 +106,9 @@ def step_assistant(c, a):
             scan += [x.strip() for x in more.split(",") if x.strip()]
         say(f"  looking on {', '.join(dict.fromkeys(scan))}…")
         cands = llm.discover(scan)
-    if old.get("url") and not any(x["url"] == old["url"] for x in cands):
-        cands.insert(0, {"url": old["url"], "models": [old.get("model")] if old.get("model") else []})
+    if old.get("url"):       # the configured one first: Enter (or --yes) keeps it
+        mine = next((x for x in cands if x["url"] == old["url"]), {"url": old["url"], "models": [old.get("model")] if old.get("model") else []})
+        cands = [mine] + [x for x in cands if x is not mine]
     for i, x in enumerate(cands, 1):
         say(f"    {i}) {x['url']:<36} {', '.join(m for m in x['models'][:3] if m)}")
     if not cands:
@@ -188,7 +190,14 @@ def step_head(c, a):
 def step_storage(c, a):
     say("\n3. Where backups and the model mirror live")
     s = c["server"]
-    old = next(iter((c.get("spindles") or {}).items()), (None, {}))
+    have = spindles(c)
+    where = ", ".join(f"{n}: {v.get('mount')}" for n, v in have.items())
+    if have and s.get("repo_root") and not a.storage and (not INTERACTIVE or yes(
+            f"keep the storage as it is ({where}; repositories in {s['repo_root']})",
+            True, "a site already set up keeps its spindles, repositories and mirror store unless you change them here")):
+        say("  kept")
+        return
+    old = next(iter(have.items()), (None, {}))
     kind0 = (old[1].get("share") or {}).get("proto") or ("local" if old[0] else "")
     say("    local  a directory or disk on this machine\n    nfs    a NAS share over NFS (a Synology, TrueNAS…)\n"
         "    smb    a NAS share over SMB")
@@ -264,8 +273,12 @@ def step_hosts(c, a):
     name = s["hostname"]
     say("\n4. The machines Noctyx backs up (Linux only; Macs are monitored)")
     old = {h["name"]: h for h in c.get("hosts") or []}
+    mine = next((h for h in c.get("hosts") or [] if h["name"] == name or h.get("address") == s["address"]), None)
     head = {"name": name, "address": s["address"], "arch": hostos.arch(), "os": hostos.os_name(), "local": True}
-    if hostos.IS_MAC:
+    if mine:                 # an existing site's head entry stays exactly as it is
+        head = mine
+        say(f"  {mine['name']}: kept as configured" + (" (backed up)" if mine.get("repo") and mine.get("backup", True) is not False else " (monitored)"))
+    elif hostos.IS_MAC:
         tm = _time_machine()
         say(f"  this Mac is monitored, not backed up" + (f" (Time Machine backs it up to {tm!r})" if tm else ""))
         head["backup"] = False
@@ -274,7 +287,7 @@ def step_hosts(c, a):
         head["backup"] = False
     else:
         head["repo"] = name
-    hosts = [head] + [h for n, h in old.items() if n != name and h.get("address") != s["address"]]
+    hosts = [head] + [h for h in c.get("hosts") or [] if h is not head]
     nodes = [x.split("=", 1) for x in a.node]
     if INTERACTIVE:
         if any(h.get("repo") for h in hosts[1:]):
@@ -295,12 +308,18 @@ def step_hosts(c, a):
         pub = _ssh_key(c)
     for n, addr in nodes:
         arch = _node_arch(c, addr) or old.get(n, {}).get("arch") or "x86_64"
-        hosts = [h for h in hosts if h["name"] != n] + [{"name": n, "address": addr, "arch": arch, "os": "linux", "repo": n}]
+        if n in old:         # a node already in the site keeps its entry (repo, spindle, custom keys)
+            say(f"  {n}: already in the site, kept")
+            continue
+        hosts.append({"name": n, "address": addr, "arch": arch, "os": "linux", "repo": n})
     c["hosts"] = hosts
-    keep = {r["id"]: r for r in c.get("repositories") or []}
-    spindle = next(iter(c["spindles"]))
-    c["repositories"] = [keep.get(h["repo"]) or {"id": h["repo"], "spindle": spindle}
-                         for h in hosts if h.get("repo") and h.get("os", "linux") == "linux" and h.get("backup", True) is not False]
+    repos = list(c.get("repositories") or [])          # every existing repository stays
+    spindle = next(iter(spindles(c)))
+    for h in hosts:
+        if h.get("repo") and h.get("os", "linux") == "linux" and h.get("backup", True) is not False \
+                and not any(r.get("id") == h["repo"] for r in repos):
+            repos.append({"id": h["repo"], "spindle": spindle})
+    c["repositories"] = repos
     pr = c.setdefault("profiles", {})
     pr.setdefault("system", {"description": "the whole root filesystem minus the noise list", "paths": ["/"],
                              "exclusions": ["common", "per-host"]})
@@ -326,7 +345,7 @@ def step_hosts(c, a):
 def step_console(c, a):
     say("\n5. Who may use the console")
     s = c["server"]
-    auth = not a.no_auth if not INTERACTIVE else yes(
+    auth = (False if a.no_auth else s.get("console_auth", True) is not False) if not INTERACTIVE else yes(
         "require sign-in", s.get("console_auth", True) is not False,
         "on: everyone signs in (viewer, operator, admin). off: open to anyone on the LAN, for a network you trust")
     s["console_auth"] = auth
@@ -406,7 +425,7 @@ def main(argv):
     first = next((h["name"] for h in c["hosts"] if h.get("repo") and h.get("backup", True) is not False), "<node>")
     say(f"""
 next:
-  sudo noctyx setup all          tools, owner, {'mount, ' if any(s.get('share') for s in c['spindles'].values()) else ''}TLS, repositories, endpoint, services, escrow
+  sudo noctyx setup all          tools, owner, {'mount, ' if any(s.get('share') for s in spindles(c).values()) else ''}TLS, repositories, endpoint, services, escrow
   sudo noctyx install-agent      the agent on every Linux host to back up
   sudo noctyx backup --host {first} --profile config
   sudo noctyx setup verify       every check, and a backup+restore round trip

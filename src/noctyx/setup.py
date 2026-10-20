@@ -54,6 +54,11 @@ def _run(argv, **kw):
     return r
 
 
+def spindles(c):
+    """{name: spindle} of the storage targets; skips the "_comment"-style entries a site config may carry."""
+    return {k: v for k, v in (c.get("spindles") or {}).items() if isinstance(v, dict) and not k.startswith("_")}
+
+
 def owner_exists():
     import pwd
     try:
@@ -202,7 +207,7 @@ def setup_mount(c):
     Then make repo_root and the HF store, owned by the repository owner."""
     if not owner_exists():
         fail(f"no user {P['repo_owner']}: run `noctyx setup owner` first")
-    for name, sp in (c.get("spindles") or {}).items():
+    for name, sp in spindles(c).items():
         mount, sh = pathlib.Path(sp["mount"]), sp.get("share")
         if not sh:
             mount.mkdir(parents=True, exist_ok=True)
@@ -243,7 +248,7 @@ def setup_mount(c):
         if subprocess.run(hostos.as_user(P["repo_owner"], ["test", "-w", str(p)])).returncode:
             fail(f"{p} is not writable by {P['repo_owner']}" + (
                  " — the NAS refuses its uid: set server.repo_owner_uid to the NAS user's uid, or allow it on the share"
-                 if any(sp.get("share") for sp in (c.get("spindles") or {}).values()) else ""))
+                 if any(sp.get("share") for sp in spindles(c).values()) else ""))
         print(f"  {p}: writable by {P['repo_owner']}")
 
 
@@ -613,7 +618,7 @@ def _privacy_needs(c):
     """[(what, binary)] that need Full Disk Access on this Mac; [] on Linux or when nothing does."""
     if not hostos.IS_MAC:
         return []
-    if not any(hostos.off_boot_volume(sp["mount"]) for sp in (c.get("spindles") or {}).values()):
+    if not any(hostos.off_boot_volume(sp["mount"]) for sp in spindles(c).values()):
         return []
     need = [] if cm.rest_on_nas(c) else [("the repository endpoint", str(BIN / "rest-server"))]
     need.append(("Noctyx's scheduler, retention, mirror and console (and the restic they run)",
@@ -712,7 +717,7 @@ def _escrow_state():
 
 
 def _spindles_ready(c):
-    sps = (c.get("spindles") or {}).values()
+    sps = spindles(c).values()
     return all((os.path.ismount(s["mount"]) if s.get("share") else os.path.isdir(s["mount"])) for s in sps) \
         and os.path.isdir(cm.repo_root(c))
 
@@ -729,7 +734,7 @@ def steps_state(c):
         ("owner", owner_exists(), f"the repository owner {P['repo_owner']}"),
         ("mount", _spindles_ready(c), "storage: " + ", ".join(
             f"{n} {s.get('share') and share_source(s['share']) or 'local'} at {s['mount']}"
-            for n, s in (c.get("spindles") or {}).items())),
+            for n, s in spindles(c).items())),
         ("tls", pathlib.Path(tls["ca"]).exists() and _crt_ok(tls["cert"]), "the site CA and the head's certificate"),
         ("repos", len(inited) == len(repos), f"repositories ({len(inited)}/{len(repos)} made)" if repos
          else "repositories: none yet (add the Linux hosts to back up: noctyx init)"),
@@ -883,7 +888,7 @@ def verify(c, run_canary=True):
 
     print("storage")
     k.add("owner", owner_exists(), P["repo_owner"], "sudo noctyx setup owner")
-    for n, sp in (c.get("spindles") or {}).items():
+    for n, sp in spindles(c).items():
         sh = sp.get("share")
         ok = os.path.ismount(sp["mount"]) if sh else os.path.isdir(sp["mount"])
         k.add(f"spindle {n}", ok, f"{share_source(sh) + ' at ' if sh else 'local '}{sp['mount']}"

@@ -1701,6 +1701,8 @@ def metrics_text():
             out.append(f"noctyx_hygiene_report_timestamp_seconds{_lbl(host=host)} {d.get('ts', 0)}")
 
     def components():
+        if not CM.VERSIONS.exists():      # not checked yet: the nightly run (or `noctyx versions`) makes it
+            return
         inv = json.loads(CM.VERSIONS.read_text())
         out.append("# HELP noctyx_component_behind 1: a critical component is older than Noctyx's pin, or missing.")
         out.append("# HELP noctyx_component_upgrade_available 1: a newer release than the pin exists upstream.")

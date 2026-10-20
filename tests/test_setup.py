@@ -167,8 +167,42 @@ def test_a_mac_head_is_monitored_and_linux_nodes_get_repositories(tmp_path, monk
 def test_a_linux_head_backs_itself_up(tmp_path, monkeypatch, fake_llm):
     c = _init(tmp_path, monkeypatch, fake_llm)
     assert c["hosts"][0]["repo"] == "head-01" and [r["id"] for r in c["repositories"]] == ["head-01"]
-    c = _init(tmp_path, monkeypatch, fake_llm, "--no-head-backup")
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    c = _init(fresh, monkeypatch, fake_llm, "--no-head-backup")
     assert c["repositories"] == [] and not cm.backup_hosts(c)
+
+
+def test_rerunning_init_on_an_existing_site_loses_nothing(tmp_path, monkeypatch, fake_llm):
+    """A site set up long ago (comments in spindles, a shared repository, custom host keys, sign-in off):
+    a --yes re-run keeps every bit of it, and a new node only adds."""
+    site = {"version": 1, "assistant": {"enabled": True, "url": f"http://127.0.0.1:{fake_llm}/v1", "model": "tiny-model"},
+            "server": {"hostname": "head-01", "address": "192.0.2.10", "ui_port": 20996, "console_auth": False,
+                       "repo_root": "/mnt/nas/backups", "ssh": {"user": "ops", "key": "/root/.ssh/id_ed25519"},
+                       "tls": {"cert": "/x/s.crt", "key": "/x/s.key", "ca": "/x/ca.crt"}},
+            "spindles": {"_comment": "the NAS and a local disk", "nas": {"mount": "/mnt/nas", "kind": "nas"},
+                         "hot": {"mount": "/mnt/hot", "kind": "local"}},
+            "repositories": [{"id": "head-01", "spindle": "hot"}, {"id": "gpu-class", "spindle": "nas"},
+                             {"id": "archive", "spindle": "nas"}],
+            "hosts": [{"name": "head-01", "address": "192.0.2.10", "arch": "x86_64", "repo": "head-01", "used_gb": 900},
+                      {"name": "gpu-01", "address": "192.0.2.21", "arch": "aarch64", "repo": "gpu-class", "spindle": "nas"},
+                      {"name": "gpu-02", "address": "192.0.2.22", "arch": "aarch64", "repo": "gpu-class"}],
+            "hf_mirror": {"store": "/mnt/nas/hf-mirror", "port": 20995}, "profiles": {"system": {"paths": ["/"]}}}
+    (tmp_path / "site.json").write_text(json.dumps(site))
+    monkeypatch.setattr(hostos, "IS_MAC", False)
+    from noctyx import firstrun
+    monkeypatch.setattr(firstrun, "CONFIG", str(tmp_path / "site.json"))
+    monkeypatch.setattr(firstrun.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(firstrun, "_ssh_key", lambda c: "ssh-ed25519 AAAA test")
+    monkeypatch.setattr(firstrun, "_node_arch", lambda c, addr: "aarch64")
+    assert firstrun.main(["--yes", "--node", "gpu-03=192.0.2.23"]) == 0
+    c = json.loads((tmp_path / "site.json").read_text())
+    assert c["spindles"] == site["spindles"] and c["server"]["repo_root"] == "/mnt/nas/backups"
+    assert c["hf_mirror"]["store"] == "/mnt/nas/hf-mirror" and c["server"]["console_auth"] is False
+    assert c["hosts"][:3] == site["hosts"]                       # untouched, custom keys and all; no "local" added
+    assert c["hosts"][3]["name"] == "gpu-03"
+    assert [r["id"] for r in c["repositories"]] == ["head-01", "gpu-class", "archive", "gpu-03"]
+    assert c["assistant"]["url"] == site["assistant"]["url"] and c["server"]["ssh"]["user"] == "ops"
 
 
 def test_macs_are_never_backup_targets():
