@@ -1184,7 +1184,7 @@ def cmd_install_agent(a):
             files[name] = str(f)
         env = {**os.environ, "NOCTYX_CONFIG": CFG_PATH, "NX_AGENT_FILE": files["agent"], "NX_DUMPS_FILE": files["dumps"],
                "NX_COMMON_FILE": files["common"],
-               "NX_ORCH": str(pathlib.Path(__file__).resolve()),
+               "NX_ORCH": str(pathlib.Path(__file__).resolve()), "NX_PY": sys.executable,
                **{f"NX_{k.upper()}": str(v) for k, v in P.items()}}
         for name in ([a.host] if a.host else [h["name"] for h in hosts(c)]):
             cmd = [str(NX_HOME / "agent" / "install-agent.sh"), "--host", name, "--profile", a.profile]
@@ -1769,13 +1769,15 @@ def render_dumps_conf(c, host):
 
 def _put(c, h, path, content, mode):
     """Install content at path on h (root-owned), via stdin — never a command line."""
-    cmd = f"install -D -m {mode} -o root -g root /dev/stdin {shlex.quote(path)}"
-    if is_head(c, h):
+    if h.get("os") == "macos":   # BSD install has no -D, and group 0 is wheel; an existing directory keeps its owner
+        cmd = (f"mkdir -p {shlex.quote(os.path.dirname(path))} && "
+               f"install -m {mode} -o root -g wheel /dev/stdin {shlex.quote(path)}")
+    else:
+        cmd = f"install -D -m {mode} -o root -g root /dev/stdin {shlex.quote(path)}"
+    if is_head(c, h) and not h.get("local"):
         r = subprocess.run(["sh", "-c", cmd], input=content, capture_output=True, text=True, timeout=60)
     else:
-        s_ = c["server"]["ssh"]
-        r = subprocess.run(["ssh", *SSH_OPTS, "-i", s_["key"], f"{h.get('ssh_user') or s_['user']}@{addr(h)}",
-                            f"sudo -n {cmd}"], input=content, capture_output=True, text=True, timeout=60)
+        r = subprocess.run(_ssh_argv(c, h, cmd), input=content, capture_output=True, text=True, timeout=60)
     if r.returncode != 0:
         raise RuntimeError(f"{path}: {(r.stderr or r.stdout).strip()[:200]}")
 
@@ -3474,7 +3476,7 @@ def main():
     stp = sub.add_parser("setup", help="first-time setup of the head, step by step (no step: where the site is, and what is next)")
     stp.add_argument("step", nargs="?", default="status",
                      choices=["status", "all", "verify", "tools", "owner", "mount", "tls", "repos", "endpoint",
-                              "rest-server", "units", "escrow"])
+                              "rest-server", "units", "privacy", "escrow"])
     stp.add_argument("--force", action="store_true", help="tls: replace the CA too (every node must then be re-installed); "
                      "tools: download even if installed")
     stp.add_argument("--no-canary", action="store_true", help="verify: skip the backup+restore round trip")

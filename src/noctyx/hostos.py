@@ -12,6 +12,7 @@ import platform
 import plistlib
 import re
 import shlex
+import shutil
 import socket
 import subprocess
 import sys
@@ -124,9 +125,10 @@ def as_user(user, argv):
 def trust_ca(ca, name):
     """Put the site CA where this machine's tools look, so a client needs no --cacert on the head."""
     if IS_MAC:
-        r = subprocess.run(["security", "add-trusted-cert", "-d", "-r", "trustRoot", "-k",
-                            "/Library/Keychains/System.keychain", str(ca)], capture_output=True, text=True)
-        return r.returncode == 0 or "already" in (r.stderr or "")
+        # the System keychain only takes a trust setting from someone at the screen: unattended (ssh, sudo
+        # from a script) it adds the certificate untrusted and fails, leaving clutter. Noctyx passes the CA
+        # explicitly everywhere, so this is a convenience the person does once, in Terminal.
+        return False
     anchor = pathlib.Path(f"/usr/local/share/ca-certificates/{name}-ca.crt")
     if not anchor.parent.is_dir():
         return False
@@ -241,6 +243,11 @@ def install_services(units, unit_prefix, label_prefix, log_dir="/var/log/noctyx"
             subprocess.run(["launchctl", "bootout", f"system/{label}"], capture_output=True)
         path.write_text(new)
         os.chmod(path, 0o644)
+        user = plistlib.loads(new.encode()).get("UserName")
+        if user:             # launchd opens the log as the job's user: a file it cannot write is EX_CONFIG (78)
+            log = pathlib.Path(log_dir, f"{label}.log")
+            log.touch(exist_ok=True)
+            shutil.chown(log, user)
         r = subprocess.run(["launchctl", "bootstrap", "system", str(path)], capture_output=True, text=True)
         if r.returncode:
             raise RuntimeError(f"launchctl bootstrap {label}: {(r.stderr or r.stdout).strip()}")
@@ -298,6 +305,64 @@ def job_running(log):
         return pid_alive(pathlib.Path(f"{log}.pid").read_text().strip())
     except OSError:
         return False
+
+
+# ── macOS privacy (TCC): what a daemon may read ─────────────────────────────
+def real_executable(path):
+    """The binary TCC sees for a launchd job: the interpreter behind a venv's symlinks."""
+    return os.path.realpath(path)
+
+
+def off_boot_volume(path):
+    """Is path on another volume than the Mac's data volume (a network share or an external disk)? macOS
+    guards both from background processes until they have Full Disk Access."""
+    try:
+        return os.stat(path).st_dev != os.stat("/private/var").st_dev
+    except OSError:
+        return True
+
+
+def open_for_console_user(*argv):
+    """Run `open …` in the logged-in user's session (System Settings, Finder), from root over ssh or sudo."""
+    try:
+        uid = os.stat("/dev/console").st_uid
+    except OSError:
+        return False
+    if uid == 0:
+        return False
+    return subprocess.run(["launchctl", "asuser", str(uid), "sudo", "-u", f"#{uid}", "open", *argv],
+                          capture_output=True).returncode == 0
+
+
+FULL_DISK_ACCESS_PANE = "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles"
+
+
+def launchd_probe(label, user, argv, timeout=20):
+    """Run argv once as a launchd daemon (the context TCC judges Noctyx's services in) -> (rc, output)."""
+    out = pathlib.Path(f"/var/tmp/{label}.out")
+    out.unlink(missing_ok=True)
+    out.touch()
+    shutil.chown(out, user)
+    plist = pathlib.Path(f"/var/tmp/{label}.plist")
+    plist.write_bytes(plistlib.dumps({"Label": label, "ProgramArguments": argv, "UserName": user, "RunAtLoad": True,
+                                      "LaunchOnlyOnce": True, "StandardOutPath": str(out), "StandardErrorPath": str(out)}))
+    os.chmod(plist, 0o644)
+    subprocess.run(["launchctl", "bootout", f"system/{label}"], capture_output=True)
+    subprocess.run(["launchctl", "bootstrap", "system", str(plist)], capture_output=True)
+    rc = None
+    for _ in range(timeout * 2):
+        st = subprocess.run(["launchctl", "print", f"system/{label}"], capture_output=True, text=True).stdout
+        m = re.search(r"last exit code = (\d+)", st)
+        if m and not re.search(r"^\s*pid = \d+", st, re.M):
+            rc = int(m.group(1))
+            break
+        import time
+        time.sleep(0.5)
+    subprocess.run(["launchctl", "bootout", f"system/{label}"], capture_output=True)
+    plist.unlink(missing_ok=True)
+    text = out.read_text(errors="replace").strip()
+    out.unlink(missing_ok=True)
+    return rc, text
 
 
 # ── boot identity ───────────────────────────────────────────────────────────

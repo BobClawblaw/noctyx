@@ -83,6 +83,10 @@ def write(path, c):
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
         f.write(json.dumps(c, indent=1) + "\n")
+    if p.exists():           # keep what `setup owner` gave it (0640, the owner's group: the directory reads it)
+        st = p.stat()
+        os.chown(tmp, st.st_uid, st.st_gid)
+        os.chmod(tmp, st.st_mode & 0o777)
     os.replace(tmp, p)
 
 
@@ -205,7 +209,7 @@ def step_storage(c, a):
             sh["user"] = a.nas_user or ask("NAS user", sh0.get("user", ""), "the NAS account that owns the share")
         mount = a.mount or ask("mount it at", old[1].get("mount") or
                                ("/Volumes/noctyx-nas" if hostos.IS_MAC else "/mnt/noctyx-nas"), "an empty directory on this machine")
-        sub = a.subdir or ask("folder for Noctyx on the share", "noctyx", "repositories go in <mount>/<folder>/repos")
+        sub = a.subdir if a.subdir is not None else ask("folder for Noctyx on the share", "noctyx", "repositories go in <mount>/<folder>/repos")
         c["spindles"] = {"nas": {"mount": mount, "kind": "nas", "share": sh}}
         base = f"{mount.rstrip('/')}/{sub.strip('/')}" if sub.strip("/") else mount.rstrip("/")
         s["repo_root"] = f"{base}/repos"

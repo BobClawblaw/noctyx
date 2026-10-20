@@ -18,6 +18,7 @@ import io
 import json
 import os
 import pathlib
+import re
 import shutil
 import ssl
 import subprocess
@@ -32,7 +33,7 @@ from . import hostos, llm
 from . import orchestrator as cm
 from .paths import P
 
-STEPS = ("tools", "owner", "mount", "tls", "repos", "endpoint", "units", "escrow")
+STEPS = ("tools", "owner", "mount", "tls", "repos", "endpoint", "units", "privacy", "escrow")
 BIN = pathlib.Path("/usr/local/bin")
 
 # pinned releases and their SHA-256 sums (from each release's SHA256SUMS). A download that does not match
@@ -92,12 +93,16 @@ def _log_dir():
 
 # ── tools: restic and rest-server, pinned and checked ───────────────────────
 def _version(binary):
-    try:
-        out = subprocess.run([binary, "version"], capture_output=True, text=True, timeout=10).stdout
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    words = out.split()
-    return words[1].lstrip("v") if len(words) > 1 else None
+    """restic says `restic 0.19.1 compiled…` to `version`; rest-server says the same to `--version`."""
+    for arg in ("version", "--version"):
+        try:
+            r = subprocess.run([binary, arg], capture_output=True, text=True, timeout=10)
+        except (OSError, subprocess.TimeoutExpired):
+            return None
+        v = next((w.lstrip("v") for w in (r.stdout or r.stderr).split() if re.fullmatch(r"v?\d+\.\d+(\.\d+)?", w)), None)
+        if r.returncode == 0 and v:
+            return v
+    return None
 
 
 def _fetch(name, url):
@@ -172,6 +177,9 @@ def setup_owner(c):
         os.chmod(d, mode)
     shutil.chown(P["state"], P["repo_owner"], P["repo_owner"])
     shutil.chown(P["etc"], "root", P["repo_owner"])
+    # the directory service runs as the owner and reads the site config (no secrets in it: keys live apart)
+    shutil.chown(cm.CFG_PATH, "root", P["repo_owner"])
+    os.chmod(cm.CFG_PATH, 0o640)
     print(f"  {P['repo_owner']}: ok; {P['etc']}, {P['repo_keys']}, {P['repo_creds']}, {P['state']}")
 
 
@@ -269,16 +277,24 @@ def setup_tls(c, force=False):
     else:
         _run(["openssl", "genrsa", "-out", str(ca_key), "4096"])
         os.chmod(ca_key, 0o600)
+        # CA extensions and key identifiers: Python 3.13+ verifies in strict X.509 mode, which refuses a chain
+        # without them (and LibreSSL's `req -x509`, macOS's openssl, adds none by itself)
+        conf = ca.with_suffix(".cnf")
+        conf.write_text("[req]\ndistinguished_name = dn\nx509_extensions = v3_ca\n[dn]\n[v3_ca]\n"
+                        "basicConstraints = critical, CA:TRUE\nkeyUsage = critical, keyCertSign, cRLSign\n"
+                        "subjectKeyIdentifier = hash\nauthorityKeyIdentifier = keyid:always\n")
         _run(["openssl", "req", "-x509", "-new", "-nodes", "-key", str(ca_key), "-sha256", "-days", "3650",
-              "-subj", "/O=Noctyx/CN=Noctyx site CA", "-out", str(ca)])
+              "-config", str(conf), "-subj", "/O=Noctyx/CN=Noctyx site CA", "-out", str(ca)])
+        conf.unlink()
         print(f"  CA made: {ca}")
         force = True
     if force or not crt.exists() or subprocess.run(["openssl", "x509", "-in", str(crt), "-noout", "-checkend",
-                                                    str(30 * 86400)], capture_output=True).returncode:
+                                                    str(30 * 86400)], capture_output=True).returncode or not _strict_ok(crt):
         san = [f"IP:{s['address']}", f"DNS:{s.get('hostname') or 'head'}", "DNS:localhost", "IP:127.0.0.1",
                *[str(x) for x in (tls.get("san") or [])]]
         ext = crt.with_suffix(".ext")
         ext.write_text("basicConstraints = CA:FALSE\nkeyUsage = critical, digitalSignature, keyEncipherment\n"
+                       "subjectKeyIdentifier = hash\nauthorityKeyIdentifier = keyid, issuer\n"
                        f"extendedKeyUsage = serverAuth\nsubjectAltName = {','.join(dict.fromkeys(san))}\n")
         csr = crt.with_suffix(".csr")
         _run(["openssl", "req", "-new", "-newkey", "rsa:3072", "-nodes", "-keyout", str(key),
@@ -302,8 +318,18 @@ def setup_tls(c, force=False):
     # the CA is public: put it where this machine's tools look, so --cacert is not needed on the head
     if hostos.trust_ca(ca, P["unit_prefix"]):
         print("  CA added to this machine's trust store")
+    elif hostos.IS_MAC:
+        print(f"  optional, for browsers and curl on this Mac (Noctyx itself does not need it), in Terminal:\n"
+              f"    sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain {ca}")
     end = _run(["openssl", "x509", "-in", str(crt), "-noout", "-enddate"]).stdout.strip().split("=", 1)[-1]
     print(f"  the certificate expires {end}: `noctyx setup tls` again renews it (the CA stays)")
+
+
+def _strict_ok(crt):
+    """Does a strict X.509 client (Python 3.13+) accept this leaf? It wants an Authority Key Identifier; a leaf
+    made before setup added one is renewed under the same CA, so no node needs re-installing."""
+    txt = subprocess.run(["openssl", "x509", "-in", str(crt), "-noout", "-text"], capture_output=True, text=True).stdout
+    return "Authority Key Identifier" in txt
 
 
 # ── repos ───────────────────────────────────────────────────────────────────
@@ -404,8 +430,21 @@ def setup_endpoint(c):
     up = cm.rest_up(c)
     cm.audit("setup-rest-server", up=up)
     if not up:
-        fail(f"{name}: endpoint {cm.rest_url(c)} DOWN: {hostos.logs_hint(name, _label(), _log_dir())}")
+        fail(f"{name}: endpoint {cm.rest_url(c)} DOWN\n{_service_log(name)}")
     print(f"  {name}: endpoint {cm.rest_url(c)} UP")
+
+
+def _service_log(name):
+    """The service's last log lines and the service manager's view of it: what a person (or the assistant)
+    needs to see why it is down."""
+    hint = hostos.logs_hint(name, _label(), _log_dir())
+    out = subprocess.run(["sh", "-c", hint + " 2>&1"], capture_output=True, text=True).stdout.strip()[-1500:]
+    if hostos.IS_MAC:
+        st = subprocess.run(["launchctl", "print", f"system/{hostos.launchd_label(name, _label())}"],
+                            capture_output=True, text=True).stdout
+        out += "\nlaunchctl: " + "; ".join(l.strip() for l in st.splitlines()
+                                           if re.search(r"^\s*(state|last exit code|pid) =", l))[:300]
+    return f"$ {hint}\n{out or '(empty)'}"
 
 
 def head_units(c):
@@ -421,8 +460,97 @@ def setup_units(c):
     down = [n for n in ("console", "directory", "hf-mirror")
             if not hostos.service_active(_service(f"{n}.service"), _label())]
     if down:
-        fail("not running: " + ", ".join(down) + " — " +
-             "; ".join(hostos.logs_hint(_service(f"{n}.service"), _label(), _log_dir()) for n in down))
+        fail("not running: " + ", ".join(down) + "\n" + "\n".join(_service_log(_service(f"{n}.service")) for n in down))
+
+
+# ── privacy (macOS): Full Disk Access for the daemons that read the repositories ──
+def _privacy_needs(c):
+    """[(what, binary)] that need Full Disk Access on this Mac; [] on Linux or when nothing does."""
+    if not hostos.IS_MAC:
+        return []
+    off = any(hostos.off_boot_volume(sp["mount"]) for sp in (c.get("spindles") or {}).values())
+    backs_up = any(h.get("local") and h.get("repo") and h.get("backup", True) is not False for h in c.get("hosts", []))
+    need = []
+    if off and not cm.rest_on_nas(c):
+        need.append(("the repository endpoint", str(BIN / "rest-server")))
+    if off or backs_up:
+        need.append(("Noctyx's scheduler, mirror and console (and the restic they run)",
+                     hostos.real_executable(sys.executable)))
+    return need
+
+
+def _endpoint_reads(c):
+    """Can the endpoint read a repository? An authenticated GET of its config: 200, or why not."""
+    s = c["server"]
+    r = (c.get("repositories") or [None])[0]
+    if not r:
+        return True, "no repository"
+    user = f"{P['repo_dir_prefix']}{r['id']}"
+    try:
+        pw = (pathlib.Path(P["repo_creds"]) / f"{user}.pass").read_text().strip()
+    except OSError:
+        return False, "no endpoint login yet (noctyx setup repos)"
+    req = urllib.request.Request(f"{cm.rest_url(c)}/{user}/{r['id']}/config",
+                                 headers={"Authorization": "Basic " + base64.b64encode(f"{user}:{pw}".encode()).decode()})
+    try:
+        _https_req(req, s["tls"]["ca"])
+        return True, "reads the repositories"
+    except urllib.error.HTTPError as e:
+        return False, f"HTTP {e.code}" + (" (it cannot read the share: no Full Disk Access)" if e.code == 500 and hostos.IS_MAC else "")
+    except Exception as e:
+        return False, str(getattr(e, "reason", e))
+
+
+def _python_reads(c):
+    rc, out = hostos.launchd_probe(f"{_label()}.privacy-probe", P["repo_owner"] if owner_exists() else "root",
+                                   [sys.executable, "-c", "import os,sys; os.listdir(sys.argv[1]); print('ok')", cm.repo_root(c)])
+    last = (out.strip().splitlines() or [f"rc={rc}"])[-1]
+    return rc == 0 and last == "ok", last[-200:]
+
+
+def privacy_state(c):
+    """[(what, binary, ok, detail)] for every binary that needs Full Disk Access."""
+    out = []
+    for what, binary in _privacy_needs(c):
+        ok, detail = _endpoint_reads(c) if binary.endswith("rest-server") else _python_reads(c)
+        out.append((what, binary, ok, detail))
+    return out
+
+
+def setup_privacy(c):
+    """macOS guards network shares, external disks and people's own folders from background processes. The
+    daemons that read the repositories need Full Disk Access, which only a person at the Mac can give."""
+    if not hostos.IS_MAC:
+        print("  nothing to do on Linux")
+        return
+    st = privacy_state(c)
+    if not st:
+        print("  nothing needs Full Disk Access (the repositories are on this Mac's own disk)")
+        return
+    while True:
+        for what, binary, ok, detail in st:
+            print(f"  {'✓' if ok else '✗'} {binary}\n      {what}: {detail}")
+        missing = [b for _, b, ok, _ in st if not ok]
+        if not missing:
+            print("  Full Disk Access: granted")
+            return
+        print("\n  macOS needs you at this Mac for this one (no command can grant it):\n"
+              "    System Settings › Privacy & Security › Full Disk Access › + , then add:")
+        for b in missing:
+            print(f"      {b}")
+        print("    (in the file picker, ⌘⇧G takes a path). Switch each one on.")
+        if hostos.open_for_console_user(hostos.FULL_DISK_ACCESS_PANE):
+            for b in missing:
+                hostos.open_for_console_user("-R", b)
+            print("    The settings pane and the binaries in Finder are open on the Mac's screen.")
+        if not sys.stdin.isatty():
+            fail("Full Disk Access is missing for: " + ", ".join(missing) + " — grant it, then `sudo noctyx setup privacy`")
+        input("\n  press Enter once they are switched on… ")
+        for b in missing:      # a running daemon keeps the verdict it got: restart them
+            for n in ("rest-server", "hf-mirror", "console"):
+                hostos.restart_service(_service(f"{n}.service"), _label())
+        time.sleep(3)
+        st = privacy_state(c)
 
 
 # ── status ──────────────────────────────────────────────────────────────────
@@ -464,6 +592,8 @@ def steps_state(c):
         ("endpoint", cm.rest_up(c), f"the repository endpoint {cm.rest_url(c)}"),
         ("units", hostos.service_active(_service("console.service"), _label()),
          "the head's services (console, directory, mirror, timers)"),
+        *([("privacy", all(ok for *_, ok, _ in privacy_state(c)), "Full Disk Access for the daemons that read the repositories")]
+          if _privacy_needs(c) else []),
         ("escrow", bool(escrow) and not stale, "an escrow bundle of the keys"
          + (f" (newest {escrow[-1].name})" if escrow else "") + (f": {len(stale)} key(s) made since, re-run it" if stale else "")),
     ]
@@ -501,12 +631,15 @@ class Checks:
 
 
 def _https(url, ca, timeout=8):
-    ctx = ssl.create_default_context(cafile=ca)
     try:
-        with urllib.request.urlopen(url, context=ctx, timeout=timeout) as r:
-            return r.status, r.read(4096)
+        return _https_req(url, ca, timeout)
     except urllib.error.HTTPError as e:
         return e.code, b""
+
+
+def _https_req(req, ca, timeout=8):
+    with urllib.request.urlopen(req, context=ssl.create_default_context(cafile=ca), timeout=timeout) as r:
+        return r.status, r.read(4096)
 
 
 def _repo_file(c, repo):
@@ -568,6 +701,8 @@ def verify(c, run_canary=True):
     print("site")
     head = [h for h in c.get("hosts", []) if h.get("address") == s.get("address") or h.get("local")]
     k.add("config", True, f"{cm.CFG_PATH}: {len(c.get('hosts', []))} host(s), {len(c.get('repositories', []))} repo(s)")
+    rd = owner_exists() and subprocess.run(hostos.as_user(P["repo_owner"], ["test", "-r", cm.CFG_PATH])).returncode == 0
+    k.add("config readable", rd, f"by {P['repo_owner']} (the directory service reads it)", "sudo noctyx setup owner")
     k.add("head host", bool(head), head[0]["name"] if head else "no host entry has the head's address",
           "add the head to hosts (noctyx init does)", warn=True)
     a = llm.configured()
@@ -610,10 +745,19 @@ def verify(c, run_canary=True):
         txt = subprocess.run(["openssl", "x509", "-in", s["tls"]["cert"], "-noout", "-text"], capture_output=True, text=True).stdout
         k.add("names", f"IP Address:{s['address']}" in txt, f"the certificate names {s['address']}",
               "the head's address changed: sudo noctyx setup tls --force")
+        k.add("strict clients", "Authority Key Identifier" in txt, "key identifiers present (Python 3.13+ accepts it)",
+              "sudo noctyx setup tls   (renews the certificate, keeps the CA)")
 
     print("repositories")
     up = cm.rest_up(c)
     k.add("endpoint", up, cm.rest_url(c), "sudo noctyx setup endpoint")
+    if up:
+        reads, why = _endpoint_reads(c)
+        k.add("endpoint reads", reads, why, "sudo noctyx setup privacy" if hostos.IS_MAC else "sudo noctyx setup mount")
+        up = reads
+    for what, binary, ok, detail in privacy_state(c) if hostos.IS_MAC else []:
+        if not binary.endswith("rest-server"):
+            k.add("full disk access", ok, f"{binary}: {detail}", "sudo noctyx setup privacy")
     for r in c.get("repositories") or []:
         rid = r["id"]
         if not (pathlib.Path(P["repo_keys"]) / f"{rid}.key").exists():
@@ -622,7 +766,12 @@ def verify(c, run_canary=True):
         if not up:
             k.add(f"repo {rid}", False, "endpoint down: not tried")
             continue
-        res = _restic(c, rid, ["cat", "config"], timeout=60)
+        try:
+            res = _restic(c, rid, ["cat", "config"], timeout=60)
+        except subprocess.TimeoutExpired:
+            k.add(f"repo {rid}", False, "restic got no answer in 60 s (it retries what the endpoint refuses)",
+                  "sudo noctyx setup repos")
+            continue
         k.add(f"repo {rid}", res.returncode == 0, "opens through the endpoint with its key and login" if res.returncode == 0
               else (res.stderr or res.stdout).strip()[-200:], "sudo noctyx setup repos")
 
@@ -697,7 +846,7 @@ RUN = {"tools": lambda c, a: setup_tools(c, a.force), "owner": lambda c, a: setu
        "mount": lambda c, a: setup_mount(c), "tls": lambda c, a: setup_tls(c, a.force),
        "repos": lambda c, a: setup_repos(c), "endpoint": lambda c, a: setup_endpoint(c),
        "rest-server": lambda c, a: setup_endpoint(c), "units": lambda c, a: setup_units(c),
-       "escrow": lambda c, a: setup_escrow(c)}
+       "privacy": lambda c, a: setup_privacy(c), "escrow": lambda c, a: setup_escrow(c)}
 
 
 def run_step(name, c, a):

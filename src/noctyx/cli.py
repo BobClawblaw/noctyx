@@ -63,7 +63,18 @@ def tool(name, args):
         return subprocess.call(["bash", str(pathlib.Path(td) / script), *args], env=env)
 
 
+def _path():
+    """Where Noctyx installs restic and rest-server, and where a Mac keeps Homebrew's tools: on PATH even under a
+    sudo whose secure_path leaves them out (macOS's does), so every step finds what `setup tools` installed."""
+    have = os.environ.get("PATH", "").split(os.pathsep)
+    extra = [d for d in ("/usr/local/bin", "/usr/local/sbin", *(("/opt/homebrew/bin",) if sys.platform == "darwin" else ()))
+             if d not in have and os.path.isdir(d)]
+    if extra:
+        os.environ["PATH"] = os.pathsep.join([*have, *extra])
+
+
 def main(argv=None):
+    _path()
     argv = list(sys.argv[1:] if argv is None else argv)
     cmd = argv[0] if argv else None
     if cmd in (None, "banner"):

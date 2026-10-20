@@ -24,7 +24,9 @@ running a web console, a directory service, a Hugging Face mirror and restic bac
 plus agents on GPU nodes). A person is installing it for the first time and a step just failed. Using the \
 install guide below and the facts you are given, say in plain words what most likely went wrong and give the \
 exact commands that fix it, for this platform. Be brief: at most 8 lines, commands in backticks. If the facts \
-are not enough, name the one command whose output would tell."""
+are not enough, name the one command whose output would tell. Never suggest turning off a firewall, TLS \
+verification or any other protection, and never suggest installing tools Noctyx installs itself (restic and \
+rest-server come from `noctyx setup tools`)."""
 
 
 def _key(name):
@@ -128,8 +130,15 @@ def _guide():
 
 
 def facts():
+    if sys.platform == "darwin":
+        svc = (f"macOS: Noctyx's services are launchd daemons /Library/LaunchDaemons/{P['launchd_prefix']}.<name>.plist "
+               f"(launchctl print|kickstart -k system/{P['launchd_prefix']}.<name>), logs in /var/log/noctyx/; "
+               "there is no systemctl or journalctl")
+    else:
+        svc = f"Linux: Noctyx's services are systemd units {P['unit_prefix']}-<name>.service (journalctl -u for logs)"
     return (f"platform: {platform.system()} {platform.release()} ({platform.machine()}); python {sys.version.split()[0]}; "
-            f"euid {os.geteuid()}; config {CONFIG} ({'present' if os.path.exists(CONFIG) else 'missing'})")
+            f"euid {os.geteuid()}; config {CONFIG} ({'present' if os.path.exists(CONFIG) else 'missing'}); "
+            f"restic/rest-server in /usr/local/bin; {svc}")
 
 
 def ask(question, system=None, max_tokens=500, a=None):
