@@ -8,9 +8,14 @@ caches. Every file is checked against its content hash, so the same model on fiv
 
 ## How it is served
 
-The mirror is `noctyx mirror`, a small stdlib HTTP server. `noctyx install-head --apply` installs it as
-`noctyx-hf-mirror.service`. The service runs as the `repo_owner` user (default `noctyx`) and has read-only access to
-the store.
+The mirror is `noctyx mirror`, a small stdlib HTTP server. `noctyx setup units` (or `noctyx install-head --apply`)
+installs it as `noctyx-hf-mirror.service` on a Linux head and as the launchd daemon `dev.noctyx.hf-mirror` on a
+macOS head. It runs as the `repo_owner` user (default `noctyx`) and has read-only access to the store.
+
+On a macOS head whose store is on a NAS share or an external disk, macOS refuses the daemon that volume until
+Noctyx's Python has Full Disk Access: `sudo noctyx setup privacy` names the binary and checks the grant. The
+harvest (below) has so far been run from Linux heads only: it uses `ssh` and `rsync` from the head to each
+host.
 
 | Setting | Source | Default |
 |---|---|---|

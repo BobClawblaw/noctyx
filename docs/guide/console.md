@@ -39,7 +39,7 @@ collapse it with ▾. The layout is saved in the browser. **Reset panel layout**
 |---|---|
 | Cluster | fleet tokens/s, running requests, GPU power, tokens generated in 24 h, network, health. One row per node and model |
 | Fleet | a card per node: CPU, GPU, temperature and power, network, memory, disk, the model it serves, uptime, its next scheduled backup |
-| Machine Report | the selected node, with tabs **overview, llm, network, storage, gpu, health, backups**, and *backup now* / *verify now* |
+| Machine Report | the selected node, with tabs **overview, llm, network, storage, gpu, health, backups**, and *backup now* / *verify now* (backed-up hosts only) |
 | Storage Tiers | NAS free and used space, size per repository, growth forecast |
 | Alerts | firing alerts with LLM triage (when an assistant is configured) |
 | Morning Brief | the assistant's summary of the fleet |
@@ -57,6 +57,24 @@ Click a node in Fleet to open its report:
 
 You can link straight to a node, panel and tab with the hash form `/#host=gpu-01&tab=gpu` or `/#panel=schedule`.
 A bare `/#gpu-01` selects a host.
+
+**What the report's overview shows:**
+
+- **Vitals, filesystems, block devices:** the host's facts, read over ssh (for the head, with `"local": true`,
+  read on the head itself), cached up to 10 minutes. They need no Prometheus.
+- **Live numbers** (the gauges, sparklines and the llm, network, storage, gpu and health tabs) come from Prometheus
+  on `127.0.0.1:9090`. A head without one shows the facts only; `sudo noctyx setup metrics` installs it (see
+  [install](install.md)).
+- **Components:** every critical component Noctyx tracks on that machine (Noctyx itself, restic, rest-server,
+  Prometheus, node_exporter, the agent) with the installed version, Noctyx's pin, the latest upstream release, its
+  state, and the command that upgrades it on that machine when it is behind or a newer release is out. The table
+  is `noctyx versions`' last run (nightly, or by hand); the line under it says when. See
+  [upgrade](upgrade.md#component-versions).
+- **A monitored host** (a Mac, or a host with `"backup": false` or no repository) has no *backup now* / *verify now*
+  buttons. In place of the snapshots card and the *Noctyx agent* line it shows its own backups: for a Mac a
+  **Time Machine** card (the last finished backup, the destination, *backing up now* while one runs; amber when
+  the last one is more than two days old) and a Backups line saying Time Machine backs it up. Noctyx never backs
+  a Mac up.
 
 ## Cluster (`/cluster`)
 
@@ -179,6 +197,7 @@ when the system asks for reduced motion.
 | `/#settings` | Dashboard with the settings drawer open |
 | `/login` | sign-in (`?next=/path`) |
 | `/metrics` | Prometheus exposition, no sign-in |
+| `/api/v1/versions` | every critical component per machine: installed, pinned, latest, state, upgrade command |
 | `/api/v1/…` | the JSON the panels read. `POST /api/v1/action` runs actions ([accounts](accounts.md#api-token-for-scripts)) |
 
 ## Prometheus `/metrics`
@@ -190,8 +209,12 @@ The console exports its own state for Prometheus, cached for 30 seconds:
 - **runs:** `noctyx_run_*`
 - **repositories, tiers and spindles:** `noctyx_repo_bytes`, `noctyx_tier_free_bytes`, `noctyx_tier_mounted`,
   `noctyx_spindle_busy`, `noctyx_rest_endpoint_up`
-- **NAS RAID:** `noctyx_nas_raid_*`
+- **NAS RAID:** `noctyx_nas_raid_*` (only when `server.nas_ssh` is set: the RAID state is read over ssh to the NAS)
 - **hygiene:** `noctyx_hygiene_items`
+- **components:** `noctyx_component_behind` (1: older than Noctyx's pin, or missing) and
+  `noctyx_component_upgrade_available` (1: a newer upstream release), each labelled `host`, `component`,
+  `installed`, `pinned`, `latest` and `upgrade` (the command); `noctyx_versions_timestamp_seconds`. The alert rules
+  `ComponentBehind`, `ComponentUpgradeAvailable` and `VersionsUnknown` (not checked for 3 days) read them
 - **GPU and temperatures from the node collectors:** `noctyx_gpu_*`, `noctyx_system_temperature_celsius`
 - **per-source health:** `noctyx_source_ok{source=…}`. A failing source drops its own series and never the whole
   scrape.
@@ -199,8 +222,12 @@ The console exports its own state for Prometheus, cached for 30 seconds:
 Every metric Noctyx makes starts with `paths.metric_prefix` (default `noctyx`), in the console's `/metrics`, the
 mirror's, the node collectors' and the alert rules alike; a site that kept older dashboards sets its old prefix.
 
-`noctyx tool install-alerting` adds this scrape job (named after `prom_job_console`, default `noctyx`) to
-`/etc/prometheus/prometheus.yml`, along with the alert rules and Alertmanager:
+`sudo noctyx setup metrics` writes this scrape job (named after `prom_job_console`, default `noctyx`, with the
+target port taken from `server.ui_port`) into the Prometheus config it manages, along with the head's own
+exporter, every node's exporter, the LLM servers and the alert rules. On a Linux head that already runs
+Prometheus, `setup metrics` prints the jobs instead, and `noctyx tool install-alerting` adds this job to
+`/etc/prometheus/prometheus.yml` along with the alert rules and Alertmanager (Linux only, with apt and systemd;
+a Mac head has no Alertmanager yet, so its rules evaluate in Prometheus but the Alerts panel stays empty):
 
 ```yaml
   - job_name: noctyx
@@ -211,5 +238,12 @@ mirror's, the node collectors' and the alert rules alike; a site that kept older
       - targets: ['127.0.0.1:20996']
 ```
 
-The job scrapes `127.0.0.1`, so the console's certificate needs `IP:127.0.0.1` in its subjectAltName (see
-[install](install.md#3-set-up-the-head-noctyx-setup)). The target port is fixed at 20996.
+The job scrapes `127.0.0.1`, so the console's certificate needs `IP:127.0.0.1` in its subjectAltName (`noctyx setup
+tls` puts it there). `install-alerting`'s target port is fixed at 20996.
+
+## Config changes
+
+The console re-reads the site config when the file changes (an `init` re-run, `policy-set`, a hand edit): hosts,
+policy and settings apply on the next request, with no restart. The TLS files and the port are read once at start:
+after changing them, restart the console (`sudo systemctl restart <unit_prefix>-console` on Linux,
+`sudo launchctl kickstart -k system/<launchd_prefix>.console` on a Mac).

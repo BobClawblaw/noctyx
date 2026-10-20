@@ -10,11 +10,24 @@ policy, retention, verification and the job plumbing.
 Paths below are the defaults from `src/noctyx/paths.py`. A site's `"paths"` block can change them, and
 `noctyx paths` prints the values in effect.
 
+## Macs are monitored, not backed up
+
+Only Linux hosts are backed up. The agent is a Linux one, and a Mac has Time Machine. A host with
+`"os": "macos"` is monitored only: `noctyx backup` and `install-agent` skip it with `monitored only`, and the
+console's machine report shows its Time Machine state (destination, last backup, whether one is running)
+instead of backup buttons. On a Mac head, `noctyx setup verify` checks that Time Machine has a destination and
+a backup less than two days old, as a warning.
+
+The head itself can be a Mac. It still runs every Linux node's backups: the repository endpoint
+(rest-server) and the repositories live on its storage, a local disk or a NAS share it mounts over NFS or
+SMB, and the nodes send their snapshots to it over HTTPS. On a Mac head, the endpoint and the scheduler need
+Full Disk Access to reach a share or an external disk (`sudo noctyx setup privacy`).
+
 ## How a backup runs
 
 `noctyx backup [--host NAME] [--profile system] [--dry-run] [--force-low-net]`
 
-For each target host (all hosts that are enabled, have a `repo` and are not `"backup": false`), the head
+For each target host (all enabled Linux hosts that have a `repo` and are not `"backup": false`), the head
 node does the following:
 
 1. **Ownership sweep.** Files owned by root inside the repositories under `server.repo_root` are chowned
@@ -34,7 +47,8 @@ node does the following:
      other hosts carry on.
    - Retention and `copy` wait for the lock instead.
 4. **Agent run.** It runs `ssh <host> sudo -n noctyx-agent backup --profile P` and streams restic's
-   output live.
+   output live. A host marked `"local": true` (a Linux head backing itself up) runs the same command
+   locally, without ssh.
    - The agent takes its own one-job-per-host lock (`/var/lib/noctyx/agent.lock`).
    - It writes boot, disk, LVM, package and GPU metadata to `/var/lib/noctyx/fsmeta/<UTC stamp>/`.
    - It runs the `pre.d` hooks (database dumps), then
@@ -68,6 +82,18 @@ A profile is a named set of paths in the site config:
               "exclusions": ["common", "per-host"] }
 }
 ```
+
+`noctyx init` writes two profiles: `system` (`/`, nightly in the 01:00–07:00 window) and `config`
+(`/etc` and `/usr/local/etc`: configuration only, a few MB). Take the first backup of a new node with
+`config`, to prove the path end to end in seconds:
+
+```bash
+sudo noctyx install-agent --host gpu-01 --profile config
+sudo noctyx backup --host gpu-01 --profile config
+```
+
+Before any larger profile, check the size of every path on the node (`sudo du -sh /root /home /srv …`):
+a home directory that holds models can be hundreds of GB, and the first backup sends all of it.
 
 `noctyx install-agent --host gpu-01 --profile system` writes the profile's paths to
 `/etc/noctyx/profile-system.d/paths` on the node. Every profile uses the packaged baseline list
@@ -265,10 +291,11 @@ NAS.
 
 ## `nightly`
 
-`noctyx-nightly.timer` (07:30 daily) runs `noctyx nightly`. Each step runs in its own process, so one
-failure never skips the rest:
+`noctyx-nightly.timer` (07:30 daily; on a macOS head the launchd daemon `dev.noctyx.nightly`) runs
+`noctyx nightly`. Each step runs in its own process, so one failure never skips the rest:
 
-- every day: `hf-harvest`, then `recipe-discover`
+- every day: `hf-harvest`, then `recipe-discover`, then `versions` (every critical component on every
+  machine against its pin and the newest release: see [Upgrade](upgrade.md))
 - on Sundays, in addition: `prune` (a dry run) and `verify`
 
 The exit code is 1 if any step failed (`WARN <step> failed (rc=N)`).
@@ -276,8 +303,9 @@ The exit code is 1 if any step failed (`WARN <step> failed (rc=N)`).
 ## Detached jobs and `follow`
 
 `backup`, `verify`, `copy`, `prune`, `restore`, `hygiene`, `reboot` (with `--yes` or `--finish`) and
-`hf-harvest` do not run inside your shell. Each one starts as its own transient systemd unit, so closing
-the terminal or restarting the console never kills it.
+`hf-harvest` do not run inside your shell. On a Linux head each one starts as its own transient systemd
+unit; on a macOS head, as a process in its own session with its pid in `<log>.pid`. Either way, closing the
+terminal or restarting the console never kills it.
 
 ```text
 DETACHED unit=noctyx-backup-gpu-01-20261019T020000Z-12345 log=/var/log/noctyx/jobs/noctyx-backup-gpu-01-20261019T020000Z-12345.log
@@ -294,7 +322,8 @@ noctyx follow --unit noctyx-backup-gpu-01-20261019T020000Z-12345 \
               --log /var/log/noctyx/jobs/noctyx-backup-gpu-01-20261019T020000Z-12345.log
 ```
 
-`follow` exits with 125 if the unit ended without an exit record, which means it was killed.
+`follow` exits with 125 if the unit ended without an exit record, which means it was killed. On macOS,
+`follow` reads the job's pid file to know whether it is still running.
 
 ## Logs and the audit
 
@@ -302,7 +331,7 @@ noctyx follow --unit noctyx-backup-gpu-01-20261019T020000Z-12345 \
 |---|---|
 | every action (head node), one JSON line each | `/var/lib/noctyx/audit.jsonl` |
 | the agent's own results (each node) | `/var/lib/noctyx/audit.jsonl` on that node |
-| detached jobs' output | `/var/log/noctyx/jobs/<unit>.log` |
+| detached jobs' output | `/var/log/noctyx/jobs/<unit>.log` (macOS: and `<unit>.log.pid`) |
 | last restic run, progress, last restore/unlock (each node) | `/var/lib/noctyx/last-backup.log`, `progress`, `last-restore.log`, `last-unlock.log` |
 | scheduler state (last attempt per host and profile) | `/etc/noctyx/state/schedule-state.json` |
 | spindle lock holders | `/var/lock/noctyx/<spindle>.lock` (JSON: `what`, `pid`, `since`) |

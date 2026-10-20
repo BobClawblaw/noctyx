@@ -9,6 +9,7 @@
   <img alt="no dependencies" src="https://img.shields.io/badge/dependencies-none%20(stdlib)-2ea043">
   <img alt="backups: restic" src="https://img.shields.io/badge/backups-restic-0f766e">
   <img alt="GPUs: NVIDIA, Apple" src="https://img.shields.io/badge/GPUs-NVIDIA%20%C2%B7%20Apple-76b900?logo=nvidia&logoColor=white">
+  <img alt="head: Linux, macOS" src="https://img.shields.io/badge/head-Linux%20%C2%B7%20macOS-444?logo=apple&logoColor=white">
   <img alt="arch: x86_64, aarch64" src="https://img.shields.io/badge/arch-x86__64%20%C2%B7%20aarch64-555">
   <img alt="donate: bitcoin" src="https://img.shields.io/badge/donate-bitcoin-f7931a?logo=bitcoin&logoColor=white">
 </p>
@@ -18,7 +19,8 @@
 The night-shift operator for your AI cluster. One console that **deploys** model recipes safely,
 **caches** every model locally, **protects** your machines and data, and **watches** all of it with an
 LLM that explains what it sees. Built for DGX Spark pairs, RTX workstations, NAS-backed home labs and
-small inference clusters.
+small inference clusters. The head runs on Linux or macOS; the machines it backs up are Linux, and a Mac is
+monitored (Time Machine backs it up).
 
 > **Status: alpha (0.1).** Extracted from a single-site implementation that has run a production GPU
 > cluster since 2026-09; that cluster now runs on Noctyx. See [docs/PLAN.md](docs/PLAN.md).
@@ -27,7 +29,7 @@ small inference clusters.
 |---|---|
 | **Deploy** | Build the next recipe while the current one serves; switch under the GPU lock; roll back automatically. Discover public recipes for your hardware, ranked by measured speed |
 | **Cache** | One copy of every Hugging Face model on the cluster, served back as `HF_ENDPOINT`; keeps working when the Hub does not |
-| **Protect** | Nightly snapshots of every node, Docker volumes, consistent database dumps, bare-metal restore |
+| **Protect** | Nightly snapshots of every Linux node, Docker volumes, consistent database dumps, bare-metal restore |
 | **Watch** | Live fleet console: temperatures, power, tokens/s per model, alerts with LLM triage, a morning brief |
 
 <p align="center"><img src="docs/screenshots/phosphor-dashboard.png" alt="The Noctyx dashboard in the Phosphor theme: fleet throughput, GPU power, per-node LLM, CPU, memory and network, storage tiers" width="100%"></p>
@@ -61,7 +63,7 @@ Regenerate them with `python3 tools/screenshots.py`.
   as `HF_ENDPOINT`, so a model is fetched from the Hub once and keeps loading when the Hub is down.
 
 **Protect**
-- restic snapshots of every node to your NAS, scheduled per profile, one writer per spindle, inside each profile's
+- restic snapshots of every Linux node to your NAS or a local disk, scheduled per profile, one writer per spindle, inside each profile's
   window, refusing to start over a link slower than a set floor.
 - Docker volumes, consistent database dumps (Postgres, MariaDB/MySQL, Redis/Valkey, SQLite) before each
   backup, retention, scheduled verification, capacity forecasts.
@@ -73,16 +75,22 @@ Regenerate them with `python3 tools/screenshots.py`.
   network fabric, disks, uptime, containers.
 - Alerts with LLM triage, a morning brief, Prometheus metrics, a kiosk view.
 - Hygiene: old kernels, unused packages, journal and Docker leftovers per node, with the space each fix frees.
+- Every critical component on every machine (restic, rest-server, Prometheus, node_exporter, the agent) checked
+  nightly against Noctyx's pin and the latest release, with the command that upgrades it, as alerts.
+- Macs are monitored, not backed up: vitals, GPU power, LLM servers and their Time Machine status.
 
 **Run it your way**
-- Pure Python standard library on the head; bash and restic on the nodes. No database, no containers needed.
+- Pure Python standard library on the head, on Linux (systemd) or macOS (launchd); bash and restic on the nodes.
+  No database, no containers needed.
+- First-time setup by questions (`noctyx init`), the site's LLM set up first so it can explain any step that
+  fails, then `noctyx setup all` and an end-to-end `noctyx setup verify`.
 - Accounts with roles, or open access on a LAN you trust. Themes. An audit log of every action.
 
 ## Documentation
 
 | Guide | |
 |---|---|
-| [Install](docs/guide/install.md) | head node, agents, the first backup, the demo |
+| [Install](docs/guide/install.md) | Linux or macOS head: init, setup, verify; agents, the first backup, versions, the demo |
 | [Console](docs/guide/console.md) | every view, settings and themes, keys |
 | [Site config](docs/guide/site-config.md) | every block and key, the `paths` layer |
 | [Backups](docs/guide/backups.md) | schedules, policy, databases, retention, verification |
@@ -98,17 +106,20 @@ Regenerate them with `python3 tools/screenshots.py`.
 Try it without a cluster: `PYTHONPATH=src python3 -m noctyx.cli demo` serves the console on
 sample data at `http://127.0.0.1:20993` (read-only).
 
-## Install (head node)
+## Install (head node, Linux or macOS)
 
 ```bash
-git clone https://github.com/BobClawblaw/noctyx && cd noctyx && pip install .   # not on PyPI yet
-sudo mkdir -p /etc/noctyx && sudo cp examples/site.example.json /etc/noctyx/site.json   # then edit it
-noctyx                                   # the banner and the command list
-sudo noctyx setup                        # a checklist: owner, tls, repos, escrow, the endpoint — run each step it names
-sudo noctyx install-head                 # shows the systemd units it would install; --apply installs them
-sudo noctyx install-agent --host gpu-01  # each node: restic, the agent, keys (never on a command line)
+git clone https://github.com/BobClawblaw/noctyx.git /opt/noctyx-src      # not on PyPI yet
+sudo python3 -m venv /opt/noctyx                  # macOS: Homebrew's python3 (/opt/homebrew/bin/python3)
+sudo /opt/noctyx/bin/pip install /opt/noctyx-src && sudo ln -sf /opt/noctyx/bin/noctyx /usr/local/bin/noctyx
+sudo noctyx init                          # questions: the assistant first, then this machine, storage, nodes, sign-in
+sudo noctyx setup all                     # tools, owner, mount, TLS, repositories, endpoint, services, metrics (+ privacy on macOS)
+sudo noctyx setup verify                  # every check, and a backup + restore round trip through the endpoint
+sudo noctyx install-agent                 # each Linux node: restic, the agent, keys (never on a command line)
 ```
 
+The same commands set up a Linux head (systemd units) or a macOS head (launchd daemons; one Full Disk Access
+grant at the Mac's screen when the repositories are on a NAS). See [the install guide](docs/guide/install.md).
 The console is at `https://<head>:20996`. Everything a site differs in lives in its config
 (`NOCTYX_CONFIG`, default `/etc/noctyx/site.json`): hosts, the NAS, schedules, retention, backup policy,
 the HF mirror, recipe slots and catalog, the assistant's LLM endpoint.

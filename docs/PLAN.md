@@ -2,7 +2,7 @@
 
 **Status:** pre-alpha. This tree is the clean home of the product; the code is being extracted from
 a private, single-site implementation that has run a real GPU cluster in production since 2026-09.
-**Date:** 2026-10-19
+**Date:** 2026-10-19 (status updated 2026-10-20)
 
 ## Decisions taken
 
@@ -172,9 +172,14 @@ old tool (console on a trial port, timers still the old tool's). **Cut over the 
 cluster runs on Noctyx's units. **Bare-metal restore image ported** (2026-10-19): `noctyx tool build-stick`
 builds the dual-arch (x86_64 + arm64) recovery stick from the site config; a stick built into an image
 file through a loop device passed all its checks (its key opens a live repository) and booted in UEFI VMs
-on both arches into the recovery menu with the live inventory and snapshots. Left: `noctyx init`,
-splitting the two large modules, the web UI out of Python, `noctyx migrate` (move nodes to Noctyx's own
-layout), a restore on real hardware.
+on both arches into the recovery menu with the live inventory and snapshots. **First-time setup and a
+macOS head** (2026-10-20): `noctyx init` (the assistant first, then a site config from questions),
+`noctyx setup all` / `setup verify` (every step, then an end-to-end check with a canary backup and restore),
+`setup metrics` (a pinned Prometheus) and `noctyx versions` (every critical component per machine, with
+alerts when one is behind or can be upgraded). The head runs on Linux (systemd) or macOS (launchd, made from
+the same unit templates); only Linux hosts are backed up, Macs are monitored and report Time Machine. CI tests
+both platforms. Left: splitting the two large modules, the web UI out of Python, `noctyx migrate` (move nodes
+to Noctyx's own layout), a restore on real hardware, Alertmanager on a macOS head.
  Port module by module from the private implementation, each
 through the privacy check, none of its history. Order: config + inventory → jobs/locks/audit →
 protect (restic, schedule, dumps) → cache → deploy → watch → console API → web UI split out of

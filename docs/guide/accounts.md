@@ -10,8 +10,9 @@ Related pages: [install](install.md) · [console tour](console.md) · [site conf
 ## Console modes
 
 The console picks its mode on every request, so adding the first user or changing the setting takes effect
-without a restart (changing `console_auth` does need `install-head --apply` and a console restart, because it
-reaches the console through its unit):
+without a restart (changing `console_auth` does need `install-head --apply` and, on Linux, a console restart,
+because it reaches the console through its unit's environment; on a Mac `install-head --apply` reloads the
+console's changed launchd daemon by itself):
 
 | Mode | When | Looking | Acting |
 |---|---|---|---|
@@ -43,7 +44,7 @@ The console never restores in place. In-place restores are CLI-only: `noctyx res
 ## Managing users
 
 Users live in `<etc>/users.json` (default `/etc/noctyx/users.json`, mode 0600, root). Run the commands as root on
-the head node:
+the head node; they are the same on Linux and macOS:
 
 ```bash
 sudo noctyx user add --name alice --role admin        # asks for the password twice
@@ -53,6 +54,11 @@ sudo noctyx user passwd --name alice
 sudo noctyx user del --name bob                       # also removes bob's saved display settings
 sudo noctyx user list
 ```
+
+**The first admin.** `sudo noctyx init` makes it when sign-in is on and the site has no admin yet: it asks for
+a name and the password twice. Without questions, `--admin NAME --admin-password-stdin` reads the password as one
+line on stdin. With sign-in on and no admin, `sudo noctyx setup verify` fails its *console admin* check and names
+the `user add` command.
 
 - Names: 2 to 32 characters, lowercase letters, digits, `.`, `_` and `-`, starting with a letter.
 - Passwords: at least 10 characters, hashed with scrypt. They are never taken from the command line. For

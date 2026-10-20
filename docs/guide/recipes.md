@@ -14,7 +14,9 @@ process, and `--no-follow` starts it and returns.
 ## Slots
 
 A slot is one GPU box, or the head and worker of a tensor-parallel pair. A slot serves one recipe at a time on a
-fixed port. Slots live in the site config under `recipes.slots`:
+fixed port. Every recipe kind deploys as a systemd unit, so a slot is always a **Linux** box. A Mac can run its own
+LLM servers, which `llm-discover` finds and the console shows, but it is never a slot. The Noctyx head that drives
+the slots can be Linux or a Mac: it reaches each slot over ssh. Slots live in the site config under `recipes.slots`:
 
 ```json
 "recipes": {

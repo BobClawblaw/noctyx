@@ -18,7 +18,11 @@ sudo noctyx hygiene --host gpu-01 --fix journal,docker-prune   # specific item i
 ```
 
 - The head node runs `noctyx-agent hygiene [--fix …]` on each host over ssh. That covers every enabled
-  host except macOS hosts and `windows-class` hosts.
+  host with an address except macOS hosts.
+- The checks are Linux ones (systemd, apt, dpkg, the kernel packages, the journal, Docker). Macs are not
+  checked, and neither is a macOS head itself; a macOS head still runs the report for its Linux nodes, from
+  the launchd daemon `dev.noctyx.hygiene` (06:45 daily) instead of `noctyx-hygiene.timer`. Naming a Mac with
+  `--host` is refused.
 - The agent takes its one-job-per-host lock, so hygiene never runs at the same time as a backup on
   that host.
 - `noctyx hygiene` runs as a detached job. Use `--foreground` or `--no-follow` as needed (see

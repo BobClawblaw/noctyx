@@ -9,6 +9,10 @@ from a retired repository tier, and how to prove that a stick boots without touc
 Paths below are the defaults from `src/noctyx/paths.py`. Run `noctyx paths` to see the values your site
 uses.
 
+Everything here is for **Linux** hosts (x86_64 and aarch64), the only ones Noctyx backs up. A Mac restores
+from Time Machine. A Mac *head* holds no snapshots of its own; to rebuild one, see
+[Rebuild a macOS head](#rebuild-a-macos-head).
+
 ## Restore a path
 
 `noctyx restore --host NAME --path /ABS/PATH [--snapshot latest|ID] [--to staging|host] [--in-place --yes]`
@@ -65,7 +69,9 @@ sudo noctyx copy [--host gpu-01]      # init the destination with the same key i
 
 ## Rebuild a node bare-metal: the recovery stick
 
-The recovery stick boots a stock Ubuntu 24.04 live image and carries a payload:
+The recovery stick boots a stock Ubuntu 24.04 live image (amd64 and arm64) and rebuilds a Linux node; it
+does nothing for a Mac. Building it (`noctyx tool build-stick …`) needs a Linux head: the scripts use
+`lsblk`, `sfdisk`, `sgdisk` and `mkfs.ext4`. The stick carries a payload:
 
 - the repository keys and the endpoint credentials
 - the CA
@@ -233,6 +239,8 @@ order:
 
 ## Rebuild the head node
 
+This section is for a **Linux** head. For a Mac head, see [Rebuild a macOS head](#rebuild-a-macos-head).
+
 `noctyx-restore-head.sh` handles the head node's layout: GPT, an ESP, `/boot` and an LVM root. It
 recreates the partition table, the LVM PV, VG and LVs, and every filesystem **with their original UUIDs**,
 using the snapshot's fsmeta (`sfdisk` dump, `blkid.txt`, LVM metadata backup). fstab, GRUB and `root=` then
@@ -261,6 +269,27 @@ sudo bash noctyx-restore-head.sh --disk /dev/nvme0n1 --repo-file /tmp/repo-locat
 - The rescue system needs `restic`, `sfdisk`, `pvcreate`, `vgcfgrestore`, `vgchange`, `mkfs.ext4`,
   `mkfs.vfat`, `python3`, `chroot` and `blkid`.
 - `--rehearsal` adds a serial console and skips the EFI NVRAM write. It is meant for VMs.
+
+### Rebuild a macOS head
+
+A Mac head is not backed up by Noctyx (Time Machine covers the Mac). What makes it the head is small: the
+keys, endpoint logins, TLS material, htpasswd and the site config, all in the escrow bundle. The repositories
+themselves live on the NAS or disk it mounts, untouched.
+
+1. Install Noctyx again ([Install](install.md)).
+2. Unpack the escrow bundle into `/etc/noctyx`. It holds the site config too (`site.json`; a config kept
+   outside `/etc/noctyx` sits at the bundle's top level: move it back to its path). A bundle made before the
+   config was included does not have it: answer `sudo noctyx init` again with the same storage and nodes.
+
+   ```bash
+   sudo mkdir -p /etc/noctyx
+   openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in noctyx-keys-<date>.tar.gz.enc | sudo tar xz -C /etc/noctyx
+   ```
+
+3. `sudo noctyx setup all`. It keeps the CA, the keys and the repositories it finds, so no node needs
+   re-installing, and recreates the system user, the mount, the services and the metrics.
+4. Grant Full Disk Access again when `setup privacy` asks (the grant belongs to the old install).
+5. `sudo noctyx setup verify`.
 
 ### Rehearse it in a VM
 

@@ -5,9 +5,52 @@ and writes the dashboard's morning brief. It is usually one of the cluster's own
 any OpenAI-compatible endpoint. Every prompt is built only from data the console already holds, and every answer
 is shown with the name of the model that wrote it. The assistant only produces text. Nothing it says is run.
 
+It is also the first thing a new site sets up: during the install it explains what went wrong, on Linux and
+on macOS alike.
+
+## Set up first, by `noctyx init`
+
+`sudo noctyx init` asks for the assistant before anything else, so that it can help with the rest of the install:
+
+1. **Find one.** It looks for OpenAI-compatible servers on the usual ports (30000, 8000, 8080, 9501–9503, 11434,
+   1234, 5000) of `127.0.0.1`, the head's own LAN address, and any machines you name, and lists those whose
+   `/v1/models` serves a model, fastest first. A site's configured endpoint is always listed first. Pick a
+   number, type a URL (`http://host:port/v1`), or answer `none` (setup works without one; it just cannot explain
+   failures).
+2. **A key**, only if the server wants a bearer token: typed at a hidden prompt, or in `NOCTYX_ASSISTANT_KEY` for
+   `init --yes`. It goes to `<llm_keys>/assistant` (0600), never on a command line.
+3. **Test it.** One short completion (*Reply with exactly: Noctyx assistant OK*). A server that serves several
+   models asks which one.
+4. **Save it.** On a new site the config is written right away with just this block, so `noctyx ask` works
+   before the rest of `init` is done. `init` writes `timeout_seconds: 120`.
+
+`sudo noctyx init --assistant-only` does just this step (on a new or an existing site). `--assistant URL [--model
+ID]` picks without questions. A `--yes` re-run that finds the configured endpoint not answering keeps it (it
+answered before and may be restarting) instead of failing; `noctyx setup verify` tests it each time and reports
+a failure as a warning.
+
+### Help during the install
+
+Once it answers, the assistant helps in three places:
+
+- **Any question in `init`** takes `?`: the question, its default, what it is for and this machine's facts go
+  to the assistant, which says what to enter and recommends a value.
+- **A failing setup step** (`noctyx setup <step>`, `setup all`, `setup verify`) sends the error, this machine's
+  facts and, when Noctyx runs from a checkout, the install and troubleshooting guides; the answer (at most 8
+  lines, commands in backticks) is printed under the failure. It is told never to suggest turning off a
+  firewall, TLS verification or another protection, and never to install restic or rest-server by hand
+  (`noctyx setup tools` does). `NOCTYX_NO_ASSIST=1` turns this off; a failing step never fails harder because
+  the assistant is down.
+- **`noctyx ask QUESTION`**, or text piped in (`journalctl -u noctyx-console -n 50 | noctyx ask`), any time.
+
+The facts are the platform and release, CPU architecture, Python version, whether it runs as root, whether the
+site config exists, where restic and rest-server live, and the service manager: systemd units and `journalctl`
+on Linux, launchd daemons (`/Library/LaunchDaemons/<launchd_prefix>.<name>.plist`, logs in `/var/log/noctyx/`)
+on macOS. Setup help asks only the configured endpoint, not the fallback servers.
+
 ## Configuring the endpoint
 
-From the CLI:
+Besides `init`, from the CLI:
 
 ```sh
 sudo noctyx assistant-set --json '{
@@ -99,6 +142,10 @@ Use an `https://` URL if the endpoint is off the trusted network.
   - LLM server stats and the last 24 hours' token, request and GPU energy totals;
   - NAS free space and RAID state, and the titles of open hygiene findings.
 - **test:** only a fixed test prompt.
+- **Setup help** (`init`'s `?`, a failing setup step, `noctyx ask`): the question or the error text (the last
+  3000 characters), the machine facts listed [above](#help-during-the-install), its address and host name (for
+  `?`), and the install and troubleshooting guides when Noctyx runs from a checkout. Errors can include paths and
+  addresses on the head.
 
 No snapshot contents, passwords or repository keys are sent. Host names, model names and alert text are, and a
 hygiene finding's detail can include paths on that host.

@@ -1,9 +1,11 @@
 # Upgrading Noctyx
 
-An upgrade replaces the package and re-renders the head node's systemd units. Then you restart the long-running
+An upgrade replaces the package and re-renders the head node's services: systemd units on Linux, launchd daemons
+in `/Library/LaunchDaemons` on a Mac (made from the same unit templates). Then you restart the long-running
 services and refresh the node agents if the agent changed. Rolling back is the same process with the older
-version. This page also covers moving a site from an earlier layout to Noctyx with the `paths` block, so the
-directories, agent and unit names stay where they are.
+version. `noctyx versions` tells you, per machine, which of the components Noctyx depends on are behind and the
+command that upgrades each. This page also covers moving a site from an earlier layout to Noctyx with the `paths`
+block, so the directories, agent and unit names stay where they are.
 
 Related pages: [install](install.md) · [site config](site-config.md#paths) · [console](console.md).
 
@@ -13,13 +15,15 @@ Related pages: [install](install.md) · [site config](site-config.md#paths) · [
 noctyx --version
 sudo cp -a /etc/noctyx/site.json /etc/noctyx/site.json.$(date +%F)    # the CLI rewrites blocks of it in place
 sudo noctyx tick --dry-run                                              # anything due soon?
-systemctl list-units 'noctyx-*' --state=running                         # detached jobs in flight
+systemctl list-units 'noctyx-*' --state=running                         # Linux: detached jobs in flight
+ls /var/log/noctyx/jobs/*.pid                                           # macOS: a detached job's pid file sits next to its log
 ```
 
-Long jobs (backups, verifies, prunes, restores, recipe switches) run as their own transient systemd units
-(`noctyx-<command>-<target>-<time>-<pid>`), not inside the console. Restarting the console does not stop them,
-and when it starts again it picks up the jobs it was following. To keep things simple, upgrade outside the
-backup window anyway.
+Long jobs (backups, verifies, prunes, restores, recipe switches) never run inside the console. On Linux each is
+its own transient systemd unit (`noctyx-<command>-<target>-<time>-<pid>`); on a Mac it is its own session with a pid
+file next to its log in `job_logs`. Restarting the console does not stop them, and when it starts again it picks
+up the jobs it was following. The console's Runs panel shows them on both. Upgrade outside the backup window
+anyway.
 
 ## Upgrade
 
@@ -27,54 +31,138 @@ backup window anyway.
 
 ```bash
 cd /opt/noctyx-src && git fetch --tags && git checkout <new tag>    # or: git pull
-sudo /opt/noctyx/bin/pip install /opt/noctyx-src                    # reinstall into the venv
+sudo -H /opt/noctyx/bin/pip install /opt/noctyx-src                 # reinstall into the venv
 noctyx --version
 ```
 
-If the units run straight from a checkout (`PYTHONPATH=src`), the `git` step is enough.
+On a Mac the venv is the one install made with Homebrew's Python (`/opt/homebrew/bin/python3 -m venv
+/opt/noctyx`); the commands are the same. `pip install` run as root from a checkout leaves a root-owned `build/`
+and `src/noctyx.egg-info` in it: remove them with `sudo rm -rf build src/noctyx.egg-info` before your next `git`
+command there.
 
-**2. Re-render the head node's units.** Compare first, then apply:
+If the services run straight from a checkout (`PYTHONPATH=src`), the `git` step is enough.
+
+**2. Re-render the head node's services.** Compare first, then apply:
 
 ```bash
-sudo noctyx install-head | less                 # what the new templates render to
-sudo noctyx install-head --apply                # writes them, daemon-reload, enable --now
+sudo noctyx install-head | less                 # what the new templates render to (plists on a Mac)
+sudo noctyx install-head --apply                # the same as: sudo noctyx setup units
 ```
 
-`--apply` enables and starts services, but it does not restart services that are already running.
+- **Linux:** writes the units, `daemon-reload`, `enable --now`. Services that are already running keep running the
+  old code until step 3.
+- **macOS:** a daemon whose plist changed is unloaded, rewritten and loaded again (which restarts it); an unchanged
+  one is left alone.
+
+`sudo noctyx setup all` after an upgrade runs only the steps that are not done yet. It reports finished steps and
+leaves them alone, so it never restarts every service; run `setup units` or `setup metrics` by name to re-render
+those.
 
 **3. Restart the long-running services.** The timer-driven services (tick, nightly, hygiene, retention) start a
 fresh process each run, so they pick up the new code by themselves.
 
 ```bash
+# Linux
 sudo systemctl restart noctyx-console noctyx-directory noctyx-hf-mirror
 systemctl status noctyx-console --no-pager
+# macOS
+for s in console directory hf-mirror; do sudo launchctl kickstart -k system/dev.noctyx.$s; done
+sudo launchctl print system/dev.noctyx.console | grep -E 'state|pid'
 ```
 
-Open browsers notice the new console build and reload once on their own.
+(`noctyx` and `dev.noctyx` are the defaults of `paths.unit_prefix` and `paths.launchd_prefix`.) Open browsers
+notice the new console build and reload once on their own.
 
-**4. Refresh the node agents** when the release notes say the agent, the dumps hook or the exclusions changed:
+**4. Refresh the node agents** when the release notes say the agent, the dumps hook or the exclusions changed, or
+`noctyx versions` shows an agent as behind:
 
 ```bash
-sudo noctyx install-agent                       # every enabled host; or --host NAME
+sudo noctyx install-agent                       # every Linux host Noctyx backs up; or --host NAME
 sudo noctyx policy-apply                        # policy files only
 ```
 
 **5. Check.**
 
 ```bash
-noctyx status
-sudo noctyx tick --dry-run
+sudo noctyx setup verify                        # every check, and a backup+restore round trip (--no-canary skips it)
+sudo noctyx versions                            # every component on every machine
 ```
 
 Then open the console's About page and confirm the version and the console build.
+
+### A Mac head after a Homebrew Python update
+
+Full Disk Access is granted to the Python binary itself, by its path in Homebrew's Cellar
+(`/opt/homebrew/Cellar/python@3.x/<version>/…/bin/python3.x`). A Homebrew update of that Python moves it, and the
+grant no longer applies: the scheduler, retention and the mirror lose the NAS share. `sudo noctyx setup verify`
+reports it (*full disk access*); `sudo noctyx setup privacy` names the new path to add in System Settings ›
+Privacy & Security › Full Disk Access, then proves the grant from launchd. A new *minor* Python (3.14 → 3.15)
+removes the interpreter the venv points at: make the venv again (`/opt/homebrew/bin/python3 -m venv --clear
+/opt/noctyx`), reinstall, and re-grant.
+
+### Certificates made before key identifiers
+
+Python 3.13 and newer verify certificates strictly and refuse a chain without key identifiers; certificates made
+by earlier versions of `noctyx setup tls` lack them. `setup verify` shows it (*strict clients*). `sudo noctyx setup
+tls` renews the server certificate under the same CA, so no node needs re-installing.
+
+## Component versions
+
+`noctyx versions` probes every machine (the head locally, the Linux nodes over ssh) for the components Noctyx
+depends on, and compares each with the version Noctyx pins and the latest upstream release:
+
+```bash
+sudo noctyx versions                 # every machine
+sudo noctyx versions --host gpu-01   # one machine; the others keep their last answer
+sudo noctyx versions --refresh       # ask GitHub again now (otherwise once a day)
+sudo noctyx versions --json
+```
+
+```text
+head-01
+  ✓ restic         0.19.1         pin 0.19.1    latest 0.19.1    current
+  ↑ prometheus     2.45.3         pin —         latest 3.15.0    3.15.0 released (apt manages it)
+gpu-01
+  ✓ restic         0.19.1         pin 0.19.1    latest 0.19.1    current
+  ✗ agent          25d3e6609bb7   pin —         latest —         older than this Noctyx's agent
+
+to upgrade (apt takes what the distro carries, which can lag the upstream release):
+  head-01      prometheus     sudo apt-get install --only-upgrade prometheus
+  gpu-01       agent          sudo noctyx install-agent --host gpu-01
+```
+
+| Component | Where | Upgraded by |
+|---|---|---|
+| noctyx | the head | the steps above |
+| restic | the head and every Linux node | head: `setup tools --force`; node: `install-agent --host NAME` |
+| rest-server | the head (unless the endpoint is on the NAS) | `setup tools --force` |
+| prometheus | the head | `setup metrics --force` |
+| node_exporter | the head and every Linux node | head: `setup metrics --force`; node: `noctyx tool install-node-metrics --host NAME` |
+| agent | every Linux node (compared by hash with the agent this Noctyx renders) | `install-agent --host NAME` |
+
+A component is judged by who installed it. One in `/usr/local/bin` was installed by Noctyx and is held to Noctyx's
+pin (`✗` behind when older). One installed by apt (`/usr/bin`) or Homebrew is compared with upstream only, and its
+upgrade command is that package manager's. States: `✓` current, `↑` a newer release is out, `✗` behind or missing,
+`·` newer than the pin (upgraded by hand), `?` the machine did not answer. A Mac head has the head's rows; a Mac that is only monitored runs
+nothing Noctyx installs, so it has none. When `setup tools --force` or `setup metrics --force` replaces a binary, it
+restarts the service that runs it (`rest-server`, `prometheus`, `node-exporter`), so the new binary is the one running.
+
+The nightly run refreshes the inventory (`<state>/versions.json`, upstream releases cached in
+`<state>/upstream-releases.json`). The console shows it in each machine's Components table and exports it on
+`/metrics`; the alert rules `ComponentBehind`, `ComponentUpgradeAvailable` and `VersionsUnknown` notify on it.
+
+**Moving a pin.** The pinned versions and their SHA-256 sums live in
+[`src/noctyx/components.py`](../../src/noctyx/components.py). Change a version and its sums (from the release's own
+sums file) together, in one commit. Setup refuses a download whose sum does not match. Then run the upgrade command
+on each machine.
 
 ## Roll back
 
 ```bash
 cd /opt/noctyx-src && git checkout <previous tag>
-sudo /opt/noctyx/bin/pip install /opt/noctyx-src
+sudo -H /opt/noctyx/bin/pip install /opt/noctyx-src
 sudo noctyx install-head --apply
-sudo systemctl restart noctyx-console noctyx-directory noctyx-hf-mirror
+sudo systemctl restart noctyx-console noctyx-directory noctyx-hf-mirror        # macOS: launchctl kickstart -k, as above
 sudo noctyx install-agent                       # only if the upgrade refreshed the agents
 ```
 
