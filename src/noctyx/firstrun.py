@@ -230,7 +230,8 @@ def step_storage(c, a):
 
 
 # ── 4. what to back up ──────────────────────────────────────────────────────
-LINUX_CONFIG_PATHS = ["/etc", "/usr/local/etc", "/root"]
+# configuration only: a first backup in seconds. Never home directories (a root's can hold hundreds of GB of models)
+LINUX_CONFIG_PATHS = ["/etc", "/usr/local/etc"]
 
 
 def _time_machine():

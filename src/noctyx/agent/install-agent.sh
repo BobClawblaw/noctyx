@@ -160,5 +160,5 @@ else
 fi
 
 # 10. backup policy: per-profile exclusions, dump hook + config, current agent
-"${NX_ORCH:?}" policy-apply --host "$HOST" || { echo "  policy-apply FAILED" >&2; exit 2; }
+"${NX_PY:-python3}" "${NX_ORCH:?}" policy-apply --host "$HOST" || { echo "  policy-apply FAILED" >&2; exit 2; }
 echo "== installed: $HOST =="

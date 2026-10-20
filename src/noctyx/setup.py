@@ -875,7 +875,8 @@ def cmd_setup(a):
         sys.exit(0 if verify(c, not a.no_canary) else 1)
     if a.step == "all":
         for name, ok, _ in steps_state(c):
-            if name == "escrow" and ok:
+            if ok:           # done already: re-running a step is safe, but `units` would restart every service
+                print(f"── {name}\n  ✓ done (`sudo noctyx setup {name}` runs it again)")
                 continue
             if name == "escrow" and not sys.stdin.isatty():
                 print("── escrow\n  skipped: it asks for a passphrase. Run `sudo noctyx setup escrow` in a terminal.")
