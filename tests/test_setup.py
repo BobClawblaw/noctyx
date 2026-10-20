@@ -12,7 +12,7 @@ from noctyx import orchestrator as cm
 
 def _units():
     c = cm.cfg()
-    return {f"{cm.UNIT}-{n}": cm.render_unit(c, n) for n in cm.HEAD_UNITS + ("rest-server.service",)}
+    return {f"{cm.UNIT}-{n}": cm.render_unit(c, n) for n in cm.HEAD_UNITS + ("rest-server.service",) + setup.METRICS_UNITS}
 
 
 def test_every_head_unit_has_a_launchd_form():
@@ -207,3 +207,28 @@ def test_mac_facts_time_machine_and_boot_time():
     assert f["timemachine"]["dest"] == "timemachine" and f["timemachine"]["running"] == "0"
     assert f["timemachine"]["latest_ts"] > 1.79e9
     assert "s/^{ sec = " in console.FACTS_MAC               # the boot time takes sec, not usec
+
+
+def test_interval_timers_and_metrics_config():
+    units = _units()
+    t = plistlib.loads(hostos.launchd_plist("dev.noctyx.textfile", units[f"{cm.UNIT}-textfile.service"],
+                                            units[f"{cm.UNIT}-textfile.timer"]).encode())
+    assert t["StartInterval"] == 15 and t["RunAtLoad"] and "UserName" not in t      # powermetrics needs root
+    d = plistlib.loads(hostos.launchd_plist("dev.noctyx.llm-discover", units[f"{cm.UNIT}-llm-discover.service"],
+                                            units[f"{cm.UNIT}-llm-discover.timer"]).encode())
+    assert d["StartInterval"] == 300
+    y = setup.prometheus_yml(cm.cfg())
+    assert y.startswith(setup.PROM_MARK) and f"127.0.0.1:{cm.HEAD_EXPORTER_PORT}" in y and "job_name: llm" in y
+
+
+def test_component_status_rules():
+    from noctyx import components as comp
+    restic = next(x for x in comp.COMPONENTS if x["name"] == "restic")
+    assert comp.status(restic, "0.19.1", "0.19.1", "0.19.1")[0] == "ok"
+    assert comp.status(restic, "0.18.0", "0.19.1", "0.19.1")[0] == "behind"
+    assert comp.status(restic, "0.19.1", "0.19.1", "0.20.0")[0] == "upgrade"
+    assert comp.status(restic, None, "0.19.1", None)[0] == "missing"
+    agent = next(x for x in comp.COMPONENTS if x["name"] == "agent")
+    assert comp.status(agent, "abc", None, None, want_agent="abd")[0] == "behind"
+    name, url, sha = comp.asset("prometheus", "macos", "aarch64")
+    assert name == "prometheus-3.15.0.darwin-arm64.tar.gz" and url.endswith("/v3.15.0/" + name) and len(sha) == 64

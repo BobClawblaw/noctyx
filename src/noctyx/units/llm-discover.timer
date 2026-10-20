@@ -1,0 +1,9 @@
+[Unit]
+Description=Noctyx LLM server discovery, every 5 min
+
+[Timer]
+OnBootSec=90s
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

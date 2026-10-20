@@ -64,6 +64,21 @@ groups:
     for: 30m
     labels: {severity: warning}
     annotations: {summary: "cannot read RAID state from the NAS (ssh)"}
+  - alert: ComponentBehind
+    expr: @METRIC_PREFIX@_component_behind == 1
+    for: 1h
+    labels: {severity: warning}
+    annotations: {summary: "{{ $labels.host }}: {{ $labels.component }} {{ $labels.installed }} is behind Noctyx's pin {{ $labels.pinned }} — {{ $labels.upgrade }}"}
+  - alert: ComponentUpgradeAvailable
+    expr: @METRIC_PREFIX@_component_upgrade_available == 1
+    for: 1h
+    labels: {severity: info}
+    annotations: {summary: "{{ $labels.host }}: {{ $labels.component }} {{ $labels.latest }} is out (running {{ $labels.installed }}) — {{ $labels.upgrade }}"}
+  - alert: VersionsUnknown
+    expr: time() - @METRIC_PREFIX@_versions_timestamp_seconds > 3 * 86400
+    for: 1h
+    labels: {severity: warning}
+    annotations: {summary: "component versions not checked for 3 days (the nightly run does it: noctyx versions)"}
   - alert: NoctyxMetricsDown
     expr: up{job="@PROM_JOB_CONSOLE@"} == 0
     for: 10m

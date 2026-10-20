@@ -29,28 +29,12 @@ import time
 import urllib.error
 import urllib.request
 
-from . import hostos, llm
+from . import components as comp, hostos, llm
 from . import orchestrator as cm
 from .paths import P
 
-STEPS = ("tools", "owner", "mount", "tls", "repos", "endpoint", "units", "privacy", "escrow")
+STEPS = ("tools", "owner", "mount", "tls", "repos", "endpoint", "units", "metrics", "privacy", "escrow")
 BIN = pathlib.Path("/usr/local/bin")
-
-# pinned releases and their SHA-256 sums (from each release's SHA256SUMS). A download that does not match
-# is refused; bump the version and the sums together.
-RESTIC_VERSION = "0.19.1"
-REST_SERVER_VERSION = "0.14.0"
-SUMS = {
-    "restic_0.19.1_darwin_amd64.bz2": "c38d579622cf602f665234c5a8c315030b6cf70656028fe6dc29a786b60e5f35",
-    "restic_0.19.1_darwin_arm64.bz2": "7be0a144ccc377880f294204aa271d76e4b79554b42a751151d425ce6ebac143",
-    "restic_0.19.1_linux_amd64.bz2": "f415415624dcc452f2a02b8c33641791a8c6d6d3b65bbb3543fcf9a25151585c",
-    "restic_0.19.1_linux_arm64.bz2": "a5f64aaab53d51e311fa3829124c5b703f2d14cf187d8640b6be3b2b49376465",
-    "rest-server_0.14.0_darwin_amd64.tar.gz": "ced47a785aec6a9fa3041cfa799dcc6c55527a12944d7a8147fc1595b5b0e945",
-    "rest-server_0.14.0_darwin_arm64.tar.gz": "057004ce24ca9edfbe0e391eae87981ab03f2abb6b65cf8fdfcddf847ded8656",
-    "rest-server_0.14.0_linux_amd64.tar.gz": "4c9c95bc079a0334e81fad379b19dc5c3353c71c2c88d652cafce2081c2b1c66",
-    "rest-server_0.14.0_linux_arm64.tar.gz": "cef139cbe8b27b16bda731d17f093b0aa466b8c60b136c12d78b6f2bff3daf22",
-}
-
 
 class StepFailed(Exception):
     pass
@@ -105,14 +89,29 @@ def _version(binary):
     return None
 
 
-def _fetch(name, url):
+def _fetch(component):
+    """A pinned release for this machine, checked against its pinned SHA-256."""
+    name, url, want = comp.asset(component, hostos.os_name(), hostos.arch())
     print(f"  downloading {name}…", flush=True)
-    with urllib.request.urlopen(url, timeout=120) as r:
+    with urllib.request.urlopen(url, timeout=300) as r:
         data = r.read()
     got = hashlib.sha256(data).hexdigest()
-    if got != SUMS[name]:
-        fail(f"{name}: sha256 {got} is not the pinned {SUMS[name]}; refusing it")
+    if got != want:
+        fail(f"{name}: sha256 {got} is not the pinned {want}; refusing it")
     return data
+
+
+def _from_tar(blob, members):
+    """{basename: bytes} of the named files in a release tarball."""
+    out = {}
+    with tarfile.open(fileobj=io.BytesIO(blob)) as t:
+        for m in t.getmembers():
+            if m.isfile() and os.path.basename(m.name) in members:
+                out[os.path.basename(m.name)] = t.extractfile(m).read()
+    missing = set(members) - set(out)
+    if missing:
+        fail(f"the release has no {', '.join(sorted(missing))}")
+    return out
 
 
 def _install_bin(path, data):
@@ -127,19 +126,17 @@ def _install_bin(path, data):
 def setup_tools(c, force=False):
     """restic and rest-server at the pinned versions in /usr/local/bin, checked against their SHA-256 sums.
     An existing binary is kept (with a note if its version differs) unless --force."""
-    plat = f"{'darwin' if hostos.IS_MAC else 'linux'}_{hostos.go_arch()}"
     BIN.mkdir(parents=True, exist_ok=True)
-    want = str(c.get("restic_version") or RESTIC_VERSION)
+    pinned = comp.PINS["restic"]["version"]
+    want = str(c.get("restic_version") or pinned)
     have = shutil.which("restic")
     v = _version(have) if have else None
     if have and not force:
         print(f"  restic {v or '?'} at {have}: kept" + (f" (the site pins {want})" if v != want else ""))
     else:
-        if want != RESTIC_VERSION:
-            fail(f"restic_version {want}: setup only knows the sums for {RESTIC_VERSION}; install it yourself")
-        name = f"restic_{RESTIC_VERSION}_{plat}.bz2"
-        data = bz2.decompress(_fetch(name, f"https://github.com/restic/restic/releases/download/v{RESTIC_VERSION}/{name}"))
-        _install_bin(BIN / "restic", data)
+        if want != pinned:
+            fail(f"restic_version {want}: setup only knows the sums for {pinned}; install it yourself")
+        _install_bin(BIN / "restic", bz2.decompress(_fetch("restic")))
         print(f"  restic {_version(str(BIN / 'restic'))} -> {BIN / 'restic'}")
     rs = BIN / "rest-server"
     if cm.rest_on_nas(c):
@@ -147,13 +144,7 @@ def setup_tools(c, force=False):
     elif rs.exists() and not force:
         print(f"  rest-server {_version(str(rs)) or '?'} at {rs}: kept")
     else:
-        name = f"rest-server_{REST_SERVER_VERSION}_{plat}.tar.gz"
-        blob = _fetch(name, f"https://github.com/restic/rest-server/releases/download/v{REST_SERVER_VERSION}/{name}")
-        with tarfile.open(fileobj=io.BytesIO(blob)) as t:
-            m = next((m for m in t.getmembers() if m.isfile() and m.name.endswith("/rest-server")), None)
-            if not m:
-                fail(f"{name} has no rest-server binary")
-            _install_bin(rs, t.extractfile(m).read())
+        _install_bin(rs, _from_tar(_fetch("rest-server"), ["rest-server"])["rest-server"])
         print(f"  rest-server {_version(str(rs))} -> {rs}")
     missing = [t for t in ("openssl", "htpasswd", "ssh", "curl") if not shutil.which(t)]
     if missing:
@@ -463,6 +454,160 @@ def setup_units(c):
         fail("not running: " + ", ".join(down) + "\n" + "\n".join(_service_log(_service(f"{n}.service")) for n in down))
 
 
+# ── metrics: Prometheus for the console's live numbers ──────────────────────
+PROM = "http://127.0.0.1:9090"
+METRICS_UNITS = ("prometheus.service", "node-exporter.service", "textfile.service", "textfile.timer",
+                 "llm-discover.service", "llm-discover.timer")
+PROM_MARK = "# managed by noctyx setup metrics"
+
+
+def _prom_ready():
+    try:
+        with urllib.request.urlopen(f"{PROM}/-/ready", timeout=3) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
+def _head_name(c):
+    s = c["server"]
+    return next((h["name"] for h in c.get("hosts", []) if h.get("local") or h.get("address") == s.get("address")),
+                s.get("hostname") or "head")
+
+
+def _prom_dir():
+    return pathlib.Path(P["prom_config"]).parent
+
+
+def prometheus_yml(c):
+    """The head's scrape config: the console, the head's own exporter, every node's exporter (targets kept by
+    llm-discover), the LLM servers, and Noctyx's alert rules."""
+    d, head = _prom_dir(), _head_name(c)
+    ca = d / f"{P['unit_prefix']}-ca.crt"
+    return f"""{PROM_MARK}: it rewrites this file; change the site config instead
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+rule_files:
+  - {d}/{P['unit_prefix']}-rules.yml
+scrape_configs:
+  - job_name: {P['prom_job_console']}
+    scheme: https
+    tls_config:
+      ca_file: {ca}
+    static_configs:
+      - targets: ['127.0.0.1:{c['server'].get('ui_port', 20996)}']
+        labels:
+          host: {head}
+  - job_name: node
+    static_configs:
+      - targets: ['127.0.0.1:{cm.HEAD_EXPORTER_PORT}']
+        labels:
+          host: {head}
+  - job_name: {P['prom_job_nodes']}
+    scheme: https
+    tls_config:
+      ca_file: {ca}
+    basic_auth:
+      username: prometheus
+      password_file: {d}/node-exporter.pass
+    file_sd_configs:
+      - files: ['{P['prom_node_targets']}']
+  - job_name: llm
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    file_sd_configs:
+      - files: ['{P['prom_llm_targets']}']
+"""
+
+
+def _install_release(component, members, force):
+    have = [m for m in members if (BIN / m).exists()]
+    if len(have) == len(members) and not force:
+        print(f"  {component}: kept ({', '.join(str(BIN / m) for m in members)})")
+        return
+    for m, data in _from_tar(_fetch(component), members).items():
+        _install_bin(BIN / m, data)
+    print(f"  {component} {comp.PINS[component]['version']} -> {', '.join(str(BIN / m) for m in members)}")
+
+
+def _write(path, text, mode, group=None):
+    path = pathlib.Path(path)
+    path.write_text(text)
+    os.chmod(path, mode)
+    if group:
+        shutil.chown(path, "root", group)
+
+
+def setup_metrics(c, force=False):
+    """Prometheus on 127.0.0.1:9090 for the console's live numbers, the head's own node_exporter (loopback
+    only), the GPU/power collector and LLM discovery. A head that already runs a Prometheus keeps it: the
+    jobs to add to it are printed instead."""
+    if not owner_exists():
+        fail(f"no user {P['repo_owner']}: run `noctyx setup owner` first")
+    ours = hostos.service_installed(_service("prometheus.service"), _label())
+    if _prom_ready() and not ours:
+        print(f"  a Prometheus already answers on {PROM}: kept. Give it these jobs (as in {P['prom_config']}):\n")
+        print("\n".join("    " + l for l in prometheus_yml(c).split("scrape_configs:\n", 1)[1].splitlines()))
+        return
+    cfgf = pathlib.Path(P["prom_config"])
+    if cfgf.exists() and PROM_MARK not in cfgf.read_text() and not force:
+        fail(f"{cfgf} exists and is not Noctyx's: move it aside, or `noctyx setup metrics --force` replaces it")
+    _install_release("prometheus", ["prometheus", "promtool"], force)
+    _install_release("node_exporter", ["node_exporter"], force)
+    d = _prom_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    os.chmod(d, 0o755)
+    owner = P["repo_owner"]
+    for p, mode, who in ((P["prom_data"], 0o750, owner), (P["textfile_dir"], 0o755, "root")):
+        pathlib.Path(p).mkdir(parents=True, exist_ok=True)
+        os.chmod(p, mode)
+        shutil.chown(p, who, owner if who == owner else None)
+    _write(d / f"{P['unit_prefix']}-ca.crt", pathlib.Path(c["server"]["tls"]["ca"]).read_text(), 0o644)
+    pw = d / "node-exporter.pass"
+    if not pw.exists():
+        import secrets
+        _write(pw, secrets.token_hex(24) + "\n", 0o640, owner)
+    else:
+        shutil.chown(pw, "root", owner); os.chmod(pw, 0o640)
+    for t in (P["prom_node_targets"], P["prom_llm_targets"]):
+        if not pathlib.Path(t).exists():
+            _write(t, "[]\n", 0o644)
+    _write(d / f"{P['unit_prefix']}-rules.yml", cm.render_site(c, (cm.NX_HOME / "metrics" / "rules.yml").read_text()), 0o644)
+    _write(cfgf, prometheus_yml(c), 0o644)
+    collector = "mac-textfile.sh" if hostos.IS_MAC else "node-textfile.sh"
+    _write(BIN / P["textfile_unit"], cm.render_site(c, (cm.NX_HOME / "metrics" / collector).read_text()), 0o755)
+    r = subprocess.run([str(BIN / "promtool"), "check", "config", str(cfgf)], capture_output=True, text=True)
+    if r.returncode:
+        fail(f"promtool rejects {cfgf}: {(r.stdout + r.stderr).strip()[-600:]}")
+    done = hostos.install_services({_service(n): cm.render_unit(c, n) for n in METRICS_UNITS}, cm.UNIT, _label(), _log_dir())
+    print(f"  installed and started: {', '.join(done)}")
+    for _ in range(30):
+        if _prom_ready():
+            break
+        time.sleep(1)
+    else:
+        fail(f"Prometheus is not ready on {PROM}\n{_service_log(_service('prometheus.service'))}")
+    if ours:                 # a running Prometheus re-reads a changed config on /-/reload
+        urllib.request.urlopen(urllib.request.Request(f"{PROM}/-/reload", method="POST"), timeout=10)
+    if hostos.IS_MAC and not shutil.which("macmon"):
+        print("  optional: `brew install macmon` adds CPU and GPU temperatures (powermetrics has none on Apple silicon)")
+    time.sleep(20)           # one scrape round
+    for job, host, health, err in _targets():
+        print(f"  {'✓' if health == 'up' else '·'} {job:<14} {host:<14} {health}{': ' + err if err else ''}")
+
+
+def _targets():
+    """[(job, host, health, error)] of every Prometheus target."""
+    try:
+        with urllib.request.urlopen(f"{PROM}/api/v1/targets?state=active", timeout=8) as r:
+            d = json.loads(r.read())
+    except Exception:
+        return []
+    return sorted((t["labels"].get("job", "?"), t["labels"].get("host", t["labels"].get("instance", "?")),
+                   t.get("health", "?"), (t.get("lastError") or "")[:120]) for t in d["data"]["activeTargets"])
+
+
 # ── privacy (macOS): Full Disk Access for the daemons that read the repositories ──
 def _privacy_needs(c):
     """[(what, binary)] that need Full Disk Access on this Mac; [] on Linux or when nothing does."""
@@ -580,7 +725,7 @@ def steps_state(c):
     rs_ok = cm.rest_on_nas(c) or (BIN / "rest-server").exists()
     return [
         ("tools", bool(shutil.which("restic")) and rs_ok and bool(shutil.which("htpasswd")),
-         f"restic {RESTIC_VERSION}, rest-server {REST_SERVER_VERSION}, openssl, htpasswd"),
+         f"restic {comp.PINS['restic']['version']}, rest-server {comp.PINS['rest-server']['version']}, openssl, htpasswd"),
         ("owner", owner_exists(), f"the repository owner {P['repo_owner']}"),
         ("mount", _spindles_ready(c), "storage: " + ", ".join(
             f"{n} {s.get('share') and share_source(s['share']) or 'local'} at {s['mount']}"
@@ -591,6 +736,7 @@ def steps_state(c):
         ("endpoint", cm.rest_up(c), f"the repository endpoint {cm.rest_url(c)}"),
         ("units", hostos.service_active(_service("console.service"), _label()),
          "the head's services (console, directory, mirror, timers)"),
+        ("metrics", _prom_ready(), "Prometheus on 127.0.0.1:9090: the console's live numbers"),
         *([("privacy", all(ok for *_, ok, _ in privacy_state(c)), "Full Disk Access for the daemons that read the repositories")]
           if _privacy_needs(c) else []),
         ("escrow", bool(escrow) and not stale, "an escrow bundle of the keys"
@@ -821,6 +967,14 @@ def verify(c, run_canary=True):
         k.add("console admin", n_admin > 0, f"{n_admin} admin account(s)",
               "sudo noctyx user add --name <you> --role admin")
 
+    print("metrics")
+    ready = _prom_ready()
+    k.add("prometheus", ready, PROM if ready else f"{PROM} not answering", "sudo noctyx setup metrics", warn=True)
+    for job, host, health, err in _targets() if ready else []:
+        k.add(f"scrape {job}", health == "up", f"{host}: {health}" + (f" ({err})" if err else ""),
+              "sudo noctyx setup metrics" if job in ("node", P["prom_job_console"]) else
+              f"sudo noctyx tool install-node-metrics --host {host}", warn=job == "llm")
+
     print("keys")
     escrow, stale = _escrow_state()
     k.add("escrow", bool(escrow) and not stale, escrow[-1].name if escrow else "no bundle: the keys exist only here",
@@ -868,7 +1022,8 @@ RUN = {"tools": lambda c, a: setup_tools(c, a.force), "owner": lambda c, a: setu
        "mount": lambda c, a: setup_mount(c), "tls": lambda c, a: setup_tls(c, a.force),
        "repos": lambda c, a: setup_repos(c), "endpoint": lambda c, a: setup_endpoint(c),
        "rest-server": lambda c, a: setup_endpoint(c), "units": lambda c, a: setup_units(c),
-       "privacy": lambda c, a: setup_privacy(c), "escrow": lambda c, a: setup_escrow(c)}
+       "privacy": lambda c, a: setup_privacy(c), "escrow": lambda c, a: setup_escrow(c),
+       "metrics": lambda c, a: setup_metrics(c, a.force)}
 
 
 def run_step(name, c, a):

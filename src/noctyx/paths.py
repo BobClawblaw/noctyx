@@ -46,6 +46,9 @@ DEFAULTS = {
     "prom_llm_targets": "/etc/prometheus/llm-targets.json",        # file_sd for LLM servers (llm-discover)
     "prom_job_console": "noctyx",                                  # job scraping the console's /metrics
     "prom_job_nodes": "noctyx-nodes",                              # job scraping node_exporter
+    "prom_config": "/etc/prometheus/prometheus.yml",               # the head's Prometheus (noctyx setup metrics)
+    "prom_data": "/var/lib/noctyx/prometheus",                     # its TSDB (30 days)
+    "textfile_dir": "/var/lib/noctyx/textfile",                    # the head exporter's textfile collector dir
     "metric_prefix": "noctyx",                                     # <prefix>_gpu_power_watts … in every metric Noctyx makes
     "textfile_name": "noctyx.prom",                                # node_exporter textfile the collectors write
     "textfile_unit": "noctyx-node-textfile",                       # the collector's binary and timer on every node

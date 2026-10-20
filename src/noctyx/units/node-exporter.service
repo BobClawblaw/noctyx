@@ -1,0 +1,15 @@
+[Unit]
+Description=Noctyx metrics: the head's own node_exporter (loopback only, 127.0.0.1:@HEAD_EXPORTER_PORT@)
+After=network-online.target
+
+[Service]
+Type=simple
+User=@REPO_OWNER@
+Group=@REPO_OWNER@
+ExecStart=/usr/local/bin/node_exporter --web.listen-address=127.0.0.1:@HEAD_EXPORTER_PORT@ --collector.textfile.directory=@TEXTFILE_DIR@
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

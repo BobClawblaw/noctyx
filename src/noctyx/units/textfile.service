@@ -1,0 +1,8 @@
+[Unit]
+Description=Noctyx metrics: GPU, power and LLM-server numbers for the head's node_exporter
+
+[Service]
+Type=oneshot
+Nice=10
+Environment=TEXTFILE_DIR=@TEXTFILE_DIR@
+ExecStart=/usr/local/bin/@TEXTFILE_UNIT@

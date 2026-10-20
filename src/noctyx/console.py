@@ -35,6 +35,7 @@ already publishes; POST whitelisted actions, tokened unless NOCTYX_CONSOLE_AUTH=
   GET  /api/v1/metrics        live per-host numbers + 30-min sparklines (Prometheus)
   GET  /api/v1/metrics/<h>?tab=overview|network|storage|gpu|health   one report tab
   GET  /api/v1/job/<id>       one UI job
+  GET  /api/v1/versions       every critical component per machine: installed, pinned, latest, upgrade command
   POST /api/v1/action         whitelisted orchestrator argv
 
 Control model: fixed argv whitelist, host/profile validated
@@ -1699,8 +1700,23 @@ def metrics_text():
                 out.append(f"noctyx_hygiene_items{_lbl(host=host, severity=sev)} {sum(1 for i in items if i['severity'] == sev)}")
             out.append(f"noctyx_hygiene_report_timestamp_seconds{_lbl(host=host)} {d.get('ts', 0)}")
 
-    for name, fn in (("schedule", schedule), ("snapshots", snapshots), ("storage", storage),
-                     ("endpoint", endpoint), ("nas_raid", raid), ("runs", jobs), ("hygiene", hygiene)):
+    def components():
+        inv = json.loads(CM.VERSIONS.read_text())
+        out.append("# HELP noctyx_component_behind 1: a critical component is older than Noctyx's pin, or missing.")
+        out.append("# HELP noctyx_component_upgrade_available 1: a newer release than the pin exists upstream.")
+        for host, rows in (inv.get("hosts") or {}).items():
+            for r in rows:
+                l = _lbl(host=host, component=r["component"], installed=r.get("installed") or "",
+                         pinned=r.get("pinned") or "", latest=r.get("latest") or "", upgrade=r.get("upgrade") or "")
+                out.append(f"noctyx_component_behind{l} {int(r['state'] in ('behind', 'missing'))}")
+                out.append(f"noctyx_component_upgrade_available{l} {int(r['state'] == 'upgrade')}")
+        out.append(f"noctyx_versions_timestamp_seconds {inv.get('ts', 0)}")
+
+    sources = [("schedule", schedule), ("snapshots", snapshots), ("storage", storage), ("endpoint", endpoint),
+               ("runs", jobs), ("hygiene", hygiene), ("components", components)]
+    if CM.cfg()["server"].get("nas_ssh"):        # RAID state needs ssh to the NAS; a site without it has none
+        sources.append(("nas_raid", raid))
+    for name, fn in sources:
         src(name, fn)
     out.append(f"noctyx_metrics_generated_timestamp_seconds {now}")
     text = mp("\n".join(out) + "\n")
@@ -1932,6 +1948,13 @@ def probe_last():
         return {"ts": 0, "mbit": {}}
 
 
+def _versions():
+    try:
+        return json.loads(CM.VERSIONS.read_text())
+    except (OSError, ValueError):
+        return {"ts": 0, "hosts": {}}
+
+
 def overview():
     # monitored_only: metrics/facts/LLM view but no backup by design (backup:false or no
     # repo — the Mac); the tile says "monitored" instead of flagging it as unscheduled
@@ -1958,6 +1981,7 @@ def overview():
     return {"generated": _utcnow(), "ts": time.time(),
             "server": S["hostname"], "hosts": hosts, "facts": facts,
             "snapshots": snaps, "schedule": sched, "network": CFG.get("network") or {},
+            "versions": _versions(),
             "auth_required": auth_on()}
 
 
@@ -3551,6 +3575,9 @@ function rDetail(f){
   h=(o.hosts||[]).find(x=>x.name==SEL)||{name:SEL},
   sn=(o.snapshots&&o.snapshots.hosts||{})[SEL]||{},g=f.gpu_stats;
  // monitored only (a Mac, or backup:false): its own backups are reported, never run from here
+ const vs=o.versions||{},CMARK={ok:'ok',upgrade:'warn',behind:'bad',missing:'bad',ahead:'mut',unknown:'mut'};
+ const comps=((vs.hosts||{})[SEL]||[]).map(r=>`<tr><td>${esc(r.component)}</td><td>${esc(r.installed||'—')}</td><td>${esc(r.pinned||'—')}</td><td>${esc(r.latest||'—')}</td>
+  <td class=${CMARK[r.state]||'mut'} title="${esc(r.upgrade||'')}">${esc(r.detail)}${(r.state=='behind'||r.state=='missing'||r.state=='upgrade')&&r.upgrade?` · <code>${esc(r.upgrade)}</code>`:''}</td></tr>`).join('');
  const mon=h.os=='macos'||!!h.monitored_only,tm=f.timemachine||{},tmOld=mon&&h.os=='macos'&&(!tm.latest_ts||Date.now()/1000-tm.latest_ts>2*86400);
  const rows=(f.last_jobs||[]).map(j=>
   `<tr><td>${esc(fmtTs(j.ts))}</td><td>${esc(j.event||'')}</td><td class="${(j.rc??0)==0?'ok':'bad'}">${j.rc??''}</td><td>${esc(j.snapshot||'')}</td></tr>`).join('');
@@ -3605,6 +3632,9 @@ function rDetail(f){
   ${tabOverview(f._m)}
   <h3>Filesystems</h3>
   <table><tr><th>mount</th><th>dev</th><th>used</th><th></th></tr>${disks||'<tr><td class=mut>no data</td></tr>'}</table>
+  <h3>Components</h3>
+  <table><tr><th>component</th><th>installed</th><th>pin</th><th>latest</th><th></th></tr>${comps||'<tr><td class=mut colspan=5>not checked yet (noctyx versions)</td></tr>'}</table>
+  ${vs.ts?`<div class=mut style="font:10.5px var(--mono)">checked ${esc(fmtTs(vs.ts))} · nightly, or <code>noctyx versions --host ${esc(SEL)}</code></div>`:''}
   ${mon?`<h3>Backups</h3>
   <div class=mut style="font:11.5px var(--mono)">monitored only: ${h.os=='macos'?'Time Machine backs this Mac up'+(tm.dest?' to '+esc(tm.dest):' (no destination set)')+(tm.latest_ts?', last '+esc(fmtTs(tm.latest_ts)):''):'not backed up by Noctyx (backup: false, or no repository)'}</div>`
   :`<h3>Noctyx agent</h3>
@@ -4615,6 +4645,8 @@ class H(BaseHTTPRequestHandler):
                 return self._json({"error": str(e)[:200]}, 500)
         if p == "/api/v1/runs":
             return self._json({"ts": time.time(), "runs": runs()})
+        if p == "/api/v1/versions":
+            return self._json(_versions())
         if p == "/api/v1/probes":
             return self._json(probe_last())
         if p == "/api/v1/jobs":

@@ -1,0 +1,8 @@
+[Unit]
+Description=Noctyx: discover LLM servers and node exporters on the fleet for Prometheus
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=PYTHONPATH=@NX_PKG_PARENT@ NOCTYX_CONFIG=@NX_CONFIG@
+ExecStart=@NX_PY@ -m noctyx.metrics.llm_discover

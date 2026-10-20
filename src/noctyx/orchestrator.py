@@ -3231,13 +3231,76 @@ def cmd_assistant_set(a):
           f" · model {blk.get('model') or '(as served)'} · fallback {'on' if blk.get('fallback', True) else 'off'}")
 
 
+# ── versions: every critical component on every machine, and what can be upgraded ──
+VERSIONS = STATE_DIR / "versions.json"
+UPSTREAM = STATE_DIR / "upstream-releases.json"
+
+
+def _agent_md5():
+    import hashlib
+    return hashlib.md5(render((NX_HOME / "agent" / "noctyx-agent.sh").read_text()).encode()).hexdigest()[:12]
+
+
+def versions(c, only=None, refresh=False):
+    """Probe every machine (the head locally, nodes over ssh), compare with the pins and upstream, save the
+    inventory where the console reads it. -> the inventory."""
+    from noctyx import components as comp, __version__
+    cache = {} if refresh else comp.load(UPSTREAM)
+
+    def probe(h, snippet):
+        snippet = render(snippet)
+        if h.get("local") or is_head(c, h):
+            return subprocess.run(["sh", "-c", snippet], capture_output=True, text=True, timeout=60).stdout
+        r = ssh(c, h, f"sh -c {shlex.quote(snippet)}", timeout=60)
+        if r.returncode == 255:
+            raise RuntimeError((r.stderr or "ssh failed").strip()[-160:])
+        return r.stdout
+    inv = comp.inventory(c, probe, cache, want_agent=_agent_md5(), version=__version__, only=only)
+    if only:                 # one host refreshed: keep the others' last answer
+        inv["hosts"] = {**(comp.load(VERSIONS).get("hosts") or {}), **inv["hosts"]}
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    for path, data in ((VERSIONS, inv), (UPSTREAM, cache)):
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=1))
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, path)
+    return inv
+
+
+def cmd_versions(a):
+    """noctyx versions [--host H] [--refresh] [--json]: installed, pinned and latest for every critical
+    component on every machine, and the command that upgrades what is behind."""
+    inv = versions(cfg(), a.host, a.refresh)
+    if a.json:
+        print(json.dumps(inv, indent=1))
+        return
+    mark = {"ok": "✓", "upgrade": "↑", "behind": "✗", "missing": "✗", "ahead": "·", "unknown": "?"}
+    todo = []
+    for host, rows in inv["hosts"].items():
+        if a.host and host != a.host:
+            continue
+        print(host)
+        for r in rows:
+            print(f"  {mark.get(r['state'], '?')} {r['component']:<14} {r['installed'] or '—':<14} "
+                  f"pin {r['pinned'] or '—':<9} latest {r['latest'] or '—':<9} {r['detail']}")
+            if r["state"] in ("behind", "missing", "upgrade") and r["upgrade"]:
+                todo.append((host, r))
+    if todo:
+        print("\nto upgrade:")
+        for host, r in todo:
+            print(f"  {host:<12} {r['component']:<14} {r['upgrade']}"
+                  + ("   (after moving the pin in components.py)" if r["state"] == "upgrade" and r["pinned"] else ""))
+    audit("versions", behind=sum(r["state"] in ("behind", "missing") for _, r in todo),
+          upgradable=sum(r["state"] == "upgrade" for _, r in todo))
+
+
 # ── head-node setup and the nightly run ─────────────────────────────────────
 def cmd_nightly(a):
     """Maintenance after the backup window: mirror harvest, recipe discovery; on Sundays the retention
     dry-run and verify. Each step runs in its own process so one failure never skips the rest."""
     me = [sys.executable, str(pathlib.Path(__file__).resolve())]
     env = {**os.environ, "NOCTYX_FOREGROUND": "1"}
-    steps = [["hf-harvest"], ["recipe-discover"]]
+    steps = [["hf-harvest"], ["recipe-discover"], ["versions"]]
     if datetime.datetime.now().isoweekday() == 7:
         steps += [["prune"], ["verify"]]
     print(f"=== noctyx nightly {datetime.datetime.now().isoformat(timespec='seconds')} ===", flush=True)
@@ -3254,6 +3317,9 @@ def cmd_nightly(a):
 HEAD_UNITS = ("console.service", "directory.service", "hf-mirror.service", "tick.service", "tick.timer",
               "nightly.service", "nightly.timer", "retention.service", "retention.timer",
               "hygiene.service", "hygiene.timer")
+
+
+HEAD_EXPORTER_PORT = 20994        # the head's own node_exporter, loopback only (noctyx setup metrics)
 
 
 def tick_minutes(c):
@@ -3273,7 +3339,8 @@ def site_values(c):
             "REPO_ROOT": s.get("repo_root") or "/", "HEAD_ADDR": s.get("address") or "",
             "HEAD_HOST": head.get("name") or "", "RESTIC_VERSION": str(c.get("restic_version") or "0.19.1"),
             "REST_PORT": str(s.get("rest_port", 20998)), "TICK_MINUTES": str(tick_minutes(c)), "TLS_CERT": s.get("tls", {}).get("cert", ""),
-            "TLS_KEY": s.get("tls", {}).get("key", ""), "NAS_REPO_ROOT": (s.get("nas_ssh") or {}).get("repo_root", "")}
+            "TLS_KEY": s.get("tls", {}).get("key", ""), "NAS_REPO_ROOT": (s.get("nas_ssh") or {}).get("repo_root", ""),
+            "HEAD_EXPORTER_PORT": str(HEAD_EXPORTER_PORT)}
 
 
 def render_site(c, text):
@@ -3483,12 +3550,15 @@ def main():
     stp = sub.add_parser("setup", help="first-time setup of the head, step by step (no step: where the site is, and what is next)")
     stp.add_argument("step", nargs="?", default="status",
                      choices=["status", "all", "verify", "tools", "owner", "mount", "tls", "repos", "endpoint",
-                              "rest-server", "units", "privacy", "escrow"])
+                              "rest-server", "units", "metrics", "privacy", "escrow"])
     stp.add_argument("--force", action="store_true", help="tls: replace the CA too (every node must then be re-installed); "
                      "tools: download even if installed")
     stp.add_argument("--no-canary", action="store_true", help="verify: skip the backup+restore round trip")
     css = sub.add_parser("console-set", help="the console's display defaults (JSON: mode, theme, tunit, custom)")
     css.add_argument("--json", required=True)
+    ver = sub.add_parser("versions", help="every critical component on every machine: installed, pinned, latest, and how to upgrade")
+    ver.add_argument("--host"); ver.add_argument("--refresh", action="store_true", help="ask GitHub again now")
+    ver.add_argument("--json", action="store_true")
     sub.add_parser("nightly", help="maintenance after the backup window (mirror harvest, recipe discovery, weekly prune dry-run + verify)")
     ih = sub.add_parser("install-head", help="render the head node's services for this site: systemd or launchd (--apply installs them)")
     ih.add_argument("--apply", action="store_true")
@@ -3516,7 +3586,7 @@ def main():
                "policy-show": cmd_policy_show, "dumps": cmd_dumps, "hf-harvest": cmd_hf_harvest,
                "recipe-deploy": cmd_recipe_deploy, "recipe-stop": cmd_recipe_stop, "recipe-start": cmd_recipe_start,
                "recipe-rollback": cmd_recipe_rollback, "recipe-status": cmd_recipe_status,
-               "recipe-catalog": cmd_recipe_catalog, "recipe-discover": cmd_recipe_discover, "nightly": cmd_nightly, "install-head": cmd_install_head, "console-set": cmd_console_set, "user": cmd_user, "setup": cmd_setup, "assistant-set": cmd_assistant_set}[a.cmd]
+               "recipe-catalog": cmd_recipe_catalog, "recipe-discover": cmd_recipe_discover, "nightly": cmd_nightly, "install-head": cmd_install_head, "console-set": cmd_console_set, "user": cmd_user, "setup": cmd_setup, "assistant-set": cmd_assistant_set, "versions": cmd_versions}[a.cmd]
     rc = 0
     try:
         handler(a)

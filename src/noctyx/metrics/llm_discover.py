@@ -131,6 +131,8 @@ def api_key(host):
 
 
 def run_on(c, h):
+    if h.get("local") and h.get("os") == "macos":      # a Mac head: here, not over ssh to itself
+        return subprocess.run(["bash", "-s"], input=SNIPPET_MAC, capture_output=True, text=True, timeout=40).stdout
     if h.get("os") == "macos":
         r = subprocess.run(["ssh", *cm.SSH_OPTS, "-i", c["server"]["ssh"]["key"],
                             f"{h.get('ssh_user') or c['server']['ssh']['user']}@{h['address']}", "bash -s"],

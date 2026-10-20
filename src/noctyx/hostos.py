@@ -16,6 +16,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import time
 
 IS_MAC = sys.platform == "darwin"
 LAUNCHD_DIR = pathlib.Path("/Library/LaunchDaemons")
@@ -153,6 +154,13 @@ def _unit_fields(text):
     return out
 
 
+def _seconds(v):
+    m = re.fullmatch(r"(\d+)\s*(s|sec|min|m|h)?", v.strip())
+    if not m:
+        raise ValueError(f"interval {v!r}")
+    return int(m.group(1)) * {"min": 60, "m": 60, "h": 3600}.get(m.group(2) or "s", 1)
+
+
 def _calendar(spec):
     """The OnCalendar forms Noctyx's timers use -> launchd StartCalendarInterval or StartInterval."""
     m = re.fullmatch(r"\*:0/(\d+)", spec)
@@ -190,8 +198,11 @@ def launchd_plist(label, service, timer=None, log_dir="/var/log/noctyx"):
     if svc.get("Nice"):
         p["Nice"] = int(svc["Nice"])
     if timer:
-        cal = next((v for s, k, v in _unit_fields(timer) if s == "Timer" and k == "OnCalendar"), None)
-        p.update(_calendar(cal))
+        tf = {k: v for s, k, v in _unit_fields(timer) if s == "Timer"}
+        if "OnCalendar" in tf:
+            p.update(_calendar(tf["OnCalendar"]))
+        else:                # OnBootSec + OnUnitActiveSec: every N seconds, starting at load
+            p.update({"StartInterval": _seconds(tf["OnUnitActiveSec"]), "RunAtLoad": True})
     else:
         p["RunAtLoad"] = True
         if svc.get("Restart") in ("always", "on-failure"):
@@ -239,8 +250,16 @@ def install_services(units, unit_prefix, label_prefix, log_dir="/var/log/noctyx"
         label = launchd_label(n, label_prefix)
         path = LAUNCHD_DIR / f"{label}.plist"
         new = launchd_plist(label, txt, timer, log_dir)
-        if path.exists():
+        loaded = _launchd_loaded(label)
+        if loaded and path.exists() and path.read_text() == new:
+            done.append(label)          # unchanged and running: a re-run restarts nothing
+            continue
+        if loaded:
             subprocess.run(["launchctl", "bootout", f"system/{label}"], capture_output=True)
+            for _ in range(40):         # bootout returns before the job is gone; bootstrap now would fail (EIO)
+                if not _launchd_loaded(label):
+                    break
+                time.sleep(0.25)
         path.write_text(new)
         os.chmod(path, 0o644)
         user = plistlib.loads(new.encode()).get("UserName")
@@ -248,12 +267,20 @@ def install_services(units, unit_prefix, label_prefix, log_dir="/var/log/noctyx"
             log = pathlib.Path(log_dir, f"{label}.log")
             log.touch(exist_ok=True)
             shutil.chown(log, user)
-        r = subprocess.run(["launchctl", "bootstrap", "system", str(path)], capture_output=True, text=True)
+        for _ in range(5):
+            r = subprocess.run(["launchctl", "bootstrap", "system", str(path)], capture_output=True, text=True)
+            if r.returncode == 0:
+                break
+            time.sleep(1)
         if r.returncode:
             raise RuntimeError(f"launchctl bootstrap {label}: {(r.stderr or r.stdout).strip()}")
         subprocess.run(["launchctl", "enable", f"system/{label}"], capture_output=True)
         done.append(label)
     return done
+
+
+def _launchd_loaded(label):
+    return subprocess.run(["launchctl", "print", f"system/{label}"], capture_output=True).returncode == 0
 
 
 def service_active(name, label_prefix):
@@ -356,7 +383,6 @@ def launchd_probe(label, user, argv, timeout=20):
     os.chmod(plist, 0o644)
     subprocess.run(["launchctl", "bootout", f"system/{label}"], capture_output=True)
     subprocess.run(["launchctl", "bootstrap", "system", str(plist)], capture_output=True)
-    import time
     text = ""
     for _ in range(timeout * 4):
         text = out.read_text(errors="replace").strip()

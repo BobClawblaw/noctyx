@@ -1,0 +1,18 @@
+[Unit]
+Description=Noctyx metrics: Prometheus on 127.0.0.1:9090 (the console's live numbers)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@REPO_OWNER@
+Group=@REPO_OWNER@
+ExecStart=/usr/local/bin/prometheus --config.file=@PROM_CONFIG@ --storage.tsdb.path=@PROM_DATA@ --storage.tsdb.retention.time=30d --web.listen-address=127.0.0.1:9090 --web.enable-lifecycle
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=full
+ReadWritePaths=@PROM_DATA@
+
+[Install]
+WantedBy=multi-user.target
