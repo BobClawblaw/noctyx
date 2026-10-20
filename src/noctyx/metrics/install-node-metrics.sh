@@ -24,22 +24,30 @@ ONLY=""; [[ ${1:-} == --host ]] && ONLY=${2:?}
 CA_CRT=@TLS@/ca.crt; CA_KEY=@TLS@/ca.key
 PKI=@ETC@/metrics; install -d -m 0700 "$PKI"
 PASS=/etc/prometheus/node-exporter.pass
-SSH_KEY=$(python3 -c "import json;print(json.load(open('$CFG'))['server']['ssh']['key'])")
-SSH_USER=$(python3 -c "import json;print(json.load(open('$CFG'))['server']['ssh']['user'])")
-HEAD=$(python3 -c "import json;print(json.load(open('$CFG'))['server']['address'])")
+PY3=${NX_PY:-python3}                 # Noctyx's own interpreter (a Mac's /usr/bin/python3 may be missing)
+SSH_KEY=$("$PY3" -c "import json;print(json.load(open('$CFG'))['server']['ssh']['key'])")
+SSH_USER=$("$PY3" -c "import json;print(json.load(open('$CFG'))['server']['ssh']['user'])")
+HEAD=$("$PY3" -c "import json;print(json.load(open('$CFG'))['server']['address'])")
 
 # one scrape credential for the fleet; bcrypt hash goes to the clients
+# Prometheus reads the password: the distro's prometheus user, or the repository owner that runs
+# Noctyx's own Prometheus (noctyx setup metrics)
+PGROUP=prometheus; "$PY3" -c "import grp;grp.getgrnam('prometheus')" 2>/dev/null || PGROUP=@REPO_OWNER@
 if [[ ! -s $PASS ]]; then
-  install -m 0640 -o root -g prometheus /dev/null "$PASS"
+  install -d -m 0755 "$(dirname "$PASS")"
+  install -m 0640 -o root -g "$PGROUP" /dev/null "$PASS"
   openssl rand -hex 24 > "$PASS"
 fi
-HASH=$(python3 -c "import bcrypt,sys;print(bcrypt.hashpw(open('$PASS').read().strip().encode(),bcrypt.gensalt(rounds=10)).decode())")
+# bcrypt by htpasswd (on every Linux head and every Mac), the password on stdin, never a command line
+HASH=$(tr -d '\n' < "$PASS" | htpasswd -niB -C 10 prometheus | cut -d: -f2-)
+[[ $HASH == '$2'* ]] || { echo "could not hash the exporter password (htpasswd -B)" >&2; exit 1; }
 
-mapfile -t HOSTS < <(python3 - "$CFG" <<'EOF'
+HOSTS=()                               # bash 3.2 (a Mac head) has no mapfile
+while IFS= read -r row; do HOSTS+=("$row"); done < <("$PY3" - "$CFG" <<'EOF'
 import json, sys
 c = json.load(open(sys.argv[1]))
 for h in c["hosts"]:
-    if h.get("enabled", True) is not False and h.get("address"):
+    if h.get("enabled", True) is not False and h.get("address") and h.get("os", "linux") == "linux":
         print(h["name"], h["address"])
 EOF
 )
@@ -105,7 +113,7 @@ done
 # Prometheus: file_sd target list from the site config (re-read automatically),
 # a scrape job for it, and host="@HEAD_HOST@" on the pre-existing head-node job.
 install -m 0644 "$CA_CRT" /etc/prometheus/@UNIT_PREFIX@-ca.crt
-python3 - "$CFG" <<'EOF' > @PROM_NODE_TARGETS@
+"$PY3" - "$CFG" <<'EOF' > @PROM_NODE_TARGETS@
 import json, sys
 c = json.load(open(sys.argv[1]))
 head = c["server"]["address"]
@@ -120,10 +128,16 @@ print(json.dumps([{"targets": [f"{addr(h)}:9100"], "labels": {"host": h["name"]}
                   if h.get("enabled", True) is not False and h.get("address") and h["address"] != head],
                  indent=2))
 EOF
-PY=/etc/prometheus/prometheus.yml
+PY=@PROM_CONFIG@
+if grep -q "managed by noctyx setup metrics" "$PY" 2>/dev/null; then
+  # Noctyx's own Prometheus already has the job and the head's target: just re-read the targets
+  curl -s -X POST http://127.0.0.1:9090/-/reload >/dev/null || true
+  echo "prometheus (noctyx setup metrics): reloaded; targets in @PROM_NODE_TARGETS@"
+  exit 0
+fi
 if ! grep -q "job_name: @PROM_JOB_NODES@" "$PY"; then
   cp -a "$PY" "$PY.pre-noctyx"
-  python3 - "$PY" <<'EOF'
+  "$PY3" - "$PY" <<'EOF'
 import re, sys
 p = sys.argv[1]; s = open(p).read()
 s = s.rstrip("\n") + """
@@ -147,7 +161,7 @@ fi
 # by. Anchored on its targets line (the stock file has comments between
 # job_name and static_configs), applied on its own so it is never skipped.
 if ! grep -q "host: @HEAD_HOST@" "$PY"; then
-  python3 - "$PY" <<'EOF2'
+  "$PY3" - "$PY" <<'EOF2'
 import sys
 p = sys.argv[1]; s = open(p).read()
 line = "      - targets: ['localhost:9100']\n"

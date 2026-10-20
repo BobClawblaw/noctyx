@@ -117,16 +117,37 @@ def configured(config=CONFIG):
     return a if a.get("enabled") and a.get("url") else None
 
 
-def _guide():
-    """The install and troubleshooting guides, when this is a checkout (the wheel does not ship docs)."""
-    root = pathlib.Path(__file__).resolve().parents[2] / "docs" / "guide"
-    out = []
-    for name in ("install.md", "troubleshooting.md"):
+GUIDE_URL = "https://raw.githubusercontent.com/BobClawblaw/noctyx/main/docs/guide/{}"
+
+
+def _guide_page(name):
+    """One guide page: from the checkout, else the published copy (the wheel ships no docs), cached a day."""
+    try:
+        return (pathlib.Path(__file__).resolve().parents[2] / "docs" / "guide" / name).read_text()
+    except OSError:
+        pass
+    cache = pathlib.Path(P["console_state"]) / "guide" / name
+    try:
+        if time.time() - cache.stat().st_mtime < 86400:
+            return cache.read_text()
+    except OSError:
+        pass
+    try:
+        with urllib.request.urlopen(GUIDE_URL.format(name), timeout=10) as r:
+            text = r.read().decode("utf-8", "replace")
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(text)
+        return text
+    except Exception:
         try:
-            out.append((root / name).read_text()[:24000])
+            return cache.read_text()          # stale beats none
         except OSError:
-            pass
-    return "\n\n".join(out)
+            return ""
+
+
+def _guide():
+    """The install and troubleshooting guides the assistant answers from."""
+    return "\n\n".join(t[:24000] for t in (_guide_page("install.md"), _guide_page("troubleshooting.md")) if t)
 
 
 def facts():

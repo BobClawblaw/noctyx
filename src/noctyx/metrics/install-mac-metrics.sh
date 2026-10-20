@@ -13,20 +13,21 @@ CFG=${NOCTYX_CONFIG:?run through: noctyx tool <name>}
 NAME=${1:?usage: install-mac-metrics.sh <host name in the site config>}
 [[ $EUID -eq 0 ]] || { echo "run as root" >&2; exit 1; }
 # address: the wired IP llm-discover last pinned (addresses.json) when the site config names the host
-read -r ADDR USER < <(python3 - "$CFG" "$NAME" <<'PY'
+PY3=${NX_PY:-python3}
+read -r ADDR USER < <("$PY3" - "$CFG" "$NAME" <<'PY'
 import json, sys
 c = json.load(open(sys.argv[1])); h = [x for x in c["hosts"] if x["name"] == sys.argv[2]][0]
 try:
     a = json.load(open("@CONSOLE_STATE@/addresses.json")).get(h["name"], {}).get("ip")
 except Exception:
     a = None
-print(a or h["address"], h.get("ssh_user", c["ssh"]["user"]))
+print(a or h["address"], h.get("ssh_user") or (c.get("server", {}).get("ssh") or c["ssh"])["user"])
 PY
 )
-SSH_KEY=$(python3 -c "import json;print(json.load(open('$CFG'))['server']['ssh']['key'])")
+SSH_KEY=$("$PY3" -c "import json;print(json.load(open('$CFG'))['server']['ssh']['key'])")
 E=(ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new -i "$SSH_KEY" "$USER@$ADDR")
 PASS=/etc/prometheus/node-exporter.pass
-HASH=$(python3 -c "import bcrypt;print(bcrypt.hashpw(open('$PASS').read().strip().encode(),bcrypt.gensalt(rounds=10)).decode())")
+HASH=$(tr -d '\n' < "$PASS" | htpasswd -niB -C 10 prometheus | cut -d: -f2-)   # bcrypt; the password on stdin
 PKI=@ETC@/metrics; install -d -m 0700 "$PKI"
 echo "== $NAME ($USER@$ADDR)"
 # The cert must name the IP Prometheus scrapes. A DHCP, dual-homed Mac has several: put every
@@ -90,6 +91,10 @@ n=$(curl -s --cacert @TLS@/ca.crt -u "prometheus:$(cat "$PASS")" "https://$ADDR:
 g=$(curl -s --cacert @TLS@/ca.crt -u "prometheus:$(cat "$PASS")" "https://$ADDR:9100/metrics" | grep -c '^@METRIC_PREFIX@_gpu' || true)
 echo "   anonymous: HTTP $code (want 401) · authenticated: $n node_* series · gpu series: $g"
 # Prometheus target list: llm-discover owns it (pins named hosts to their wired IP, rewrites on change)
-"${NX_PY:-python3}" -m noctyx.metrics.llm_discover >/dev/null 2>&1 || true
-systemctl reload prometheus
+"$PY3" -m noctyx.metrics.llm_discover >/dev/null 2>&1 || true
+if grep -q "managed by noctyx setup metrics" @PROM_CONFIG@ 2>/dev/null; then
+  curl -s -X POST http://127.0.0.1:9090/-/reload >/dev/null || true
+else
+  systemctl reload prometheus
+fi
 echo "   prometheus target added; the dashboard picks $NAME up on its next refresh"

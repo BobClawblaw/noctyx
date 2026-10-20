@@ -293,3 +293,12 @@ def test_inventory_pins_only_what_noctyx_installed():
     assert gpu["agent"]["state"] == "ok" and gpu["restic"]["state"] == "ok"
     assert gpu["node_exporter"]["upgrade"].endswith("(on gpu-01)")
     assert inv["hosts"]["mac"] == []                              # a Mac runs nothing Noctyx installs
+
+
+def test_hygiene_refuses_a_mac(monkeypatch):
+    import types
+    c = {"hosts": [{"name": "mac", "address": "192.0.2.30", "os": "macos"}], "server": {}}
+    monkeypatch.setattr(cm, "cfg", lambda: c)
+    with pytest.raises(SystemExit) as e:
+        cm.cmd_hygiene(types.SimpleNamespace(host="mac", fix=None))
+    assert "Mac" in str(e.value)

@@ -119,6 +119,12 @@ def _from_tar(blob, members):
     return out
 
 
+def _restart_if_running(*services):
+    for n in services:
+        if hostos.service_installed(_service(n), _label()) and hostos.restart_service(_service(n), _label()):
+            print(f"  restarted {_service(n)} on the new binary")
+
+
 def _install_bin(path, data):
     tmp = path.with_suffix(".new")
     tmp.write_bytes(data)
@@ -151,6 +157,7 @@ def setup_tools(c, force=False):
     else:
         _install_bin(rs, _from_tar(_fetch("rest-server"), ["rest-server"])["rest-server"])
         print(f"  rest-server {_version(str(rs))} -> {rs}")
+        _restart_if_running("rest-server.service")
     missing = [t for t in ("openssl", "htpasswd", "ssh", "curl") if not shutil.which(t)]
     if missing:
         hint = "" if hostos.IS_MAC else " (apt install " + " ".join(
@@ -382,8 +389,8 @@ def setup_repos(c):
 
 # ── escrow ──────────────────────────────────────────────────────────────────
 def setup_escrow(c):
-    """An encrypted bundle of every key and credential (AES-256, PBKDF2), its passphrase typed by you and
-    stored nowhere. Copy it off this machine and off the NAS."""
+    """An encrypted bundle of every key and credential and the site config (AES-256, PBKDF2), its passphrase
+    typed by you and stored nowhere. Copy it off this machine and off the NAS."""
     if not sys.stdin.isatty():
         fail("escrow asks for a passphrase on the terminal: run `sudo noctyx setup escrow` in one")
     out = pathlib.Path(P["etc"]) / "escrow"
@@ -393,7 +400,13 @@ def setup_escrow(c):
     parts = [str(pathlib.Path(p).relative_to(etc)) for p in (P["repo_keys"], P["repo_creds"], P["tls"],
                                                               f"{P['etc']}/htpasswd")
              if pathlib.Path(p).exists() and pathlib.Path(p).is_relative_to(etc)]
-    tar = subprocess.Popen(["tar", "-C", str(etc), "-czf", "-", *parts], stdout=subprocess.PIPE)
+    cfg = pathlib.Path(cm.CFG_PATH)
+    if cfg.is_relative_to(etc):
+        parts.append(str(cfg.relative_to(etc)))
+        extra = []
+    else:                    # a config kept elsewhere goes in at the bundle's top level
+        extra = ["-C", str(cfg.parent), cfg.name]
+    tar = subprocess.Popen(["tar", "-C", str(etc), "-czf", "-", *parts, *extra], stdout=subprocess.PIPE)
     enc = subprocess.run(["openssl", "enc", "-aes-256-cbc", "-pbkdf2", "-iter", "200000", "-salt", "-out", str(bundle)],
                          stdin=tar.stdout)      # openssl asks for the passphrase on the terminal, twice
     tar.wait()
@@ -527,13 +540,15 @@ scrape_configs:
 
 
 def _install_release(component, members, force):
+    """-> True when the binaries were (re)placed."""
     have = [m for m in members if (BIN / m).exists()]
     if len(have) == len(members) and not force:
         print(f"  {component}: kept ({', '.join(str(BIN / m) for m in members)})")
-        return
+        return False
     for m, data in _from_tar(_fetch(component), members).items():
         _install_bin(BIN / m, data)
     print(f"  {component} {comp.PINS[component]['version']} -> {', '.join(str(BIN / m) for m in members)}")
+    return True
 
 
 def _write(path, text, mode, group=None):
@@ -556,10 +571,14 @@ def setup_metrics(c, force=False):
         print("\n".join("    " + l for l in prometheus_yml(c).split("scrape_configs:\n", 1)[1].splitlines()))
         return
     cfgf = pathlib.Path(P["prom_config"])
-    if cfgf.exists() and PROM_MARK not in cfgf.read_text() and not force:
-        fail(f"{cfgf} exists and is not Noctyx's: move it aside, or `noctyx setup metrics --force` replaces it")
-    _install_release("prometheus", ["prometheus", "promtool"], force)
-    _install_release("node_exporter", ["node_exporter"], force)
+    if cfgf.exists() and PROM_MARK not in cfgf.read_text():
+        if not force:
+            fail(f"{cfgf} exists and is not Noctyx's: move it aside, or `noctyx setup metrics --force` replaces it")
+        keep = cfgf.with_name(cfgf.name + ".pre-noctyx")
+        shutil.copy2(cfgf, keep)
+        print(f"  {cfgf} is not Noctyx's: kept a copy at {keep}")
+    new_prom = _install_release("prometheus", ["prometheus", "promtool"], force)
+    new_exp = _install_release("node_exporter", ["node_exporter"], force)
     d = _prom_dir()
     d.mkdir(parents=True, exist_ok=True)
     os.chmod(d, 0o755)
@@ -587,6 +606,8 @@ def setup_metrics(c, force=False):
         fail(f"promtool rejects {cfgf}: {(r.stdout + r.stderr).strip()[-600:]}")
     done = hostos.install_services({_service(n): cm.render_unit(c, n) for n in METRICS_UNITS}, cm.UNIT, _label(), _log_dir())
     print(f"  installed and started: {', '.join(done)}")
+    if ours:                 # services that were already running keep the old binary until restarted
+        _restart_if_running(*(["prometheus.service"] if new_prom else []), *(["node-exporter.service"] if new_exp else []))
     for _ in range(30):
         if _prom_ready():
             break

@@ -679,6 +679,8 @@ def cmd_hygiene(a):
     """
     c = cfg()
     targets = [host_by_name(c, a.host)] if a.host else [h for h in hosts(c) if h.get("os") != "macos" and h.get("address")]
+    if a.host and targets[0].get("os") == "macos":
+        sys.exit(f"{a.host} is a Mac: hygiene checks are Linux ones (systemd, apt, dpkg); Macs are monitored only")
     try:
         report = json.loads(HYGIENE_FILE.read_text())
     except Exception:
@@ -957,11 +959,8 @@ def cmd_reboot(a):
     REBOOT_DIR.mkdir(parents=True, exist_ok=True)
     (REBOOT_DIR / f"{h['name']}.json").write_text(json.dumps(rec, indent=1))
     unit = f"{UNIT}-host-reboot-{int(time.time())}"
-    if h.get("os") == "macos":
-        r = _on(c, h, f"nohup sh -c 'sleep {delay}; shutdown -r now' >/dev/null 2>&1 &", timeout=30)
-    else:
-        r = _on(c, h, f"systemd-run --quiet --collect --unit={unit} --on-active={delay} "
-                      f"--description='Noctyx: reboot requested from the console/CLI' systemctl reboot", timeout=30)
+    r = _on(c, h, f"systemd-run --quiet --collect --unit={unit} --on-active={delay} "
+                  f"--description='Noctyx: reboot requested from the console/CLI' systemctl reboot", timeout=30)
     if r.returncode != 0:
         (REBOOT_DIR / f"{h['name']}.json").unlink()
         audit("reboot", host=h["name"], rc=1, error=(r.stderr or "").strip()[-200:])
