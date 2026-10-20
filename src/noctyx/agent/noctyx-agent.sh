@@ -23,26 +23,16 @@ AUDIT=$STATE/audit.jsonl
 HOOKS=@NODE_ETC@/hooks
 LOCK=$STATE/agent.lock
 VERBOSE=${NOCTYX_VERBOSE:-0}
-# macOS nodes: /bin/bash 3.2 and a BSD userland (no flock, lsblk, systemctl, /proc, GNU date/tail).
-# Every Darwin difference branches on IS_MAC; Linux takes the original path.
-IS_MAC=0; [[ $(uname -s) == Darwin ]] && IS_MAC=1
-[[ $IS_MAC == 1 ]] && PATH=/usr/local/bin:/opt/homebrew/bin:$PATH
-NXHOST=$(hostname -s)
-# ISO-8601 timestamps: BSD date has no -Is
-if [[ $IS_MAC == 1 ]]; then nx_ts() { date "$@" +%Y-%m-%dT%H:%M:%S%z | sed -E 's/([0-9]{2})$/:\1/'; }
-else nx_ts() { date "$@" -Is; }; fi
 
 log() { printf '[cm-agent] %s\n' "$*" >&2; }
-die() { log "FATAL: $*"; emit "{\"event\":\"error\",\"host\":\"$NXHOST\",\"message\":\"$1\"}"; exit 1; }
+die() { log "FATAL: $*"; emit "{\"event\":\"error\",\"host\":\"$(hostname -s)\",\"message\":\"$1\"}"; exit 1; }
 
 emit() { printf '@RESULT_TOKEN@ %s\n' "$1"; [[ -d $STATE ]] && printf '%s\n' "$1" >> "$AUDIT"; }
 
 [[ $EUID -eq 0 ]] || die "must run as root (needs raw block metadata, xattrs, ACLs, device nodes)"
-[[ -r $CONF ]]    || die "missing $CONF — install the agent first (head node: noctyx install-agent --host $NXHOST)"
+[[ -r $CONF ]]    || die "missing $CONF — install the agent first (head node: noctyx install-agent --host $(hostname -s))"
 # shellcheck disable=SC1090
 . "$CONF"
-# A Mac's `hostname -s` follows its network name (DHCP, Bonjour); snapshots carry the site's name for it
-[[ $IS_MAC == 1 && -n ${HOST:-} ]] && NXHOST=$HOST
 for v in REST_URL REST_USER PASSWORD_FILE CA_FILE REPO_ID; do
   [[ -n ${!v:-} ]] || die "$CONF missing $v"
 done
@@ -87,13 +77,6 @@ trap '' HUP PIPE
 # `snapshots` made every busy host report "no readable snapshot list".
 take_job_lock() {
   exec 9>"$LOCK" || die "cannot open lock file $LOCK"
-  if [[ $IS_MAC == 1 ]]; then
-    # no flock(1) on macOS: perl takes flock(2) on OUR fd 9 (inherited), so the lock lives on the shared open
-    # file description and lasts until this shell exits, exactly like `flock -n 9`
-    perl -e 'use Fcntl qw(:flock); open(my $fh, ">&=", 9) or exit 2; flock($fh, LOCK_EX|LOCK_NB) or exit 1' \
-      || die "another noctyx job is genuinely running (lock holders: $(fuser "$LOCK" 2>/dev/null | tr ' ' '\n' | grep -v "^$$\$" | tr '\n' ' '))"
-    return
-  fi
   # The holder list must come from the LOCK, never from pgrep -f on the agent's name:
   # the orchestrator's ssh command line contains that exact string, so pgrep
   # matches the job's own driver (on the head node even the orchestrator's
@@ -107,54 +90,12 @@ take_job_lock() {
 # bootloader, UUIDs, kernel, driver and toolkit state leaves a box that is
 # "restored" and still down. Capture everything the restore image needs while
 # the machine is healthy and can describe itself.
-# a command bounded to N seconds (no timeout(1) on macOS)
-nx_timeout() { local t=$1; shift
-  if command -v timeout >/dev/null; then timeout "$t" "$@"; else perl -e 'alarm shift; exec @ARGV' "$t" "$@"; fi; }
-
-# A Mac restores by reinstalling macOS and restoring the data volume, so its metadata is a
-# description of the machine, not a replayable disk layout.
-fs_meta_macos() {
-  local out=$1
-  mkdir -p "$out"
-  { echo "# generated $(nx_ts) by noctyx-agent on $NXHOST"
-    echo "# host=$NXHOST arch=$(uname -m) kernel=$(uname -r)"
-    uname -a; echo; sw_vers; echo; uptime; echo
-    nx_ts; echo "timezone: $(readlink /etc/localtime 2>/dev/null | sed 's#.*/zoneinfo/##')"
-  } > "$out/system.txt" 2>&1
-  diskutil list > "$out/diskutil-list.txt" 2>&1
-  diskutil apfs list > "$out/diskutil-apfs.txt" 2>&1
-  mount > "$out/mount.txt" 2>&1
-  df -k -P > "$out/df.txt" 2>&1
-  nx_timeout 60 system_profiler SPHardwareDataType SPSoftwareDataType > "$out/hardware.txt" 2>&1
-  launchctl list > "$out/launchctl-list.txt" 2>&1
-  ls -l /Library/LaunchDaemons /Library/LaunchAgents > "$out/launchd-plists.txt" 2>&1
-  crontab -l > "$out/crontab-root.txt" 2>/dev/null
-  ifconfig > "$out/network-addresses.txt" 2>&1
-  netstat -rn -f inet > "$out/network-routes.txt" 2>&1
-  { scutil --get ComputerName; scutil --get LocalHostName; scutil --get HostName; } > "$out/hostnames.txt" 2>&1
-  { fdesetup status; csrutil status; } > "$out/security.txt" 2>&1
-  # Homebrew runs as its owner, never as root; ask as that user
-  local brew="" bu
-  for b in /opt/homebrew/bin/brew /usr/local/bin/brew; do [[ -x $b ]] && { brew=$b; break; }; done
-  if [[ -n $brew ]]; then
-    bu=$(stat -f %Su "$brew")
-    { echo "# brew ($brew, owner $bu)"; nx_timeout 120 sudo -u "$bu" "$brew" list --versions
-      echo "# casks"; nx_timeout 120 sudo -u "$bu" "$brew" list --cask --versions; } > "$out/brew.txt" 2>&1
-  fi
-  { python3 -c "import torch;print('torch',torch.__version__,'mps',torch.backends.mps.is_available())" 2>/dev/null
-    pip3 list 2>/dev/null | grep -iE '^(torch|mlx|jax|vllm|transformers)'
-  } > "$out/ai-toolchain.txt" 2>&1
-  ln -sfn "$out" "$META/current"
-  echo "$out"
-}
-
 fs_meta() {
   local out=$1 d dev
-  [[ $IS_MAC == 1 ]] && { fs_meta_macos "$out"; return; }
   mkdir -p "$out"
 
-  { echo "# generated $(date -Is) by noctyx-agent on $NXHOST"
-    echo "# host=$NXHOST arch=$(uname -m) kernel=$(uname -r)"
+  { echo "# generated $(date -Is) by noctyx-agent on $(hostname -s)"
+    echo "# host=$(hostname -s) arch=$(uname -m) kernel=$(uname -r)"
     uname -a; echo; cat /etc/os-release 2>/dev/null; echo
     echo "cmdline: $(cat /proc/cmdline 2>/dev/null)"; echo; uptime; echo
     date -Is; echo "timezone: $(cat /etc/timezone 2>/dev/null)"
@@ -280,9 +221,7 @@ cmd_backup() {
   local paths_file="$prof_conf/paths" excl_file="$prof_conf/exclusions"
   [[ -r $paths_file ]] || die "no paths file for profile '$profile' ($paths_file)"
 
-  local paths l
-  if (( BASH_VERSINFO[0] >= 4 )); then mapfile -t paths < "$paths_file"
-  else paths=(); while IFS= read -r l || [[ -n $l ]]; do paths+=("$l"); done < "$paths_file"; fi
+  local paths; mapfile -t paths < "$paths_file"
   # per-host policy (generated by `noctyx policy-apply`): one restic pattern per
   # line, "!pattern" re-includes. Passed AFTER the baseline list so a negation in it
   # wins (restic applies the last matching pattern). Used to read each line as an
@@ -300,11 +239,9 @@ cmd_backup() {
   # the common one excludes the separate mounts (/mnt/** and the site's extras)
   local common_excl=@NODE_ETC@/exclusions-common.conf
   [[ -r @NODE_ETC@/exclusions-$profile.conf ]] && common_excl=@NODE_ETC@/exclusions-$profile.conf
-  # macOS: the OS volume, caches and Spotlight/Time Machine internals (install-agent puts the list there)
-  [[ $IS_MAC == 1 && -r @NODE_ETC@/exclusions-macos.conf ]] && excl=( "--exclude-file=@NODE_ETC@/exclusions-macos.conf" ${excl[@]+"${excl[@]}"} )
 
-  local -a tags=( --tag "@SNAPSHOT_TAG@" --tag "profile-$profile" --tag "host-$NXHOST" )
-  local hostname_arg=( --host "$NXHOST" )
+  local -a tags=( --tag "@SNAPSHOT_TAG@" --tag "profile-$profile" --tag "host-$(hostname -s)" )
+  local hostname_arg=( --host "$(hostname -s)" )
   local -a opts=()
   # restic — including the pinned 0.19.1 — has NO xattr or POSIX-ACL capture. There
   # is no --xattrs and no --with-acl; a flag like that fails with "unknown flag",
@@ -325,7 +262,7 @@ cmd_backup() {
   # files": 3h52m on one node). Name the newest snapshot of this
   # host+profile explicitly; unchanged files are then skipped by mtime/size.
   local parent
-  parent=$("${RESTIC[@]}" snapshots --no-lock --host "$NXHOST" --tag "profile-$profile" --latest 1 --json 2>/dev/null \
+  parent=$("${RESTIC[@]}" snapshots --no-lock --host "$(hostname -s)" --tag "profile-$profile" --latest 1 --json 2>/dev/null \
            | python3 -c 'import json,sys
 try:
     s=json.load(sys.stdin); print(s[-1]["id"] if s else "")
@@ -349,33 +286,20 @@ except Exception: print("")' 2>/dev/null)
   # restic writes to a FILE, never to our (possibly doomed) stderr pipe; a
   # separate tail streams it to the driver and is the only thing that dies if
   # the driver goes away.
-  "${RESTIC[@]}" backup ${opts[@]+"${opts[@]}"} "${tags[@]}" "${hostname_arg[@]}" \
-    --exclude-file="$common_excl" ${excl[@]+"${excl[@]}"} \
+  "${RESTIC[@]}" backup "${opts[@]}" "${tags[@]}" "${hostname_arg[@]}" \
+    --exclude-file="$common_excl" "${excl[@]}" \
     "$meta" "${paths[@]}" > "$STATE/last-backup.log" 2>&1 &
   restic_pid=$!
-  local tail_pid=""
-  if [[ $IS_MAC == 1 ]]; then   # BSD tail has no --pid: stopped below once restic is done
-    tail -n +1 -f "$STATE/last-backup.log" >&2 2>/dev/null & tail_pid=$!
-  else
-    tail -n +1 --pid="$restic_pid" -f "$STATE/last-backup.log" >&2 2>/dev/null &
-  fi
+  tail -n +1 --pid="$restic_pid" -f "$STATE/last-backup.log" >&2 2>/dev/null &
   local ifc tx0=0 tx=0 rb=0 dur
-  if [[ $IS_MAC == 1 ]]; then
-    local rh=${REST_URL#https://}; rh=${rh%%[:/]*}
-    ifc=$(route -n get "$rh" 2>/dev/null | awk '/interface:/{print $2; exit}')
-  else
-    ifc=$(ip route get "${REST_URL#https://}" 2>/dev/null | awk '{for(i=1;i<=NF;i++)if($i=="dev")print $(i+1)}' | head -1)
-    ifc=${ifc:-$(ip route show default 2>/dev/null | awk '{print $5; exit}')}
-  fi
-  # bytes sent on the path's interface: sysfs on Linux, netstat's link row (Obytes) on macOS
-  tx_bytes() { if [[ $IS_MAC == 1 ]]; then netstat -I "$ifc" -b -n 2>/dev/null | awk '$3 ~ /^<Link/{print $10; exit}'
-               else cat "/sys/class/net/$ifc/statistics/tx_bytes"; fi; }
-  if [[ -n $ifc ]] && { [[ $IS_MAC == 1 ]] || [[ -r /sys/class/net/$ifc/statistics/tx_bytes ]]; }; then tx0=$(tx_bytes); tx0=${tx0:-0}; fi
+  ifc=$(ip route get "${REST_URL#https://}" 2>/dev/null | awk '{for(i=1;i<=NF;i++)if($i=="dev")print $(i+1)}' | head -1)
+  ifc=${ifc:-$(ip route show default 2>/dev/null | awk '{print $5; exit}')}
+  [[ -n $ifc && -r /sys/class/net/$ifc/statistics/tx_bytes ]] && tx0=$(cat /sys/class/net/$ifc/statistics/tx_bytes)
   while sleep 30; do
     kill -0 "$restic_pid" 2>/dev/null || break
     rb=0; dur=$(( $(date +%s) - t0 ))
     tx=$tx0
-    if [[ -n $ifc ]] && { [[ $IS_MAC == 1 ]] || [[ -r /sys/class/net/$ifc/statistics/tx_bytes ]]; }; then tx=$(tx_bytes); tx=${tx:-$tx0}; fi
+    [[ -n $ifc && -r /sys/class/net/$ifc/statistics/tx_bytes ]] && tx=$(cat /sys/class/net/$ifc/statistics/tx_bytes)
     [[ -r /proc/$restic_pid/io ]] && rb=$(awk '/^read_bytes/{print $2}' /proc/$restic_pid/io)
     log "progress ${dur}s: uploaded $(( (tx - tx0) / 1000000 )) MB · scanned $(( rb / 1000000 )) MB"
     # same line for the UI's Machine Report, which reads it over its own ssh —
@@ -384,7 +308,6 @@ except Exception: print("")' 2>/dev/null)
       "$dur" "$(( (tx - tx0) / 1000000 ))" "$(( rb / 1000000 ))" > "$STATE/progress"
   done
   wait "$restic_pid"; rc=$?
-  [[ -n $tail_pid ]] && { sleep 1; kill "$tail_pid"; wait "$tail_pid"; } 2>/dev/null
   rm -f "$STATE/progress"
   t1=$(date +%s)
 
@@ -393,21 +316,13 @@ except Exception: print("")' 2>/dev/null)
       log "post-hook $(basename "$h")"; "$h" "$profile" "$rc" || true; done
   fi
 
-  local snap; snap=$("${RESTIC[@]}" snapshots --no-lock --host "$NXHOST" --json 2>/dev/null \
+  local snap; snap=$("${RESTIC[@]}" snapshots --no-lock --host "$(hostname -s)" --json 2>/dev/null \
                     | python3 -c 'import json,sys
 try:
     s=json.load(sys.stdin); print(s[-1]["short_id"] if s else "")
 except Exception: print("")' 2>/dev/null)
-  local dur=$(( t1 - t0 )) warn=""
-  # macOS: privacy-protected paths (TCC) refuse even root unless restic has Full Disk Access. restic
-  # still commits the snapshot and exits 3 ("some source files could not be read"): a warning there,
-  # not a failed backup. On Linux rc 3 stays a failure.
-  if [[ $IS_MAC == 1 && $rc -eq 3 && -n $snap ]]; then
-    warn=",\"restic_rc\":3,\"warning\":\"incomplete snapshot: some files were unreadable (grant restic Full Disk Access)\""
-    log "restic exited 3: snapshot $snap saved without some unreadable files"
-    rc=0
-  fi
-  emit "{\"event\":\"backup\",\"host\":\"$NXHOST\",\"profile\":\"$profile\",\"repo\":\"$REPO_ID\",\"snapshot\":\"$snap\",\"seconds\":$dur,\"rc\":$rc$warn,\"ts\":\"$(nx_ts -u)\"}"
+  local dur=$(( t1 - t0 ))
+  emit "{\"event\":\"backup\",\"host\":\"$(hostname -s)\",\"profile\":\"$profile\",\"repo\":\"$REPO_ID\",\"snapshot\":\"$snap\",\"seconds\":$dur,\"rc\":$rc,\"ts\":\"$(date -u -Is)\"}"
   # Emit the audit line FIRST, then propagate the failure. A wrapper that dies
   # before writing the audit record turns one failed backup into an invisible
   # one — which is the difference between an alert and a missing file in March.
@@ -418,7 +333,7 @@ cmd_verify() {
   local subset=${1:-2%} rc
   log "restic check (structural)"; "${RESTIC[@]}" check 2>&1 | tail -3 >&2; rc=$?
   log "restic check --read-data-subset=$subset"; "${RESTIC[@]}" check --read-data-subset="$subset" 2>&1 | tail -3 >&2; rc=$(( rc + $? ))
-  emit "{\"event\":\"verify\",\"host\":\"$NXHOST\",\"repo\":\"$REPO_ID\",\"rc\":$rc,\"ts\":\"$(nx_ts -u)\"}"
+  emit "{\"event\":\"verify\",\"host\":\"$(hostname -s)\",\"repo\":\"$REPO_ID\",\"rc\":$rc,\"ts\":\"$(date -u -Is)\"}"
   return $rc
 }
 
@@ -446,7 +361,7 @@ cmd_retention() {
     log "prune (removing unreferenced pack data)"
     "${RESTIC[@]}" prune 2>&1 | tail -3 >&2; rc=$(( rc + $? ))
   fi
-  emit "{\"event\":\"retention\",\"host\":\"$NXHOST\",\"repo\":\"$REPO_ID\",\"apply\":$([[ -z $dry ]] && echo true || echo false),\"rc\":$rc,\"ts\":\"$(nx_ts -u)\"}"
+  emit "{\"event\":\"retention\",\"host\":\"$(hostname -s)\",\"repo\":\"$REPO_ID\",\"apply\":$([[ -z $dry ]] && echo true || echo false),\"rc\":$rc,\"ts\":\"$(date -u -Is)\"}"
   return $rc
 }
 
@@ -483,11 +398,6 @@ hyg_want_fix() { # <tier> <id>
 cmd_hygiene() {
   HYG_FIX=""
   while [[ $# -gt 0 ]]; do case $1 in --fix) HYG_FIX=$2; shift 2;; *) die "hygiene: unknown argument $1";; esac; done
-  # the checks are systemd/apt/dpkg ones: a Mac reports nothing to fix
-  if [[ $IS_MAC == 1 ]]; then
-    emit "{\"event\":\"hygiene\",\"host\":\"$NXHOST\",\"fix\":\"${HYG_FIX}\",\"items\":[],\"unsupported\":\"macos\",\"ts\":\"$(nx_ts -u)\"}"
-    return 0
-  fi
   local u ls ss rc
 
   # 1. failed units — ghosts (unit file gone) vs real
@@ -608,7 +518,7 @@ print(int(n))')
 
   local json
   json=$(printf '%s\n' "${hyg_items[@]}" | python3 -c 'import json,sys;items=[json.loads(l) for l in sys.stdin if l.strip()];print(json.dumps(items))')
-  emit "{\"event\":\"hygiene\",\"host\":\"$NXHOST\",\"fix\":\"${HYG_FIX}\",\"items\":$json,\"ts\":\"$(nx_ts -u)\"}"
+  emit "{\"event\":\"hygiene\",\"host\":\"$(hostname -s)\",\"fix\":\"${HYG_FIX}\",\"items\":$json,\"ts\":\"$(date -u -Is)\"}"
 }
 
 mkdir -p "$STATE"
@@ -623,7 +533,7 @@ case "${1:-backup}" in
   list|snapshots)
     shift
     # --no-lock: read-only, and must work while a backup holds the repo
-    exec "${RESTIC[@]}" snapshots --no-lock --host "$NXHOST" "$@";;
+    exec "${RESTIC[@]}" snapshots --no-lock --host "$(hostname -s)" "$@";;
   # Clear stale repo locks left by a killed/interrupted backup. Safe only when
   # no backup is genuinely running here — the orchestrator calls this after a
   # lock-shaped error and immediately retries, so a live writer would show up
@@ -632,7 +542,7 @@ case "${1:-backup}" in
     shift; take_job_lock
     "${RESTIC[@]}" unlock "$@" > "$STATE/last-unlock.log" 2>&1; rc=$?
     tail -3 "$STATE/last-unlock.log" >&2
-    emit "{\"event\":\"unlock\",\"host\":\"$NXHOST\",\"repo\":\"$REPO_ID\",\"rc\":$rc,\"ts\":\"$(nx_ts -u)\"}";;
+    emit "{\"event\":\"unlock\",\"host\":\"$(hostname -s)\",\"repo\":\"$REPO_ID\",\"rc\":$rc,\"ts\":\"$(date -u -Is)\"}";;
   # Restore a path from a snapshot. Default target is a fresh directory under
   # $STATE/restore/ — never the live tree; --target / is the operator's explicit
   # in-place choice (the orchestrator only sends it with --in-place --yes).
@@ -646,9 +556,9 @@ case "${1:-backup}" in
     [[ $snap =~ ^([0-9a-f]{8,64}|latest)$ ]] || die "restore: bad --snapshot"
     mkdir -p "$target"
     log "restore $snap $rpath -> $target"
-    "${RESTIC[@]}" restore "$snap" --host "$NXHOST" --include "$rpath" --target "$target" 2>&1 \
+    "${RESTIC[@]}" restore "$snap" --host "$(hostname -s)" --include "$rpath" --target "$target" 2>&1 \
       | tee "$STATE/last-restore.log" >&2; rc=${PIPESTATUS[0]}
-    emit "{\"event\":\"restore\",\"host\":\"$NXHOST\",\"snapshot\":\"$snap\",\"path\":\"$rpath\",\"target\":\"$target\",\"rc\":$rc,\"ts\":\"$(nx_ts -u)\"}"
+    emit "{\"event\":\"restore\",\"host\":\"$(hostname -s)\",\"snapshot\":\"$snap\",\"path\":\"$rpath\",\"target\":\"$target\",\"rc\":$rc,\"ts\":\"$(date -u -Is)\"}"
     exit "$rc";;
   check)
     shift; take_job_lock

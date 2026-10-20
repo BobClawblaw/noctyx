@@ -177,9 +177,10 @@ def hosts(cfg_, only_enabled=True):
 
 
 def backup_hosts(cfg_):
-    """Hosts Noctyx backs up: enabled, with a repo, not backup:false
-    (a monitored-only host like the Mac has metrics but no repo)."""
-    return [h for h in hosts(cfg_) if h.get("backup", True) is not False and h.get("repo") and h.get("address")]
+    """Hosts Noctyx backs up: enabled Linux hosts with a repo, not backup:false. A Mac is monitored only
+    (metrics, LLM servers): it has Time Machine, and the agent is a Linux one."""
+    return [h for h in hosts(cfg_) if h.get("backup", True) is not False and h.get("repo") and h.get("address")
+            and h.get("os", "linux") == "linux"]
 
 
 def host_by_name(cfg_, name):
@@ -519,8 +520,9 @@ def cmd_backup(a):
     c = cfg()
     _sweep_root_owned_repo_files(c)
     targets = [host_by_name(c, a.host)] if a.host else backup_hosts(c)
-    if a.host and (targets[0].get("backup", True) is False or not targets[0].get("repo")):
-        sys.exit(f"{a.host} is monitored only (backup: false in the site config)")
+    if a.host and targets[0] not in backup_hosts(c):
+        sys.exit(f"{a.host} is monitored only" + (" (only Linux hosts are backed up)" if targets[0].get("os", "linux") != "linux"
+                                                  else " (backup: false, or no repo, in the site config)"))
     print(f"Noctyx backup — profile={a.profile} targets={len(targets)}")
     ok = 0
     for h in targets:
@@ -1186,7 +1188,12 @@ def cmd_install_agent(a):
                "NX_COMMON_FILE": files["common"],
                "NX_ORCH": str(pathlib.Path(__file__).resolve()), "NX_PY": sys.executable,
                **{f"NX_{k.upper()}": str(v) for k, v in P.items()}}
-        for name in ([a.host] if a.host else [h["name"] for h in hosts(c)]):
+        names = [a.host] if a.host else [h["name"] for h in backup_hosts(c)]
+        for name in names:
+            h = host_by_name(c, name)
+            if h.get("os", "linux") != "linux":
+                print(f"{name}: {h.get('os')} hosts are monitored only, never backed up (the agent is Linux's)")
+                continue
             cmd = [str(NX_HOME / "agent" / "install-agent.sh"), "--host", name, "--profile", a.profile]
             if a.with_client_timer:
                 cmd.append("--with-client-timer")

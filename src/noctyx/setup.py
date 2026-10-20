@@ -468,14 +468,11 @@ def _privacy_needs(c):
     """[(what, binary)] that need Full Disk Access on this Mac; [] on Linux or when nothing does."""
     if not hostos.IS_MAC:
         return []
-    off = any(hostos.off_boot_volume(sp["mount"]) for sp in (c.get("spindles") or {}).values())
-    backs_up = any(h.get("local") and h.get("repo") and h.get("backup", True) is not False for h in c.get("hosts", []))
-    need = []
-    if off and not cm.rest_on_nas(c):
-        need.append(("the repository endpoint", str(BIN / "rest-server")))
-    if off or backs_up:
-        need.append(("Noctyx's scheduler, mirror and console (and the restic they run)",
-                     hostos.real_executable(sys.executable)))
+    if not any(hostos.off_boot_volume(sp["mount"]) for sp in (c.get("spindles") or {}).values()):
+        return []
+    need = [] if cm.rest_on_nas(c) else [("the repository endpoint", str(BIN / "rest-server"))]
+    need.append(("Noctyx's scheduler, retention, mirror and console (and the restic they run)",
+                 hostos.real_executable(sys.executable)))
     return need
 
 
@@ -502,10 +499,11 @@ def _endpoint_reads(c):
 
 
 def _python_reads(c):
-    rc, out = hostos.launchd_probe(f"{_label()}.privacy-probe", P["repo_owner"] if owner_exists() else "root",
-                                   [sys.executable, "-c", "import os,sys; os.listdir(sys.argv[1]); print('ok')", cm.repo_root(c)])
-    last = (out.strip().splitlines() or [f"rc={rc}"])[-1]
-    return rc == 0 and last == "ok", last[-200:]
+    out = hostos.launchd_probe(f"{_label()}.privacy-probe", P["repo_owner"] if owner_exists() else "root",
+                               [sys.executable, "-c", "import os,sys\ntry:\n os.listdir(sys.argv[1]); print('ok')\n"
+                                "except OSError as e:\n print('ERR', e)", cm.repo_root(c)])
+    last = out.strip().splitlines()[-1]
+    return last == "ok", "reads the share" if last == "ok" else last[-200:]
 
 
 def privacy_state(c):
@@ -588,7 +586,8 @@ def steps_state(c):
             f"{n} {s.get('share') and share_source(s['share']) or 'local'} at {s['mount']}"
             for n, s in (c.get("spindles") or {}).items())),
         ("tls", pathlib.Path(tls["ca"]).exists() and _crt_ok(tls["cert"]), "the site CA and the head's certificate"),
-        ("repos", bool(repos) and len(inited) == len(repos), f"repositories ({len(inited)}/{len(repos)} made)"),
+        ("repos", len(inited) == len(repos), f"repositories ({len(inited)}/{len(repos)} made)" if repos
+         else "repositories: none yet (add the Linux hosts to back up: noctyx init)"),
         ("endpoint", cm.rest_up(c), f"the repository endpoint {cm.rest_url(c)}"),
         ("units", hostos.service_active(_service("console.service"), _label()),
          "the head's services (console, directory, mirror, timers)"),
@@ -828,6 +827,8 @@ def verify(c, run_canary=True):
         except Exception as e:
             k.add(h["name"], False, f"unreachable: {e}", f"sudo noctyx install-agent --host {h['name']}")
 
+    if run_canary and up and not c.get("repositories"):
+        print("round trip\n  · no repository yet: add the Linux hosts to back up (noctyx init), then verify again")
     if run_canary and up and c.get("repositories"):
         print("round trip")
         repo = next((h["repo"] for h in head if h.get("repo")), c["repositories"][0]["id"])
@@ -835,7 +836,9 @@ def verify(c, run_canary=True):
         k.add("canary backup+restore", ok, detail)
 
     bad = k.failed
-    print(f"\n{len(k.rows) - len(bad)}/{len(k.rows)} checks pass" + (f"; {len(bad)} fail" if bad else ": the site works"))
+    warn = [r for r in k.rows if r[0] == "!"]
+    print(f"\n{len(k.rows) - len(bad) - len(warn)}/{len(k.rows)} checks pass"
+          + (f", {len(warn)} warning(s)" if warn else "") + (f", {len(bad)} fail" if bad else ": the site works"))
     if bad:
         llm.setup_help("setup verify", "\n".join(f"{n}: {d}" for _, n, d, _ in bad))
     return not bad

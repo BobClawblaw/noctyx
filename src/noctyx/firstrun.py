@@ -139,6 +139,10 @@ def step_assistant(c, a):
             say(f"  ✓ {t['model']} answered in {t['ms']} ms: {t['text']!r}")
             break
         say(f"  ✗ {t.get('error')}")
+        if not INTERACTIVE and url == old.get("url") and not a.assistant:
+            say("  kept as configured: it answered before and may be restarting (`noctyx setup verify` checks it)")
+            ASSISTANT = old
+            return
         if not INTERACTIVE:
             sys.exit("the assistant did not answer (--assistant URL, or leave it out)")
     blk = {"enabled": True, "url": url, "model": model or t.get("model") or "",
@@ -226,29 +230,83 @@ def step_storage(c, a):
 
 
 # ── 4. what to back up ──────────────────────────────────────────────────────
-MAC_CONFIG_PATHS = ["/etc", "/Library/LaunchDaemons", "/usr/local/etc", "/opt/homebrew/etc"]
 LINUX_CONFIG_PATHS = ["/etc", "/usr/local/etc", "/root"]
 
 
+def _time_machine():
+    """The Mac's Time Machine destination's name, or None."""
+    r = subprocess.run(["tmutil", "destinationinfo"], capture_output=True, text=True)
+    return next((l.split(":", 1)[1].strip() for l in r.stdout.splitlines() if l.startswith("Name")), None)
+
+
+def _ssh_key(c):
+    """Root's key the head reaches nodes with: made if missing; -> its public half."""
+    key = pathlib.Path(c["server"]["ssh"]["key"])
+    if not key.exists():
+        key.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", f"noctyx@{c['server']['hostname']}",
+                        "-f", str(key)], check=True)
+    return pathlib.Path(f"{key}.pub").read_text().strip()
+
+
+def _node_arch(c, addr):
+    s = c["server"]["ssh"]
+    r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new",
+                        "-i", s["key"], f"{s['user']}@{addr}", "uname -m"], capture_output=True, text=True, timeout=15)
+    return {"arm64": "aarch64"}.get(r.stdout.strip(), r.stdout.strip()) if r.returncode == 0 else None
+
+
 def step_hosts(c, a):
+    """The machines: the head itself, and the Linux boxes Noctyx backs up (one repository each). A Mac is
+    monitored, never backed up: it has Time Machine, and the agent is a Linux one."""
     s = c["server"]
     name = s["hostname"]
-    say(f"\n4. The head backs itself up into the repository {name!r}")
-    c["repositories"] = [r for r in c.get("repositories") or [] if r.get("id") != name] + \
-        [{"id": name, "spindle": next(iter(c["spindles"]))}]
-    hosts = [h for h in c.get("hosts") or [] if h.get("name") != name and h.get("address") != s["address"]]
-    hosts.insert(0, {"name": name, "address": s["address"], "arch": hostos.arch(), "os": hostos.os_name(),
-                     "repo": name, "local": True})
+    say("\n4. The machines Noctyx backs up (Linux only; Macs are monitored)")
+    old = {h["name"]: h for h in c.get("hosts") or []}
+    head = {"name": name, "address": s["address"], "arch": hostos.arch(), "os": hostos.os_name(), "local": True}
+    if hostos.IS_MAC:
+        tm = _time_machine()
+        say(f"  this Mac is monitored, not backed up" + (f" (Time Machine backs it up to {tm!r})" if tm else ""))
+        head["backup"] = False
+    elif a.no_head_backup or not yes("back this machine up too", old.get(name, {}).get("backup", True) is not False,
+                                     "the head holds the keys and the site config: backing it up is what lets you rebuild it"):
+        head["backup"] = False
+    else:
+        head["repo"] = name
+    hosts = [head] + [h for n, h in old.items() if n != name and h.get("address") != s["address"]]
+    nodes = [x.split("=", 1) for x in a.node]
+    if INTERACTIVE:
+        if any(h.get("repo") for h in hosts[1:]):
+            say("  already: " + ", ".join(f"{h['name']} ({h['address']})" for h in hosts[1:] if h.get("repo")))
+        say("  Linux machines to back up, one per line as NAME ADDRESS (Enter on an empty line to finish):")
+        while True:
+            line = ask("node", "", "a GPU box or any Linux machine: its short name and LAN address, e.g. gpu-01 192.0.2.21")
+            if not line:
+                break
+            parts = line.replace("=", " ").split()
+            if len(parts) != 2:
+                say("    NAME ADDRESS, e.g. gpu-01 192.0.2.21")
+                continue
+            nodes.append(parts)
+    if nodes:
+        s["ssh"]["user"] = a.ssh_user or ask("user the head logs into the nodes as (it needs passwordless sudo there)",
+                                             s["ssh"].get("user") or "root", "Noctyx runs `sudo -n` on each node as this user")
+        pub = _ssh_key(c)
+    for n, addr in nodes:
+        arch = _node_arch(c, addr) or old.get(n, {}).get("arch") or "x86_64"
+        hosts = [h for h in hosts if h["name"] != n] + [{"name": n, "address": addr, "arch": arch, "os": "linux", "repo": n}]
     c["hosts"] = hosts
+    keep = {r["id"]: r for r in c.get("repositories") or []}
+    spindle = next(iter(c["spindles"]))
+    c["repositories"] = [keep.get(h["repo"]) or {"id": h["repo"], "spindle": spindle}
+                         for h in hosts if h.get("repo") and h.get("os", "linux") == "linux" and h.get("backup", True) is not False]
     pr = c.setdefault("profiles", {})
     pr.setdefault("system", {"description": "the whole root filesystem minus the noise list", "paths": ["/"],
                              "exclusions": ["common", "per-host"]})
     pr.setdefault("config", {"description": "system configuration only: small and quick (a first backup)",
-                             "paths": MAC_CONFIG_PATHS if hostos.IS_MAC else LINUX_CONFIG_PATHS,
-                             "exclusions": ["common"]})
+                             "paths": LINUX_CONFIG_PATHS, "exclusions": ["common"]})
     sch = c.setdefault("schedule", {"tick_minutes": 15, "retry_after": "1h"})
-    sch.setdefault("defaults", {"system": {"every": "24h", "window": "01:00-07:00"},
-                                "config": {"every": "24h", "window": "00:00-23:59"}})
+    sch.setdefault("defaults", {"system": {"every": "24h", "window": "01:00-07:00"}})
     c.setdefault("retention", {"daily": 14, "weekly": 8, "monthly": 6})
     c.setdefault("network", {"expected_client_to_server_mbit": 1000, "measured_client_to_server_mbit": None,
                              "min_throughput_mbit": 40})
@@ -256,8 +314,11 @@ def step_hosts(c, a):
     c.setdefault("common_exclusions_extra", [])
     c.setdefault("paths", {})
     c["version"] = 1
-    say("  profiles: system (/, nightly 01:00–07:00) and config (configuration only, quick)."
-        "\n  Add GPU nodes later: put them in hosts, then `sudo noctyx install-agent --host NAME`.")
+    backed = [h["name"] for h in hosts if h.get("repo") and h.get("backup", True) is not False]
+    say(f"  backed up: {', '.join(backed) or 'nothing yet'}; profile system (/, nightly 01:00–07:00)")
+    if nodes:
+        say(f"  on each node, authorise the head's key for {s['ssh']['user']} (and give it passwordless sudo):\n"
+            f"    echo '{pub}' >> ~{s['ssh']['user']}/.ssh/authorized_keys")
 
 
 # ── 5. the console ──────────────────────────────────────────────────────────
@@ -309,6 +370,8 @@ def main(argv):
     p.add_argument("--nas-server"); p.add_argument("--nas-path"); p.add_argument("--nas-user")
     p.add_argument("--mount", help="nfs/smb: where to mount the share"); p.add_argument("--subdir", help="folder on the share")
     p.add_argument("--owner-uid", help="nfs: the uid the NAS lets write")
+    p.add_argument("--node", action="append", default=[], metavar="NAME=ADDRESS", help="a Linux machine to back up (repeatable)")
+    p.add_argument("--no-head-backup", action="store_true", help="a Linux head: do not back the head itself up")
     p.add_argument("--no-auth", action="store_true", help="console open on the LAN, no sign-in")
     p.add_argument("--admin", help="the first admin's name"); p.add_argument("--admin-password-stdin", action="store_true")
     p.add_argument("--setup", action="store_true", help="then run `noctyx setup all`")
@@ -339,12 +402,12 @@ def main(argv):
     if c["server"]["console_auth"]:
         pathlib.Path(P["etc"]).mkdir(parents=True, exist_ok=True)
         make_admin(a)
-    head = c["hosts"][0]["name"]
+    first = next((h["name"] for h in c["hosts"] if h.get("repo") and h.get("backup", True) is not False), "<node>")
     say(f"""
 next:
-  sudo noctyx setup all          tools, owner, {'mount, ' if any(s.get('share') for s in c['spindles'].values()) else ''}TLS, repository, endpoint, services, escrow
-  sudo noctyx install-agent --host {head}
-  sudo noctyx backup --host {head} --profile config
+  sudo noctyx setup all          tools, owner, {'mount, ' if any(s.get('share') for s in c['spindles'].values()) else ''}TLS, repositories, endpoint, services, escrow
+  sudo noctyx install-agent      the agent on every Linux host to back up
+  sudo noctyx backup --host {first} --profile config
   sudo noctyx setup verify       every check, and a backup+restore round trip
 console: https://{c['server']['address']}:{c['server']['ui_port']}""")
     if a.setup or (INTERACTIVE and yes("run `noctyx setup all` now", True, "it runs every setup step in order and stops at the first that fails")):

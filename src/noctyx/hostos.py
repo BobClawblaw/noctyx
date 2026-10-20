@@ -294,7 +294,13 @@ def spawn_detached(unit, argv, log, env):
 
 def pid_alive(pid):
     try:
-        os.kill(int(pid), 0)
+        pid = int(pid)
+        try:                 # our own finished child is a zombie until reaped, and kill(0) succeeds on a zombie
+            if os.waitpid(pid, os.WNOHANG)[0] == pid:
+                return False
+        except ChildProcessError:
+            pass
+        os.kill(pid, 0)
         return True
     except (OSError, ValueError):
         return False
@@ -338,7 +344,8 @@ FULL_DISK_ACCESS_PANE = "x-apple.systempreferences:com.apple.settings.PrivacySec
 
 
 def launchd_probe(label, user, argv, timeout=20):
-    """Run argv once as a launchd daemon (the context TCC judges Noctyx's services in) -> (rc, output)."""
+    """Run argv once as a launchd daemon (the context TCC judges Noctyx's services in) -> output. argv must end
+    by printing one line, `ok` or `ERR …`: launchd's own record of the exit is not dependable for a one-shot."""
     out = pathlib.Path(f"/var/tmp/{label}.out")
     out.unlink(missing_ok=True)
     out.touch()
@@ -349,20 +356,17 @@ def launchd_probe(label, user, argv, timeout=20):
     os.chmod(plist, 0o644)
     subprocess.run(["launchctl", "bootout", f"system/{label}"], capture_output=True)
     subprocess.run(["launchctl", "bootstrap", "system", str(plist)], capture_output=True)
-    rc = None
-    for _ in range(timeout * 2):
-        st = subprocess.run(["launchctl", "print", f"system/{label}"], capture_output=True, text=True).stdout
-        m = re.search(r"last exit code = (\d+)", st)
-        if m and not re.search(r"^\s*pid = \d+", st, re.M):
-            rc = int(m.group(1))
+    import time
+    text = ""
+    for _ in range(timeout * 4):
+        text = out.read_text(errors="replace").strip()
+        if re.search(r"^(ok|ERR\b.*)$", text, re.M):
             break
-        import time
-        time.sleep(0.5)
+        time.sleep(0.25)
     subprocess.run(["launchctl", "bootout", f"system/{label}"], capture_output=True)
     plist.unlink(missing_ok=True)
-    text = out.read_text(errors="replace").strip()
     out.unlink(missing_ok=True)
-    return rc, text
+    return text or "ERR no output (the probe did not start)"
 
 
 # ── boot identity ───────────────────────────────────────────────────────────

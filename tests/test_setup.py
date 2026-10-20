@@ -136,3 +136,53 @@ def test_local_hosts_run_here_not_over_ssh():
     c = cm.cfg()
     assert cm._ssh_argv(c, {"name": "h", "address": "192.0.2.10", "local": True}, "true") == ["sh", "-c", "true"]
     assert cm._ssh_argv(c, {"name": "h", "address": "192.0.2.21"}, "true")[0] == "ssh"
+
+
+def _init(tmp_path, monkeypatch, port, *flags, mac=False):
+    from noctyx import firstrun
+    cfg = tmp_path / "site.json"
+    monkeypatch.setattr(firstrun, "CONFIG", str(cfg))
+    monkeypatch.setattr(firstrun.os, "geteuid", lambda: 0)
+    monkeypatch.setitem(firstrun.P, "llm_keys", str(tmp_path / "keys"))
+    monkeypatch.setattr(firstrun, "_ssh_key", lambda c: "ssh-ed25519 AAAA test")
+    monkeypatch.setattr(firstrun, "_node_arch", lambda c, addr: "aarch64")
+    monkeypatch.setattr(firstrun, "_time_machine", lambda: "tm")
+    monkeypatch.setattr(hostos, "IS_MAC", mac)
+    assert firstrun.main(["--yes", "--assistant", f"http://127.0.0.1:{port}/v1", "--hostname", "head-01",
+                          "--address", "192.0.2.10", "--storage", "local", "--path", str(tmp_path / "nx"),
+                          "--no-auth", *flags]) == 0
+    return json.loads(cfg.read_text())
+
+
+def test_a_mac_head_is_monitored_and_linux_nodes_get_repositories(tmp_path, monkeypatch, fake_llm):
+    c = _init(tmp_path, monkeypatch, fake_llm, "--node", "gpu-01=192.0.2.21", "--node", "gpu-02=192.0.2.22", mac=True)
+    head = c["hosts"][0]
+    assert head["os"] == "macos" and head["backup"] is False and "repo" not in head
+    assert [r["id"] for r in c["repositories"]] == ["gpu-01", "gpu-02"]
+    assert [h["name"] for h in cm.backup_hosts(c)] == ["gpu-01", "gpu-02"]
+    assert all(h["arch"] == "aarch64" and h["os"] == "linux" for h in c["hosts"][1:])
+
+
+def test_a_linux_head_backs_itself_up(tmp_path, monkeypatch, fake_llm):
+    c = _init(tmp_path, monkeypatch, fake_llm)
+    assert c["hosts"][0]["repo"] == "head-01" and [r["id"] for r in c["repositories"]] == ["head-01"]
+    c = _init(tmp_path, monkeypatch, fake_llm, "--no-head-backup")
+    assert c["repositories"] == [] and not cm.backup_hosts(c)
+
+
+def test_macs_are_never_backup_targets():
+    c = {"hosts": [{"name": "m", "address": "192.0.2.30", "os": "macos", "repo": "m"},
+                   {"name": "g", "address": "192.0.2.21", "repo": "g"}]}
+    assert [h["name"] for h in cm.backup_hosts(c)] == ["g"]
+
+
+def test_a_finished_job_is_not_running(tmp_path):
+    import subprocess, sys
+    log = tmp_path / "job.log"
+    hostos.spawn_detached("u", [sys.executable, "-c", "pass"], str(log), {})
+    import time
+    for _ in range(50):
+        if not hostos.job_running(str(log)):
+            break
+        time.sleep(0.1)
+    assert not hostos.job_running(str(log))            # reaped, not a zombie that kill(0) still finds
