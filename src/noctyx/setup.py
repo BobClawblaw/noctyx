@@ -662,6 +662,20 @@ def _restic(c, repo, args, timeout=300, **kw):
         os.unlink(rf)
 
 
+def _time_machine():
+    """-> (fine, what): this Mac's Time Machine destination and how old its newest backup is."""
+    dest = next((l.split(":", 1)[1].strip() for l in subprocess.run(["tmutil", "destinationinfo"], capture_output=True,
+                 text=True).stdout.splitlines() if l.startswith("Name")), None)
+    if not dest:
+        return False, "no destination set"
+    latest = subprocess.run(["tmutil", "latestbackup"], capture_output=True, text=True).stdout.strip()
+    m = re.search(r"(\d{4}-\d{2}-\d{2})-(\d{6})", latest)
+    if not m:
+        return False, f"backs up to {dest!r}, no finished backup found"
+    age = time.time() - datetime.datetime.strptime(m.group(1) + m.group(2), "%Y-%m-%d%H%M%S").timestamp()
+    return age < 2 * 86400, f"backs up to {dest!r}, last {cm.fmt_duration(age)} ago"
+
+
 def canary(c, repo):
     """A small random tree backed up through the endpoint, restored, compared byte for byte; the snapshot
     is then forgotten on the head (the endpoint is append-only, so clients cannot)."""
@@ -816,7 +830,12 @@ def verify(c, run_canary=True):
     if hs:
         print("hosts")
     for h in hs:
-        if h.get("backup", True) is False or not h.get("repo"):
+        if h.get("os") == "macos" and h.get("local") and hostos.IS_MAC:
+            ok, detail = _time_machine()
+            k.add(h["name"], ok, f"monitored; Time Machine: {detail}",
+                  "System Settings › General › Time Machine (Noctyx never backs a Mac up)", warn=True)
+            continue
+        if h not in cm.backup_hosts(c):
             k.add(h["name"], True, "monitored only")
             continue
         try:

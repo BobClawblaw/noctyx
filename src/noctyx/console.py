@@ -57,6 +57,20 @@ NX_HOME = pathlib.Path(__file__).resolve().parent
 CFG_PATH = CONFIG
 CFG = json.load(open(CFG_PATH))
 S = CFG["server"]
+_CFG_MTIME = os.path.getmtime(CFG_PATH)
+
+
+def _reload_cfg():
+    """Pick up an edited site config (noctyx init, policy-set, a hand edit) without a restart. The TLS files
+    and the port stay as they were at start: those need one."""
+    global CFG, S, _CFG_MTIME
+    try:
+        m = os.path.getmtime(CFG_PATH)
+        if m != _CFG_MTIME:
+            CFG, _CFG_MTIME = json.load(open(CFG_PATH)), m
+            S = CFG["server"]
+    except (OSError, ValueError):
+        pass
 CERT, KEY, CA = S["tls"]["cert"], S["tls"]["key"], S["tls"]["ca"]
 PORT = int(os.environ.get("NOCTYX_CONSOLE_PORT", S.get("ui_port", 20996)))
 TOKEN_FILE = P["ui_token"]
@@ -1152,8 +1166,8 @@ _SNAPS_CACHE: dict[str, dict] = {}
 
 def _host_repo(host):
     h = next((x for x in CFG["hosts"] if x["name"] == host), None)
-    if not h:
-        raise ValueError("unknown host")
+    if not h or not h.get("repo"):
+        raise ValueError("unknown host" if not h else "monitored only: no snapshots")
     return h["repo"], CM.repo_dir(CFG, h["repo"])
 
 
@@ -1775,7 +1789,7 @@ FACTS_B64 = base64.b64encode(FACTS_SCRIPT.encode()).decode()
 # macOS variant (no /proc, no lsblk, no nvidia-smi): same section names, parsed by the same code
 FACTS_MAC = r"""
 echo "==os=="; echo "macOS $(sw_vers -productVersion) ($(sw_vers -buildVersion))"; uname -srm
-echo "==uptime=="; uptime | sed 's/.*up /up /;s/,.*//' ; date -r "$(sysctl -n kern.boottime | sed 's/.*sec = \([0-9]*\).*/\1/')" "+%F %T"
+echo "==uptime=="; uptime | sed 's/.*up /up /;s/,.*//' ; date -r "$(sysctl -n kern.boottime | sed 's/^{ sec = \([0-9]*\).*/\1/')" "+%F %T"
 echo "==cpu=="; sysctl -n hw.ncpu; sysctl -n machdep.cpu.brand_string
 echo "==mem=="; vm_stat | awk -v total=$(sysctl -n hw.memsize) 'BEGIN{ps=16384} /page size of/{ps=$8} /Pages active/{a=$3} /Pages wired/{w=$4} /Pages occupied by compressor/{c=$5} END{gsub(/\./,"",a);gsub(/\./,"",w);gsub(/\./,"",c); printf "%.1f %.1f\n", (a+w+c)*ps/1e9, total/1e9}'
 echo "==disk=="; df -k / /System/Volumes/Data 2>/dev/null | awk 'NR>1{printf "%s %d %d %s %s\n",$1,$2*1024,$3*1024,$5,$9}'
@@ -1789,6 +1803,9 @@ echo "==load=="; sysctl -n vm.loadavg | tr -d '{}' | awk '{print $1,$2,$3}'
 echo "==agentbusy=="; sudo -n lsof -t @NODE_LIB@/agent.lock 2>/dev/null | wc -w
 echo "==progress=="; sudo -n cat @NODE_LIB@/progress 2>/dev/null
 echo "==backuplog=="; sudo -n stat -f %m @NODE_LIB@/last-backup.log 2>/dev/null; sudo -n tail -n 8 @NODE_LIB@/last-backup.log 2>/dev/null
+echo "==timemachine=="; tmutil destinationinfo 2>/dev/null | awk -F' : ' '/^Name/{print "dest", $2; exit}'
+  l=$(sudo -n tmutil latestbackup 2>/dev/null || tmutil latestbackup 2>/dev/null); [ -n "$l" ] && echo "latest $(basename "$l")"
+  tmutil status 2>/dev/null | awk -F' = ' '/ Running/{gsub(/;/,"",$2); print "running", $2}'
 """
 FACTS_MAC = CM.render(FACTS_MAC)
 FACTS_MAC_B64 = base64.b64encode(FACTS_MAC.encode()).decode()
@@ -1847,6 +1864,15 @@ def _parse_facts(out):
                 pass
         elif sec == "load":
             f["loadavg"] = s
+        elif sec == "timemachine":            # a Mac's own backups: Noctyx reports them, Time Machine makes them
+            k, _, v = s.partition(" ")
+            tm = f.setdefault("timemachine", {})
+            if k == "latest":
+                m = re.search(r"(\d{4}-\d{2}-\d{2})-(\d{6})", v)
+                if m:
+                    tm["latest_ts"] = datetime.datetime.strptime(m.group(1) + m.group(2), "%Y-%m-%d%H%M%S").timestamp()
+            elif k in ("dest", "running"):
+                tm[k] = v.strip()
         elif sec == "agentbusy":
             f["agent_busy"] = s.isdigit() and int(s) > 0
         elif sec == "progress":
@@ -1909,7 +1935,7 @@ def probe_last():
 def overview():
     # monitored_only: metrics/facts/LLM view but no backup by design (backup:false or no
     # repo — the Mac); the tile says "monitored" instead of flagging it as unscheduled
-    hosts = [{"name": h["name"], "repo": h["repo"], "arch": h["arch"],
+    hosts = [{"name": h["name"], "repo": h.get("repo"), "arch": h["arch"], "os": h.get("os", "linux"),
               "used_gb": h.get("used_gb"),
               "monitored_only": h.get("backup", True) is False or not h.get("repo")}
              for h in CFG["hosts"] if h.get("enabled", True) is not False]
@@ -1931,7 +1957,7 @@ def overview():
         sched = {"error": str(e)[:200], "rows": []}
     return {"generated": _utcnow(), "ts": time.time(),
             "server": S["hostname"], "hosts": hosts, "facts": facts,
-            "snapshots": snaps, "schedule": sched, "network": CFG["network"],
+            "snapshots": snaps, "schedule": sched, "network": CFG.get("network") or {},
             "auth_required": auth_on()}
 
 
@@ -3524,6 +3550,8 @@ function rDetail(f){
  const o=OVR||{snapshots:{hosts:{}},hosts:[]},
   h=(o.hosts||[]).find(x=>x.name==SEL)||{name:SEL},
   sn=(o.snapshots&&o.snapshots.hosts||{})[SEL]||{},g=f.gpu_stats;
+ // monitored only (a Mac, or backup:false): its own backups are reported, never run from here
+ const mon=h.os=='macos'||!!h.monitored_only,tm=f.timemachine||{},tmOld=mon&&h.os=='macos'&&(!tm.latest_ts||Date.now()/1000-tm.latest_ts>2*86400);
  const rows=(f.last_jobs||[]).map(j=>
   `<tr><td>${esc(fmtTs(j.ts))}</td><td>${esc(j.event||'')}</td><td class="${(j.rc??0)==0?'ok':'bad'}">${j.rc??''}</td><td>${esc(j.snapshot||'')}</td></tr>`).join('');
  const srows=((o.schedule&&o.schedule.rows)||[]).filter(r=>r.host==SEL);
@@ -3553,9 +3581,9 @@ function rDetail(f){
  return `<div class=rep>
  <div class=hero><span class=big>${esc(SEL)}</span>
   <span class=mut>${esc(f.address||'')}${f.ip&&f.ip!=f.address?' · '+esc(f.ip):''}</span></div>
- <div style=margin-top:8px>
+ ${mon?'':`<div style=margin-top:8px>
   <button class=act onclick="act('backupHost',{host:'${esc(SEL)}'})">backup now</button>
-  <button class=act onclick="act('verifyHost',{host:'${esc(SEL)}'})">verify now</button></div>
+  <button class=act onclick="act('verifyHost',{host:'${esc(SEL)}'})">verify now</button></div>`}
  ${jj?`<div class="jlive ${jj.done?(jj.rc===0?'ok':'bad'):'run'}" id=jlive>
   <div class=jl-h>${esc(jj.action)} <span class=jl-d>${fmtDur((jj.done?(jj._end||Date.now()/1000):Date.now()/1000)-(jj.started_ts||0))}</span>
    ${jj.done?(jj.rc===0?'· done':'· rc='+jj.rc):'· running…'}</div>
@@ -3570,15 +3598,18 @@ function rDetail(f){
    <div class=card data-k=cpu><div class=l>cpu</div><div class=v>${esc((f.cpu&&f.cpu[0])||'—')}</div><div class=s>${esc(((f.cpu&&f.cpu[1])||'').slice(0,22))}</div></div>
    <div class=card><div class=l>uptime</div><div class=v style=font-size:13px>${esc((f.uptime_lines&&f.uptime_lines[0]||'—'))}</div></div>
    ${g&&g.temp_c!=null?`<div class=card data-k=gpu><div class=l>gpu</div><div class=v>${Math.round(tval(g.temp_c))}<span class=u>°${TU}</span></div><div class=s>${g.util_pct??'—'}% · ${g.mem_used_mib??'—'} MiB</div></div>`:''}
-   <div class=card data-k=ok><div class=l>snapshots</div><div class=v>${sn.count||0}</div><div class=s>${sn.last_ts?'last '+esc(fmtTs(sn.last_ts)):'none'}${sn.stale?' · stale':''}</div></div>
+   ${mon?`<div class=card data-k=${tmOld?'warn':'ok'}><div class=l>time machine</div><div class=v style=font-size:13px>${tm.latest_ts?esc(fmtTs(tm.latest_ts)):(tm.dest?'no backup yet':'off')}</div><div class=s>${esc(tm.dest||'no destination')}${tm.running=='1'?' · backing up now':''}</div></div>`
+   :`<div class=card data-k=ok><div class=l>snapshots</div><div class=v>${sn.count||0}</div><div class=s>${sn.last_ts?'last '+esc(fmtTs(sn.last_ts)):'none'}${sn.stale?' · stale':''}</div></div>`}
   </div>
   ${(f.gpu&&f.gpu[0])?`<div class=mut style="font:11px var(--mono);margin-top:8px">${esc(f.gpu.join(' / '))}</div>`:''}
   ${tabOverview(f._m)}
   <h3>Filesystems</h3>
   <table><tr><th>mount</th><th>dev</th><th>used</th><th></th></tr>${disks||'<tr><td class=mut>no data</td></tr>'}</table>
-  <h3>Noctyx agent</h3>
+  ${mon?`<h3>Backups</h3>
+  <div class=mut style="font:11.5px var(--mono)">monitored only: ${h.os=='macos'?'Time Machine backs this Mac up'+(tm.dest?' to '+esc(tm.dest):' (no destination set)')+(tm.latest_ts?', last '+esc(fmtTs(tm.latest_ts)):''):'not backed up by Noctyx (backup: false, or no repository)'}</div>`
+  :`<h3>Noctyx agent</h3>
   <div class=mut style="font:11.5px var(--mono)">${f.agent&&f.agent[0]?'agent '+esc(f.agent[0])+' · profiles '+esc(f.agent[1]||'—'):'<span class=bad>not installed</span>'}
-   ${h.used_gb?` · pinned source ${h.used_gb} GB`:''}</div>`
+   ${h.used_gb?` · pinned source ${h.used_gb} GB`:''}</div>`}`
  :DTAB=='llm'?tabLLM(f._m)
  :DTAB=='network'?tabNetwork(f._m)
  :DTAB=='storage'?tabStorage(f._m)+`<h3>Block devices (inventory)</h3>
@@ -4426,6 +4457,7 @@ class H(BaseHTTPRequestHandler):
         self._send(json.dumps(obj).encode(), code=code)
 
     def do_GET(self):
+        _reload_cfg()
         p = self.path.split("?")[0]
         q = dict(kv.split("=", 1) for kv in self.path.split("?")[1].split("&") if "=" in kv) \
             if "?" in self.path else {}

@@ -186,3 +186,24 @@ def test_a_finished_job_is_not_running(tmp_path):
             break
         time.sleep(0.1)
     assert not hostos.job_running(str(log))            # reaped, not a zombie that kill(0) still finds
+
+
+def test_console_overview_with_a_monitored_mac(monkeypatch):
+    """A Mac head made by noctyx init has no repo: the console's overview must still answer."""
+    from noctyx import console
+    monkeypatch.setitem(console.CFG, "hosts", [{"name": "mac", "address": "192.0.2.30", "arch": "aarch64",
+                                                 "os": "macos", "backup": False, "local": True}])
+    monkeypatch.setattr(console, "host_facts", lambda name, age=120: {"os_lines": ["macOS"]})
+    monkeypatch.setattr(console, "snapshot_summary", lambda: {"hosts": {}})
+    monkeypatch.setattr(console, "schedule_summary", lambda snaps=None: {"rows": []})
+    o = console.overview()
+    assert o["hosts"] == [{"name": "mac", "repo": None, "arch": "aarch64", "os": "macos", "used_gb": None,
+                           "monitored_only": True}]
+
+
+def test_mac_facts_time_machine_and_boot_time():
+    from noctyx import console
+    f = console._parse_facts("==timemachine==\ndest timemachine\nlatest 2026-10-20-120000.previous\nrunning 0\n")
+    assert f["timemachine"]["dest"] == "timemachine" and f["timemachine"]["running"] == "0"
+    assert f["timemachine"]["latest_ts"] > 1.79e9
+    assert "s/^{ sec = " in console.FACTS_MAC               # the boot time takes sec, not usec
