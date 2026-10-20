@@ -114,6 +114,7 @@ def test_init_writes_a_working_site(tmp_path, monkeypatch, fake_llm):
     monkeypatch.setattr(firstrun, "CONFIG", str(cfg))
     monkeypatch.setattr(firstrun.os, "geteuid", lambda: 0)
     monkeypatch.setitem(firstrun.P, "llm_keys", str(tmp_path / "keys"))
+    monkeypatch.setattr(hostos, "IS_MAC", False)       # a Linux head: it backs itself up (a Mac head never does)
     rc = firstrun.main(["--yes", "--assistant", f"http://127.0.0.1:{fake_llm}/v1", "--hostname", "head-01",
                         "--address", "192.0.2.10", "--storage", "nfs", "--nas-server", "192.0.2.5",
                         "--nas-path", "/volume1/backups", "--mount", "/mnt/nas", "--owner-uid", "1026", "--no-auth"])
