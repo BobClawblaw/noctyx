@@ -267,3 +267,29 @@ def test_component_status_rules():
     assert comp.status(agent, "abc", None, None, want_agent="abd")[0] == "behind"
     name, url, sha = comp.asset("prometheus", "macos", "aarch64")
     assert name == "prometheus-3.15.0.darwin-arm64.tar.gz" and url.endswith("/v3.15.0/" + name) and len(sha) == 64
+
+
+def test_inventory_pins_only_what_noctyx_installed():
+    from noctyx import components as comp
+    c = {"server": {"hostname": "head-01", "address": "192.0.2.10"},
+         "hosts": [{"name": "head-01", "address": "192.0.2.10", "local": True, "repo": "head-01"},
+                   {"name": "gpu-01", "address": "192.0.2.21", "repo": "gpu-01"},
+                   {"name": "mac", "address": "192.0.2.30", "os": "macos", "backup": False}]}
+    answers = {"head-01": {"restic": "0.19.1 noctyx", "rest-server": "0.13.0 noctyx", "prometheus": "2.45.3 distro",
+                           "node_exporter": "1.7.0 distro"},
+               "gpu-01": {"restic": "0.19.1 noctyx", "node_exporter": "1.7.0 distro", "agent": "abc noctyx"}}
+
+    def probe(h, snippet):
+        return "".join(f"=={k}==\n{v}\n" for k, v in answers.get(h["name"], {}).items())
+    cache = {repo: {"tag": comp.PINS[n]["version"], "ts": 9e12} for n, repo in
+             (("restic", "restic/restic"), ("rest-server", "restic/rest-server"), ("prometheus", "prometheus/prometheus"),
+              ("node_exporter", "prometheus/node_exporter"))}
+    inv = comp.inventory(c, probe, cache, want_agent="abc", version="0.1.0")
+    head = {r["component"]: r for r in inv["hosts"]["head-01"]}
+    assert head["rest-server"]["state"] == "behind" and head["rest-server"]["upgrade"] == "sudo noctyx setup tools --force"
+    assert head["prometheus"]["pinned"] is None and head["prometheus"]["state"] == "upgrade"
+    assert head["prometheus"]["upgrade"] == "sudo apt-get install --only-upgrade prometheus"
+    gpu = {r["component"]: r for r in inv["hosts"]["gpu-01"]}
+    assert gpu["agent"]["state"] == "ok" and gpu["restic"]["state"] == "ok"
+    assert gpu["node_exporter"]["upgrade"].endswith("(on gpu-01)")
+    assert inv["hosts"]["mac"] == []                              # a Mac runs nothing Noctyx installs

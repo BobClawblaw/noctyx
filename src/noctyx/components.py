@@ -54,21 +54,33 @@ PINS = {
 }
 
 # what each machine runs. role: head = the head only; node = every Linux host Noctyx backs up; both.
-# probe: a shell snippet printing the installed version (empty = not installed); run on that machine as root.
+# bins: where the component may live and who put it there, first match wins: "noctyx" (installed and pinned by
+# Noctyx, upgraded by Noctyx), "distro" (apt: compared with upstream, upgraded with apt), "brew" (likewise).
 COMPONENTS = [
-    {"name": "noctyx", "role": "head", "repo": "BobClawblaw/noctyx", "upgrade": "noctyx upgrade guide (pip install the new release)"},
-    {"name": "restic", "role": "both", "probe": "restic version 2>/dev/null | awk '{print $2}'",
+    {"name": "noctyx", "role": "head", "repo": "BobClawblaw/noctyx", "upgrade": "pip install the new release (see the upgrade guide)"},
+    {"name": "restic", "role": "both", "arg": "version", "pkg": "restic",
+     "bins": [("/usr/local/bin/restic", "noctyx"), ("/usr/bin/restic", "distro"), ("/opt/homebrew/bin/restic", "brew")],
      "upgrade_head": "sudo noctyx setup tools --force", "upgrade_node": "sudo noctyx install-agent --host {host}"},
-    {"name": "rest-server", "role": "head", "probe": "/usr/local/bin/rest-server --version 2>/dev/null | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' | head -1",
-     "upgrade_head": "sudo noctyx setup tools --force"},
-    {"name": "prometheus", "role": "head", "probe": "/usr/local/bin/prometheus --version 2>&1 | awk 'NR==1{print $3}'",
+    {"name": "rest-server", "role": "head", "arg": "--version",
+     "bins": [("/usr/local/bin/rest-server", "noctyx")], "upgrade_head": "sudo noctyx setup tools --force"},
+    {"name": "prometheus", "role": "head", "arg": "--version", "pkg": "prometheus",
+     "bins": [("/usr/local/bin/prometheus", "noctyx"), ("/usr/bin/prometheus", "distro"), ("/opt/homebrew/bin/prometheus", "brew")],
      "upgrade_head": "sudo noctyx setup metrics --force"},
-    {"name": "node_exporter", "role": "both",
-     "probe": "(/usr/local/bin/node_exporter --version 2>&1 || prometheus-node-exporter --version 2>&1) | awk 'NR==1{print $3}'",
+    {"name": "node_exporter", "role": "both", "arg": "--version", "pkg": "prometheus-node-exporter",
+     "bins": [("/usr/local/bin/node_exporter", "noctyx"), ("/usr/bin/prometheus-node-exporter", "distro"),
+              ("/opt/homebrew/bin/node_exporter", "brew")],
      "upgrade_head": "sudo noctyx setup metrics --force", "upgrade_node": "sudo noctyx tool install-node-metrics --host {host}"},
-    {"name": "agent", "role": "node", "probe": "md5sum @AGENT_BIN@ 2>/dev/null | cut -c1-12",
-     "upgrade_node": "sudo noctyx install-agent --host {host}"},
+    {"name": "agent", "role": "node", "probe": "f=@AGENT_BIN@; [ -r $f ] && echo \"$(md5sum $f | cut -c1-12) noctyx\""},
 ]
+
+
+def probe_snippet(comp):
+    """Shell printing `VERSION SOURCE` for a component (nothing when it is not installed)."""
+    if comp.get("probe"):
+        return comp["probe"]
+    tries = [f"[ -x {p} ] && {{ echo \"$({p} {comp['arg']} 2>&1 | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' | head -1) {src}\"; exit 0; }}"
+             for p, src in comp["bins"]]
+    return "( " + "; ".join(tries) + "; true )"
 
 
 def plat(os_name, arch):
@@ -123,7 +135,8 @@ def applies(comp, host, head_name):
 
 def status(comp, installed, pinned, upstream, want_agent=None):
     """-> (state, detail): ok | missing | behind (older than the pin, or a stale agent) | upgrade (a newer
-    release exists than the pin) | ahead (newer than the pin: someone upgraded by hand)."""
+    release exists than the pin, or than what the distro installed) | ahead (newer than the pin: someone
+    upgraded by hand). pinned is None for what Noctyx did not install itself."""
     if comp["name"] == "agent":
         if not installed:
             return "missing", "not installed"
@@ -139,7 +152,11 @@ def status(comp, installed, pinned, upstream, want_agent=None):
     return "ok", "current"
 
 
-def upgrade_cmd(comp, host, is_head):
+def upgrade_cmd(comp, host, is_head, source="noctyx"):
+    if source == "distro":
+        return f"sudo apt-get install --only-upgrade {comp.get('pkg', comp['name'])}" + ("" if is_head else f"   (on {host['name']})")
+    if source == "brew":
+        return f"brew upgrade {comp.get('pkg', comp['name'])}" + ("" if is_head else f"   (on {host['name']})")
     key = "upgrade_head" if is_head else "upgrade_node"
     return (comp.get(key) or comp.get("upgrade") or "").format(host=host["name"])
 
@@ -157,7 +174,7 @@ def inventory(c, probe, cache, want_agent=None, version=None, only=None):
             continue
         rows = []
         comps = [x for x in COMPONENTS if applies(x, h, head["name"])]
-        snippet = "".join(f"echo '=={x['name']}=='; {x['probe']}\n" for x in comps if x.get("probe"))
+        snippet = "".join(f"echo '=={x['name']}=='; {probe_snippet(x)}\n" for x in comps if x.get("probe") or x.get("bins"))
         got, err = {}, None
         try:
             txt = probe(h, snippet) if snippet else ""
@@ -176,13 +193,20 @@ def inventory(c, probe, cache, want_agent=None, version=None, only=None):
                 pin = str(c.get("restic_version") or pin)
             repo = PINS.get(x["name"], {}).get("repo") or x.get("repo")
             up = latest(repo, cache) if repo else None
-            inst = version if x["name"] == "noctyx" else norm(got.get(x["name"]))
+            if x["name"] == "noctyx":
+                inst, source = version, "noctyx"
+            else:
+                inst, _, source = (got.get(x["name"]) or "").partition(" ")
+                inst, source = norm(inst), source.strip() or "noctyx"
+            pin_here = pin if source == "noctyx" and x["name"] not in ("noctyx", "agent") else None
             if err and x["name"] != "noctyx":
                 st, why = "unknown", f"unreachable: {err}"
             else:
-                st, why = status(x, inst, None if x["name"] in ("noctyx", "agent") else pin, up, want_agent)
-            rows.append({"component": x["name"], "installed": inst or None, "pinned": pin, "latest": up,
-                         "state": st, "detail": why, "upgrade": upgrade_cmd(x, h, h is head)})
+                st, why = status(x, inst, pin_here, up, want_agent)
+                if source in ("distro", "brew") and st != "missing":
+                    why += f" ({'apt' if source == 'distro' else 'Homebrew'} manages it)"
+            rows.append({"component": x["name"], "installed": inst or None, "pinned": pin_here, "latest": up,
+                         "source": source, "state": st, "detail": why, "upgrade": upgrade_cmd(x, h, h is head, source)})
         out[h["name"]] = rows
     return {"ts": time.time(), "generated": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
             "hosts": out}
