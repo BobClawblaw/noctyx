@@ -1305,18 +1305,9 @@ def about_info():
     """UI › About: what is running, under which license, and how to support it."""
     from noctyx import __version__
     c = CM.cfg()
-    change = None
-    for lic in (NX_HOME.parents[1] / "LICENSE", NX_HOME.parent / "LICENSE"):
-        try:
-            m = re.search(r"^Change Date:\s*(\S+)", lic.read_text(), re.M)
-            if m:
-                change = m.group(1)
-                break
-        except OSError:
-            pass
     rc = CM.recipes_cfg(c)
     return {"version": __version__, "build": UI_BUILD, "python": sys.version.split()[0],
-            "restic": str(c.get("restic_version") or "0.19.1"), "change_date": change,
+            "restic": str(c.get("restic_version") or "0.19.1"),
             "site": {"head": c["server"].get("hostname"), "nas": CM.nas_name(c),
                      "hosts": len([h for h in c["hosts"] if h.get("enabled", True) is not False and h.get("address")]),
                      "slots": len(rc["slots"]), "recipes": len(rc["catalog"])},
@@ -2238,21 +2229,29 @@ a.menu-title{text-decoration:none;display:inline-flex;align-items:center;gap:6px
 .akeys{font:12px var(--sans);color:var(--fg-dim);line-height:2} .akeys kbd{font:10.5px var(--mono);border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--fg);margin-right:2px}
 /* Kiosk: no chrome, big type */
 body.kiosk header.top{display:none} body.kiosk .panel{border:0;background:transparent;box-shadow:none} body.kiosk .panel>.grip{display:none}
-.kiosk-wrap{display:flex;flex-direction:column;gap:18px;padding:6px 4px}
-.ktop{display:flex;align-items:center;gap:22px;flex-wrap:wrap}
-.kbrand{display:flex;align-items:center;gap:10px;text-decoration:none;margin-right:auto} .kbrand .mark{width:34px;height:34px} .kbrand .wordmark{font-size:22px}
-.kbig{display:flex;flex-direction:column;align-items:flex-end} .kbig b{font:800 44px/1 var(--mono)} .kbig span,.kclock span{font:11px var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim)}
-.kclock{display:flex;flex-direction:column;align-items:flex-end;padding-left:20px;border-left:1px solid var(--line)} .kclock b{font:700 44px/1 var(--mono)}
-.kslots{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px}
-.kslot,.knode{background:var(--bg-1);border:1px solid var(--line-soft);border-radius:var(--radius);padding:14px 16px}
+/* One screen: the wrap is exactly the viewport (body overflow:hidden) and kioskFit() sizes the
+   node grid to the height left under the header and the slots: rows = floor(leftover / card
+   height), columns adapt to the node count, and the whole wrap scales down as a last resort. */
+body.kiosk #desk{padding:0;overflow:hidden} body.kiosk .pbody{padding:0;overflow:hidden}
+.kiosk-wrap{display:flex;flex-direction:column;gap:calc(18px*var(--kf-h,1));padding:calc(10px*var(--kf-h,1)) calc(8px*var(--kf-h,1));box-sizing:border-box;
+  width:100vw;height:100vh;transform-origin:top left}
+html.kiosk-1{--kf-h:.78} html.kiosk-2{--kf-h:.62}
+.ktop{display:flex;align-items:center;gap:calc(22px*var(--kf-h,1));flex-wrap:wrap}
+.kbrand{display:flex;align-items:center;gap:calc(10px*var(--kf-h,1));text-decoration:none;margin-right:auto} .kbrand .mark{width:calc(34px*var(--kf-h,1));height:calc(34px*var(--kf-h,1))} .kbrand .wordmark{font-size:calc(22px*var(--kf-h,1))}
+.kbig{display:flex;flex-direction:column;align-items:flex-end} .kbig b{font:800 calc(44px*var(--kf-h,1))/1 var(--mono)} .kbig span,.kclock span{font:calc(11px*var(--kf-h,1)) var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim)}
+.kclock{display:flex;flex-direction:column;align-items:flex-end;padding-left:calc(20px*var(--kf-h,1));border-left:1px solid var(--line)} .kclock b{font:700 calc(44px*var(--kf-h,1))/1 var(--mono)}
+.kslots{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:calc(12px*var(--kf-h,1))}
+.kslot,.knode{background:var(--bg-1);border:1px solid var(--line-soft);border-radius:var(--radius);padding:calc(14px*var(--kf-h,1)) calc(16px*var(--kf-h,1));min-height:0;display:flex;flex-direction:column}
 .kslot.down,.knode.down{border-color:color-mix(in srgb,var(--bad) 55%,var(--line))}
-.kh{display:flex;align-items:center;gap:10px;font:700 18px var(--sans)} .kh .mut{font:500 12px var(--sans)}
-.km{font:600 15px var(--mono);margin-top:8px;color:var(--accent)}
-.knodes{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px}
-.kgrid{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:6px 10px;margin-top:10px;font:12px var(--sans);align-items:baseline}
-.kgrid span{color:var(--fg-dim)} .kgrid b{font:700 20px var(--mono)}
-.kllm{display:flex;justify-content:space-between;align-items:baseline;margin-top:10px;padding-top:8px;border-top:1px solid var(--line-soft);font:12px var(--mono);gap:8px}
-.kllm .mut{overflow:hidden;text-overflow:ellipsis;white-space:nowrap} .kllm b{font:800 22px var(--mono);color:var(--accent);white-space:nowrap;flex:0 0 auto} .kllm small{font:11px var(--sans);color:var(--fg-dim)}
+.kh{display:flex;align-items:center;gap:calc(10px*var(--kf-h,1));font:700 calc(18px*var(--kf-h,1)) var(--sans)} .kh .mut{font:500 calc(12px*var(--kf-h,1)) var(--sans)}
+.km{font:600 calc(15px*var(--kf-h,1)) var(--mono);margin-top:calc(8px*var(--kf-h,1));color:var(--accent)}
+.knodes{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));grid-auto-rows:minmax(0,auto);gap:calc(12px*var(--kf-h,1));flex:1;min-height:0}
+/* kioskFit() rewrites grid-template-columns and grid-auto-rows on .knodes; html.kiosk-{1,2}
+   shrink --kf-h, which every kiosk size above derives from */
+.kgrid{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:calc(6px*var(--kf-h,1)) calc(10px*var(--kf-h,1));margin-top:calc(10px*var(--kf-h,1));font:calc(12px*var(--kf-h,1)) var(--sans);align-items:baseline}
+.kgrid span{color:var(--fg-dim)} .kgrid b{font:700 calc(20px*var(--kf-h,1)) var(--mono)}
+.kllm{display:flex;justify-content:space-between;align-items:baseline;margin-top:auto;padding-top:calc(8px*var(--kf-h,1));border-top:1px solid var(--line-soft);font:calc(12px*var(--kf-h,1)) var(--mono);gap:calc(8px*var(--kf-h,1))}
+.kllm .mut{overflow:hidden;text-overflow:ellipsis;white-space:nowrap} .kllm b{font:800 calc(22px*var(--kf-h,1)) var(--mono);color:var(--accent);white-space:nowrap;flex:0 0 auto} .kllm small{font:calc(11px*var(--kf-h,1)) var(--sans);color:var(--fg-dim)}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden;background:var(--bg-0)}
 .seg button{background:none;border:0;border-right:1px solid var(--line);color:var(--fg-dim);font:600 11.5px var(--sans);padding:6px 12px;cursor:pointer}
 .seg button{white-space:nowrap}
@@ -2692,14 +2691,14 @@ html[data-style=phosphor] .hero .hv{font-size:clamp(34px,3vw,50px);color:var(--a
 html[data-style=phosphor] [data-ghost]::before{content:attr(data-ghost);position:absolute;left:0;top:0;z-index:-1;
  color:color-mix(in srgb,currentColor 9%,transparent);text-shadow:none;pointer-events:none;white-space:pre}
 html[data-style=phosphor] .kbig b:not(.ok):not(.warn):not(.bad){color:var(--k)}
-html[data-style=phosphor] .kbig b,html[data-style=phosphor] .kclock b{font-size:44px;
+html[data-style=phosphor] .kbig b,html[data-style=phosphor] .kclock b{font-size:calc(44px*var(--kf-h,1));
  text-shadow:0 0 calc(18px * var(--gl)) color-mix(in srgb,currentColor 55%,transparent),0 0 2px color-mix(in srgb,currentColor 80%,transparent)}
 html[data-style=phosphor] .kclock b{color:var(--accent)}
-html[data-style=phosphor] .kbig span,html[data-style=phosphor] .kclock span{font-family:var(--display);font-size:9px;letter-spacing:.18em;margin-top:6px}
-html[data-style=phosphor] .kmeters .bar{height:13px}
+html[data-style=phosphor] .kbig span,html[data-style=phosphor] .kclock span{font-family:var(--display);font-size:calc(9px*var(--kf-h,1));letter-spacing:.18em;margin-top:calc(6px*var(--kf-h,1))}
+html[data-style=phosphor] .kmeters .bar{height:calc(13px*var(--kf-h,1))}
 
 /* kiosk cards and the CRT */
-html[data-style=phosphor] .kslot,html[data-style=phosphor] .knode{background:linear-gradient(180deg,color-mix(in srgb,var(--bg-1) 94%,var(--fg)),var(--bg-1) 44px);
+html[data-style=phosphor] .kslot,html[data-style=phosphor] .knode{background:linear-gradient(180deg,color-mix(in srgb,var(--bg-1) 94%,var(--fg)),var(--bg-1) calc(44px*var(--kf-h,1)));
  border-color:color-mix(in srgb,var(--accent) 10%,var(--line-soft));box-shadow:inset 0 1px 0 color-mix(in srgb,var(--accent) calc(22% * var(--gl)),transparent),0 12px 30px rgba(0,0,0,calc(.45 * var(--gl)))}
 html[data-style=phosphor] .kslot.down,html[data-style=phosphor] .knode.down{border-color:color-mix(in srgb,var(--bad) 60%,var(--line));
  box-shadow:inset 0 1px 0 color-mix(in srgb,var(--bad) 40%,transparent),0 0 calc(26px * var(--gl)) color-mix(in srgb,var(--bad) 18%,transparent)}
@@ -3107,7 +3106,7 @@ function rAbout(d){
  const pill=(k,v,c)=>`<span class="apill ${c||''}"><span>${esc(k)}</span><b>${esc(v)}</b></span>`;
  return `<div class=about>
   <img class=abanner src="/assets/banner.svg" alt="Noctyx — the night-shift operator for your AI cluster">
-  <div class=apills>${pill('version',d.version)}${pill('license','BSL 1.1')}${pill('Apache 2.0 on',d.change_date||'—')}${pill('python',d.python)}${pill('restic',d.restic)}${pill('status','alpha','warn')}</div>
+  <div class=apills>${pill('version',d.version)}${pill('license','Apache 2.0')}${pill('python',d.python)}${pill('restic',d.restic)}${pill('status','alpha','warn')}</div>
   <div class=acols>
    <div class=acard><h3>What Noctyx does</h3>
     <div class=afeat><b>Deploy</b><span>Model recipes onto GPU slots: built while the current model serves, switched under the slot's GPU lock, rolled back automatically. Public recipes for your hardware, ranked by measured speed.</span></div>
@@ -3128,14 +3127,12 @@ function rAbout(d){
      <a href="${R}/blob/main/docs/guide/recipes.md" target=_blank rel=noopener>Deploy recipes</a><a href="${R}/blob/main/docs/guide/site-config.md" target=_blank rel=noopener>Site config reference</a>
      <a href="${R}/blob/main/docs/spec/recipe-deploy.md" target=_blank rel=noopener>Recipe deploy spec (draft)</a></div></div>
    <div class=acard><h3>License</h3>
-    <p>Source-available under the <b>Business Source License 1.1</b>.</p>
-    <p class=mut>Free for personal, hobby and home-lab use and for non-profit teaching and research, at any scale. Evaluating, developing and
-     testing are always free. Use by or for a company, or offering Noctyx as a hosted service, needs a commercial license.</p>
-    <p class=mut>Every release becomes Apache 2.0 four years after it ships${d.change_date?` — this one on <b>${esc(d.change_date)}</b>`:''}.</p>
-    <div class=alinks><a href="${R}/blob/main/LICENSE" target=_blank rel=noopener>LICENSE</a><a href="${R}/blob/main/COMMERCIAL.md" target=_blank rel=noopener>Commercial licensing</a></div></div>
+    <p>Licensed under the <b>Apache License, Version 2.0</b>.</p>
+    <p class=mut>Free to use, modify and redistribute. The bundled fonts stay under
+     the SIL Open Font License; the recipe deploy spec is CC-BY-4.0.</p>
+    <div class=alinks><a href="${R}/blob/main/LICENSE" target=_blank rel=noopener>LICENSE</a><a href="/assets/fonts/LICENSES.txt">Font licenses</a></div></div>
    <div class=acard><h3>Support Noctyx</h3>
-    <p class=mut>Donations keep the free tier going. A commercial license is paid to the same address: ask for a quote, pay it, then send the
-     transaction id with a message signed by the paying address; you get a signed license file.</p>
+    <p class=mut>Donations keep the project going.</p>
     <div class=adonate><img src="/assets/donate-qr.png" alt="QR code: the bitcoin address" width=164 height=164>
      <div><div class=k>Bitcoin</div><button class=addr title="copy" onclick="copyAddr(this,'${esc(d.donate)}')">${esc(d.donate)}</button><div class="mut copied"></div></div></div></div>
   </div></div>`}
@@ -3429,10 +3426,106 @@ function morphKids(a,b){const ac=a.childNodes,bc=Array.from(b.childNodes);
   morph(x,y)}
  while(ac.length>bc.length)a.removeChild(a.lastChild)}
 function repaint(id,data){const p=PANELS.find(x=>x.id==id),b=$('b-'+id);if(!b||!p)return;
+ /* the kiosk's fit lives in inline styles on the rendered tree, and morph() clears style
+    attributes the fresh markup doesn't carry — snapshot them and put them back */
+ const fit=id=='kiosk'?kioskFitSnap(b):null;
+ if(id=='kiosk'&&_kfSaved)kfStyle(_kfSaved);    /* morph() can't restore <html>'s class: the step it
+                                                   chose would evaporate on the next 10s refresh */
  const t=document.createElement('template');t.innerHTML=p.render(data)||'<div class=empty>no data</div>';
  morphKids(b,t.content);b.classList.remove('stale');
+ if(id=='kiosk'){kioskFitRestore(b,fit);kioskFit()}
  for(const k in CH)if(!document.querySelector(`[data-ch="${k}"]`))delete CH[k];
  if(id=='actions')wireActions()}
+function kioskFitSnap(b){const w=b.querySelector('.kiosk-wrap'),n=b.querySelector('.knodes');
+ return w||n?{wrap:w&&w.style.transform,nodes:n&&n.getAttribute('style'),cls:n&&n.className}:null}
+function kioskFitRestore(b,f){if(!f)return;
+ const w=b.querySelector('.kiosk-wrap'),n=b.querySelector('.knodes');
+ if(w&&f.wrap!=null)w.style.transform=f.wrap;
+ if(n&&f.nodes!=null)n.setAttribute('style',f.nodes);
+ if(n&&f.cls)n.className=f.cls}
+/* /kiosk: everything on one screen, always. The wrap is exactly the viewport (body overflow:hidden)
+   and kioskFit() packs the node grid into the height left under the header and the slots: for each
+   (type step, column count) it measures the cards' intrinsic height in a hidden in-DOM clone of the
+   wrap — the live grid can't be measured (its rows are stretched by the flex container) and a bare
+   detached tree resolves no inherited --kf-h and none of the theme selectors — then keeps the
+   roomiest step whose rows fit full-size, shares the leftover height between them, and falls back
+   to scaling the whole wrap (floor .5) when even the tightest step overflows. The three type steps
+   come from --kf-h: all the kiosk CSS above derives from it, and kfStyle steps the ROOT — morph()
+   can patch neither body's class list nor <html>, and a root class inherits into the probe's clone
+   too. One fit per frame; if the applied tree still overflows its rows (a late theme class, a font
+   load, a repaint mid-solve), the settled check refits, guard-bounded to converge. */
+const KF={1:.78,2:.62};
+let _kfSaved=0,_fitPend=0,_fitPass=0;
+function kfStyle(s){_kfSaved=s;document.documentElement.classList.toggle('kiosk-1',s==1);document.documentElement.classList.toggle('kiosk-2',s==2)}
+function kioskFit(){
+ if(_fitPend||!document.querySelector('.kiosk-wrap'))return;   /* not on /kiosk: nothing to size */
+ _fitPend=true;
+ requestAnimationFrame(()=>requestAnimationFrame(()=>{_fitPend=false;kioskFitNow()}))}
+function kioskFitNow(){
+ const wrap=document.querySelector('.kiosk-wrap');if(!wrap)return;
+ const H=wrap.clientHeight,W=wrap.clientWidth;
+ wrap.style.transform='';
+ const nodes=wrap.querySelector('.knodes');if(!nodes||!nodes.children.length){kfStyle(0);return}
+ const n=nodes.children.length;if(!n){kfStyle(0);return}
+ /* measure in a hidden clone of the whole wrap: the top row and the slot cards above the grid
+    shrink with the step too, so they are part of the room. The clone must sit inside the DOM —
+    a bare detached tree resolves no inherited custom properties (--kf-h) and none of the theme
+    selectors that hang off body[data-view]/html[data-style]. The clone grid's box is measured,
+    not assumed: 100vh on the wrap resolves inside the probe (overflow:hidden), then the grid's
+    flex height falls out. Cards carry their style attribute through the clone — a previous
+    fit's inline transform/position is cleared, and bar fills are stripped: they animate every
+    tick and would jitter the measurement and re-trigger this fit forever. */
+ const probe=document.createElement('div');
+ probe.style.cssText=`position:fixed;visibility:hidden;left:-9999px;top:0;width:${W}px;height:${H}px;overflow:hidden`;
+ document.body.appendChild(probe);
+ const solve=s=>{
+  kfStyle(s);
+  probe.innerHTML='';
+  const copy=wrap.cloneNode(true);
+  copy.querySelectorAll('.kmeters .bar').forEach(b=>{b.className='barx';b.style.cssText='height:8px'});
+  copy.querySelectorAll('.kiosk-wrap,.knodes').forEach(e=>e.removeAttribute('style'));
+  copy.querySelectorAll('.knodes>*').forEach(e=>{e.style.position='';e.style.transform=''});
+  probe.appendChild(copy);
+  const pn=copy.querySelector('.knodes');
+  if(!pn||!pn.children.length)return null;
+  const maxCols=Math.max(1,Math.min(n,Math.floor((W+12)/262)));
+  const kfh=s?KF[s]:1,bottom=Math.ceil(10*kfh);
+  for(let cols=maxCols;cols>=1;cols--){
+   pn.style.gridTemplateColumns=`repeat(${cols},minmax(0,1fr))`;
+   pn.style.gridAutoRows='';
+   const rows=Math.ceil(n/cols);
+   const avail=pn.offsetHeight;               /* the flex box at this step (height:auto:100vh) */
+   /* the card's natural height: rows stretch to fill the grid, so offsetHeight can be the row,
+      not the content — measure with the cards out of flow (grid-area keeps each in its cell, so
+      the row height still comes from content, never from the grid box) */
+   const cells=[...pn.children];
+   cells.forEach(c=>{c.style.position='absolute'});
+   const cell=pn.firstElementChild.offsetHeight||pn.firstElementChild.scrollHeight;
+   cells.forEach(c=>{c.style.position=''});
+   if(!cell)continue;
+   const nat=rows*cell+(rows-1)*12;           /* rows stacked at natural size, none stretched */
+   if(nat<=avail+1)                          /* every row full-size: share the slack evenly */
+    return {cols,rows,rh:(avail-(rows-1)*12)/rows,s};
+   if(cols==maxCols)                         /* nowhere wider: scale the wrap to height */
+    return {cols,rows,rh:cell,s,scale:avail/nat}}
+  return null};
+ let best=null,soft=null;
+ for(let s=0;s<=2;s++){const m=solve(s);
+  if(m&&m.scale===undefined){best=m;break}       /* full-size at this step: the roomiest wins */
+  if(m&&!soft)soft=m}                           /* otherwise remember the first scaled layout */
+ if(!best)best=soft;
+ probe.remove();
+ if(!best){kfStyle(0);return}
+ kfStyle(best.s);                               /* settle the step before measuring the live tree */
+ nodes.style.gridTemplateColumns=`repeat(${best.cols},minmax(0,1fr))`;
+ nodes.style.gridAutoRows=best.rh.toFixed(1)+'px';
+ wrap.style.transform=best.scale?`scale(${Math.min(1,Math.max(.5,best.scale)).toFixed(4)})`:'';
+ /* settle: if the applied tree's content still overflows its rows (a late theme class, a font
+    that loaded mid-solve, stretched heights lying to the probe), refit from the true state —
+    guard-bounded, the fit converges in one or two extra passes */
+ const sc=parseFloat(wrap.style.transform)||1,box=nodes.firstElementChild.getBoundingClientRect().height/sc;
+ if(++_fitPass<5&&[...nodes.children].some(c=>c.scrollHeight>box+2))kioskFit();else _fitPass=0}
+if(VIEW=='kiosk'){addEventListener('resize',kioskFit);new MutationObserver(kioskFit).observe($('desk'),{childList:true,subtree:true})}
 
 /* ── renderers (pure: data -> html) ── */
 /* live tile body from Prometheus (fleet_metrics) */

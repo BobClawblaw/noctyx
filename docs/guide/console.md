@@ -119,14 +119,15 @@ Saving runs the same validated CLI commands (`policy-set`, `assistant-set`). See
 
 ![Kiosk](../screenshots/kiosk.png)
 
-A wall display with no menus and large type: GPU slots, a tile per node, fleet totals and alerts. Every source
-refreshes together every 10 seconds.
+A wall display with no menus and large type: GPU slots, a tile per node, fleet totals and alerts — laid out to fit
+one screen, whatever the display's resolution (the console sizes the node grid to the room left, down to scaling
+the whole view on very small screens). Every source refreshes together every 10 seconds.
 
 ## About (`/about`)
 
 ![About](../screenshots/about.png)
 
-Shows the version, license and change date, Python and restic versions, this site (head, hosts, slots, recipes,
+Shows the version, license (Apache 2.0), Python and restic versions, this site (head, hosts, slots, recipes,
 backup target, console build), the keyboard keys, documentation links and donation details.
 
 ## Sign-in (`/login`)

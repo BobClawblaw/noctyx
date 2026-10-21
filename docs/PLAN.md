@@ -9,8 +9,8 @@ a private, single-site implementation that has run a real GPU cluster in product
 | | |
 |---|---|
 | Name | **Noctyx** (replaces the working name "ClusterManager", which is descriptive and crowded: NVIDIA's Bright Cluster Manager / Base Command Manager, Adaptive Cluster Manager, IBM Platform Cluster Manager, Gluu Cluster Manager) |
-| License | **Business Source License 1.1** — production use free for non-commercial purposes at any scale; every for-profit use needs a commercial license; each release converts to **Apache 2.0** four years after it ships |
-| Who may sell it | Only the Licensor. Nobody else may sell it, host it as a service, or run it inside a business without a commercial license |
+| License | **Apache License, Version 2.0** (since 2026-10-21; the tree launched under BSL 1.1) — free to use, modify and redistribute, commercial use included |
+| Who sells support | Anyone may sell Noctyx (Apache 2.0); we aim to be the default: the maintainer's hosting, the Fleet console and paid support remain the revenue lines |
 | Public repo | A fresh repository with no history from the private implementation and no site-specific information (see §9) |
 
 ## 1. What Noctyx is
@@ -33,67 +33,52 @@ crowd running community model recipes on DGX Sparks, RTX workstations and Macs. 
 almost all hand-run shell scripts with no deploy, rollback or health layer. Noctyx is that layer.
 Lead with Deploy; Protect is why people trust it with production.
 
-**Who it is for.**
-- *Free:* home labs, hobbyists, students, non-profit research — the community that writes and
-  benchmarks recipes, and Noctyx's distribution channel.
-- *Paying:* startups and companies running their own inference hardware (a few GPU nodes to a few
-  racks), AI consultancies and integrators deploying for clients, labs inside for-profit companies.
+**Who it is for.** Home labs, hobbyists, students and non-profit research — the community that
+writes and benchmarks recipes, and Noctyx's distribution channel — and startups and companies
+running their own inference hardware (a few GPU nodes to a few racks), AI consultancies and
+integrators deploying for clients, labs inside companies. The software is free for all of them.
 
-## 2. Licensing and how only the Licensor makes money
+## 2. Licensing and how the project makes money
 
-**What BSL 1.1 with our Additional Use Grant does:**
+**What Apache License 2.0 means** (changed from BSL 1.1 on 2026-10-21; the copyright stays with the
+contributors, §5 of the license carries their contributions under the same terms — no CLA needed):
 
 | Use | Allowed without paying? |
 |---|---|
-| Read, copy, modify, fork, redistribute the source | Yes (forks stay under the same license) |
-| Non-production use by anyone (evaluation, development, testing) | Yes — BSL always allows it |
-| Production use by an individual: personal, hobby, home lab | Yes, any size |
-| Teaching and research at a non-profit institution | Yes, any size |
-| Any production use by or for a for-profit organization | **No — commercial license** |
-| Offering Noctyx (or its output) to third parties as a hosted or managed service | **No — commercial license** |
-| A version older than four years | Yes — it is Apache 2.0 by then |
+| Read, copy, modify, fork, redistribute the source | Yes (derivatives keep the Apache 2.0 notice obligations) |
+| Any use, personal or commercial, at any scale | Yes |
+| Offering Noctyx to third parties as a hosted or managed service | Yes |
+| Selling Noctyx itself, or a support contract for it | Yes — anyone may; we compete on being the maintainer |
 
-It is *source-available*, not "open source" (OSI forbids field-of-use limits); say "source-available"
-everywhere. The four-year conversion keeps goodwill: the community always gets yesterday's Noctyx
-under a true open-source license.
+It is true open source (OSI-approved); say "open source", not "source-available".
 
 **Revenue lines**, in launch order:
-0. **Donations** — Noctyx is donationware for its free users: the README and COMMERCIAL.md carry
-   the bitcoin address `bc1q9echf820hapc04y0f636uxdry2ahyx32tkleff`, Noctyx's own.
-1. **Commercial license** — paid in bitcoin to the same address (quote → payment → transaction id +
-   a message signed by one of the transaction's input addresses, which proves the payer → signed
-   license file; verification with BIP-322); card/invoice billing once the company exists — annual subscription per managed GPU node (a node = one machine with an
-   accelerator; a TP pair = two nodes), with a site license above a threshold. Includes updates.
-2. **Support** — business-hours or 24×7 tiers on top of the license; paid onboarding (we bring a
+0. **Donations** — the README carries the bitcoin address `bc1q9echf820hapc04y0f636uxdry2ahyx32tkleff`,
+   Noctyx's own.
+1. **Support** — business-hours or 24×7 response on the open-source core; paid onboarding (we bring a
    new site from zero to "every model deployable, every node restorable").
-3. **Noctyx Fleet** (later) — multi-site console, SSO/RBAC, audit export, alert routing to
-   PagerDuty/Slack/Teams, off-site replication policies, compliance reports. Licensed separately;
-   lives in a separate private repository so the BSL core stays complete for single sites.
-4. **Hosted control plane** (later) — the console as a service, agents at the customer's site.
-   Only the Licensor may offer this; the license forbids it for everyone else.
+2. **Noctyx Fleet** (later) — multi-site console, SSO/RBAC, audit export, alert routing to
+   PagerDuty/Slack/Teams, off-site replication policies, compliance reports. SaaS/subscription;
+   lives in a separate repository so the open-source core stays complete for single sites.
+3. **Hosted control plane** (later) — the console as a service, agents at the customer's site.
 
-**Pricing — hypotheses to validate in the beta, not decisions.** Anchor high against enterprise
-cluster managers (sold per node per year, aimed at data centres) and low against "free scripts".
-Test a startup tier (small node count, self-serve) and a standard tier; ask beta sites what one
-avoided outage or one avoided re-download of a 200 GB model is worth to them.
+**Pricing — hypotheses to validate in the beta, not decisions.** Anchor against "what an avoided
+outage or a re-downloaded 200 GB model costs" for support, and against self-hosting effort for Fleet
+and hosting.
 
-**Enforcement.** Honest-customer model at launch: no DRM, no phone-home. The console shows the
-license state ("non-commercial", or the licensee and node count from a signed license file) and the
-commercial agreement carries an audit clause. Add license-key checks only to Fleet features, never to
-the free core.
+**No enforcement.** The license asks nothing of users: no license keys, no DRM, no phone-home, no
+audit clause. Money comes from convenience (support, hosting, Fleet), not from the code.
 
 **Legal setup — before the first public release** (needs a lawyer; this plan is not legal advice):
-- [ ] A company (e.g. an LLC) to own the copyright and trademark and to sign customer contracts;
-      assign the existing code to it and change `Licensor` in LICENSE to the company.
-- [ ] Lawyer review of the Additional Use Grant wording (it may only *add* rights — BSL covenant 2).
+- [ ] A company (e.g. an LLC) to own the project trademark and to sign customer contracts; assign
+      the copyright it holds to the company.
 - [ ] Trademark: clearance search for **NOCTYX** (software, class 9 and 42), then file. Register
       the domains (noctyx.ai / .dev were unregistered at last check; .com was taken).
-- [ ] Contributor License Agreement (Apache-ICLA style: contributor keeps copyright, grants the
-      Licensor the right to license contributions commercially). Enforced by a CLA bot on PRs.
-- [ ] Commercial license agreement + order form; support terms; privacy policy for the website.
-- [ ] Accounting for bitcoin income: license payments are business revenue (donations may be taxed
-      differently); once the company exists, decide whether license payments move to an address the
-      company controls, separate from the donation address.
+- [ ] Support terms, privacy policy for the website.
+- [ ] Accounting for bitcoin income (donations may be taxed differently from service revenue); once
+      the company exists, decide whether service payments move to an address the company controls,
+      separate from the donation address.
+
 - [ ] Third-party notices: restic and rest-server (BSD-2-Clause), Prometheus / Alertmanager /
       node_exporter (Apache-2.0), macmon and any bundled JS — keep `THIRD_PARTY.md` exact.
 
@@ -151,7 +136,7 @@ Today Noctyx needs an adapter per recipe layout. Publishing a small, open `[depl
 `recipe.toml` (draft: [spec/recipe-deploy.md](spec/recipe-deploy.md)) lets any recipe author make a
 repo one-click deployable: hardware, node count, prepare/start/stop/health commands, model pins, the
 settings a site must supply. The spec itself is published under **CC-BY-4.0** (anyone may implement
-it — adoption is the point; the implementation stays BSL). Then:
+it — adoption is the point; the implementation is Apache 2.0 too). Then:
 - discovery shows "deployable" for every spec'd recipe, with no guessing;
 - benchmark leaderboards can link speed results to recipes by repo and commit;
 - recipe authors get a reason to add the section: one-click installs for their users.
@@ -199,8 +184,8 @@ the recipe and benchmark community; `[deploy]` spec v0 with PRs to a few popular
 releases; collect pricing evidence. Exit: two sites running unattended for two weeks; one recovered
 from a real failure with Noctyx.
 
-**Phase 4 — Launch (2–3 weeks).** Public repo, website, docs, the commercial license store (order
-form + signed license files), support intake. Announce in the recipe community with real numbers.
+**Phase 4 — Launch (2–3 weeks).** Public repo, website, docs, support offerings, Fleet/hosting
+signups. Announce in the recipe community with real numbers.
 
 **Phase 5 — Fleet and hosted (after revenue).** Multi-site console, SSO, alert routing, off-site
 replication, then the hosted control plane.
@@ -216,9 +201,8 @@ bed for every release.
 
 | Risk | Mitigation |
 |---|---|
-| "Source-available" puts off part of the community | Free for every non-commercial user at any size; 4-year Apache conversion; the deploy spec itself is CC-BY |
+| Apache 2.0 lets anyone sell or host it | Expected of open source; we compete on being the maintainer: fastest development, the recipe community channel, the Fleet and hosting products |
 | A big vendor ships the same layer | Speed: own the recipe spec and the community channel first; the brand is ours |
-| Companies use it without paying | Clear license state in the console, audit clause, a cheap startup tier that is easier than evading |
 | Restore bugs lose someone's data | Restore drills in CI and on the reference cluster each release; "verify" on by default |
 | A deploy takes down production | Plans by default, confirm with impact, GPU locks, automatic rollback — already built; keep it the default |
 | Trademark conflict found late | Clearance search before any public launch |
@@ -227,8 +211,8 @@ bed for every release.
 
 - The public repo starts fresh: no history from the private implementation.
 - No site information in anything public: no names or e-mail addresses of people, host names, LAN or
-  VPN addresses, home-directory paths, NAS names, or other private projects. (The bitcoin address for donations and
-  license payments is deliberate.) Examples use generic
+  VPN addresses, home-directory paths, NAS names, or other private projects. (The bitcoin address for
+  donations and service payments is deliberate.) Examples use generic
   names (`head`, `gpu-01`, `nas`) and documentation address ranges (192.0.2.0/24).
 - `tools/privacy_check.py` runs in CI on every change. It checks generic patterns (private address
   ranges, home paths, non-noreply e-mail addresses) and, on a maintainer's machine, extra patterns from
@@ -237,7 +221,7 @@ bed for every release.
 
 ## 10. Open decisions
 
-1. Commercial pricing (per-node price, startup tier, site-license threshold) — after beta evidence.
+1. Support/Fleet/hosting pricing (per-node support price, Fleet tier) — after beta evidence.
 2. The company: jurisdiction and structure — with the lawyer.
 3. Whether the Mac becomes a deploy slot (MLX recipes) in 1.0 or later.
 4. A slot spanning both GB10 pairs (4-node recipes) — after the spec settles.

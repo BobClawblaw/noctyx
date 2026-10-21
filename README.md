@@ -3,8 +3,7 @@
 <p align="center">
   <img alt="status: alpha" src="https://img.shields.io/badge/status-alpha-f5a524">
   <img alt="version 0.1.0" src="https://img.shields.io/badge/version-0.1.0-38e1ff">
-  <img alt="license: BSL 1.1" src="https://img.shields.io/badge/license-BSL%201.1-8b5cf6">
-  <img alt="Apache 2.0 after four years" src="https://img.shields.io/badge/becomes-Apache%202.0-6366f1">
+  <img alt="license: Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-e16087">
   <img alt="python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-3776ab?logo=python&logoColor=white">
   <img alt="no dependencies" src="https://img.shields.io/badge/dependencies-none%20(stdlib)-2ea043">
   <img alt="backups: restic" src="https://img.shields.io/badge/backups-restic-0f766e">
@@ -143,22 +142,13 @@ your name in the audit log.
 
 ## License
 
-Noctyx is **source-available** under the [Business Source License 1.1](LICENSE):
-
-- **Free** for personal, hobby and home-lab use, and for teaching and research at non-profit
-  institutions — at any scale.
-- **Free** for anyone to evaluate, develop with and test.
-- **Commercial use** (by or for a for-profit organization) and offering Noctyx as a hosted service
-  need a commercial license — see [COMMERCIAL.md](COMMERCIAL.md).
-- Every release becomes **Apache 2.0** four years after it ships.
+Noctyx is licensed under the **Apache License, Version 2.0** — free to use, modify and
+redistribute. See [LICENSE](LICENSE).
 
 ## Donations
 
-Noctyx is donationware for everyone who uses it free. If it saves you a night, a re-download or a
-dead node, tips keep it going:
+Noctyx is free and open source, forever. If it saves you a night, a re-download or a dead node, tips keep it going:
 
 **Bitcoin:** `bc1q9echf820hapc04y0f636uxdry2ahyx32tkleff`
 
-Commercial licenses are paid to the same address — see [COMMERCIAL.md](COMMERCIAL.md).
-
-"Noctyx" is a trademark of its Licensor; the license grants no rights in the name or logo.
+"Noctyx" is a trademark of its owner; the Apache 2.0 license grants no rights in the name or logo.
