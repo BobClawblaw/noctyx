@@ -111,15 +111,26 @@ def pin_addresses(c, hosts):
 SNIPPET_MAC = r"""
 ps -axo pid=,command= | grep -E 'mtplx serve|mlx_lm.server|vllm serve|llama-server|ollama serve|tensorfold(-native)? serve' | grep -v grep | while read -r pid cmd; do echo "CMD $pid $cmd"; done
 lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | awk 'NR>1{print "LISTEN " $9}'
+for c in $(docker ps -q 2>/dev/null); do
+  docker inspect "$c" --format 'DCMD {{.Name}} {{json .Config.Cmd}} {{json .Config.Entrypoint}}' 2>/dev/null
+done
 """
 COMMON_PORTS = [8000, 8888, 8080, 8081, 30000, 30001, 11434, 5000, 9000, 1234]
 
 SNIPPET = r"""
-for p in $(pgrep -f 'vllm serve|vllm\.entrypoints|sglang\.launch_server|llama-server|text-generation-launcher|ollama serve|tensorfold(-native)? serve' 2>/dev/null); do
+for p in $(pgrep -f 'vllm serve|vllm\.entrypoints|sglang\.launch_server|llama-server|text-generation-launcher|ollama serve|tensorfold[^ ]* serve|mtplx[^ ]* serve' 2>/dev/null); do
   printf 'CMD %s ' "$p"; tr '\0' ' ' < /proc/$p/cmdline 2>/dev/null; echo
 done
 ss -Hltn 2>/dev/null | awk '{print "LISTEN " $4}'
+# every IPv4 this node holds: a TP lane names its head by fabric IP (10.x), which is not the
+# LAN address in the site config — this is what lets a worker be paired to its head
+ip -o -4 addr show 2>/dev/null | awk '{print "IP " $4}' | cut -d/ -f1 | sed 's/^IP //' | sed 's/^/IPADDR /'
 docker ps --format 'CTR {{.Names}}|{{.Image}}|{{.Ports}}' 2>/dev/null
+# containerised inference ranks: a TP worker launched as `docker run tf-dsv41-lanes <ckpt> <cache> <rank> <tp> <master> <port> ...`
+# has no host-visible cmdline, so pgrep above can never see it — read the container's own command
+for c in $(docker ps -q 2>/dev/null); do
+  docker inspect "$c" --format 'DCMD {{.Name}} {{json .Config.Cmd}} {{json .Config.Entrypoint}}' 2>/dev/null
+done
 """
 
 
@@ -147,23 +158,62 @@ def run_on(c, h):
     return r.stdout
 
 
+def parse_dcmd(line):
+    """A container's own command line -> same shape as parse_cmd, for ranks that run in Docker.
+
+    tensorfold TP lanes are started positionally:
+        tf-<model>-lanes <checkpoint> <rank-cache> <rank> <tp> <master> <master-port> <kit> ...
+    Rank 0 owns the HTTP port; rank>0 is a headless worker. A container running a normal
+    `tensorfold-native serve ...` is parsed by parse_cmd instead.
+    """
+    try:
+        name, cmd_json = line.split(" ", 2)[0:2]
+    except ValueError:
+        return None
+    try:
+        argv = json.loads(cmd_json)
+    except Exception:
+        return None
+    if not isinstance(argv, list) or not argv:
+        return None
+    prog = str(argv[0]).rsplit("/", 1)[-1]
+    joined = " ".join(str(a) for a in argv)
+    if "serve" in argv or re.search(r"tensorfold(-native)? serve", joined):
+        return parse_cmd(joined)          # a normal serve cmdline inside a container
+    m = re.match(r"^tf-(.+?)-lanes$", prog)
+    if not m:
+        return None
+    tail = [str(a) for a in argv[1:]]
+    # the first six positional args are <ckpt> <cache> <rank> <tp> <master> <port>
+    if len(tail) < 6 or not (tail[2].isdigit() and tail[3].isdigit()):
+        return None
+    rank, tp, master, port = int(tail[2]), int(tail[3]), tail[4], tail[5]
+    model = None
+    mm = re.search(r"model_name=([^,\s]+)|--name[= ]([^\s]+)", joined)
+    if mm:
+        model = mm.group(1) or mm.group(2)
+    return {"engine": "tensorfold", "model": model or m.group(1), "tp": tp,
+            "headless": rank != 0, "cmd_port": port if port.isdigit() else None,
+            "master": f"{master}:{port}" if master else None}
+
+
 def parse_cmd(cmd):
     """engine, model, tp, headless, port(from cmdline) for one server process."""
     eng = ("mtplx" if ("mtplx serve" in cmd or "mtplx.server" in cmd) else
            "vllm" if re.search(r"vllm( serve|\.entrypoints)", cmd) else
            "sglang" if "sglang" in cmd else "llamacpp" if "llama-server" in cmd else
            "tgi" if "text-generation-launcher" in cmd else "ollama" if "ollama" in cmd else
-           "tensorfold" if re.search(r"tensorfold(-native)? serve", cmd) else None)
+           "tensorfold" if re.search(r"tensorfold[^ ]* serve", cmd) else None)
     if not eng:
         return None
     def opt(name, default=None):
         m = re.search(rf"(?:^|\s)--{name}(?:[= ]([^\s]+))?", cmd)
         return (m.group(1) if m and m.group(1) else default) if m else None
     model = opt("served-model-name") or opt("model") or opt("model-path") or opt("hf-repo")
-    if eng == "tensorfold":                      # `tensorfold[-native] serve <path> --name X --tp N --rank R`
+    if eng == "tensorfold":                      # `tensorfold[-suffix] serve <path> --name X --tp N --rank R`
         model = opt("name") or model
     if not model and eng in ("vllm", "tensorfold"):
-        m = re.search(rf"{eng}(?:-native)? serve\s+(\S+)", cmd)
+        m = re.search(rf"{eng}[^ ]* serve\s+(\S+)", cmd)
         model = m.group(1) if m else None
     if model and "/" in model and not model.startswith("http"):
         model = model.rstrip("/").split("/")[-1] if model.count("/") > 1 else model
@@ -222,6 +272,7 @@ def main():
             topo["hosts"][h["name"]] = {"error": str(e)[:100], "servers": []}
             continue
         cmds = [parse_cmd(l[4:].split(" ", 1)[1]) for l in out.splitlines() if l.startswith("CMD ")]
+        cmds += [parse_dcmd(l[5:]) for l in out.splitlines() if l.startswith("DCMD ")]
         cmds = [x for x in cmds if x]
         listen = {int(l.rsplit(":", 1)[1]) for l in out.splitlines() if l.startswith("LISTEN ") and l.rsplit(":", 1)[1].isdigit()}
         ctr_ports = {}
@@ -271,6 +322,9 @@ def main():
                                     **model_info(h["address"], p)})
                     seen_ports.add(p)
         topo["hosts"][h["name"]] = {"servers": servers}
+        # every IPv4 this host holds, so a lane's fabric master address can be traced back to a node
+        ipaddrs = [l.split(" ", 1)[1].strip() for l in out.splitlines() if l.startswith("IPADDR ")]
+        topo["hosts"][h["name"]]["ipaddrs"] = sorted({a for a in ipaddrs if cm._IPV4.match(a)})
         for s_ in servers:
             if s_.get("target"):
                 labels = {"host": h["name"], "engine": s_["engine"], "port": str(s_["port"])}
@@ -288,8 +342,20 @@ def main():
             if s_["role"] == "worker":
                 s_["worker_for"] = heads.get((s_["engine"], s_["model"]))
                 if not s_["worker_for"] and (s_["engine"], s_.get("master")) in by_master:
-                    s_["worker_for"], head = by_master[(s_["engine"], s_["master"])]
+                    s_["worker_for"], head = by_master[(s_["engine"], s_.get("master"))]
                     s_["model"] = head["model"]
+                # a lane names its head by IP:port; when the head serves a different model string
+                # (lane argv says `tf-dsv41-lanes`, the head's --name says the full model) the
+                # master address is the only reliable link, so match it against host addresses
+                if not s_["worker_for"] and s_.get("master"):
+                    mip = s_["master"].rsplit(":", 1)[0]
+                    head_host = next((hn2 for hn2, d2 in topo["hosts"].items()
+                                      if mip in (d2.get("ipaddrs") or [])), None)
+                    for hn2, head2 in serving:
+                        if hn2 == head_host and head2["engine"] == s_["engine"]:
+                            s_["worker_for"] = hn2
+                            s_["model"] = head2["model"]
+                            break
     os.makedirs(os.path.dirname(TOPO), exist_ok=True)
     for path, data in ((TARGETS, targets), (TOPO, topo)):
         tmp = path + ".tmp"

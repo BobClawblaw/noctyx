@@ -2236,10 +2236,20 @@ body.kiosk #desk{padding:0;overflow:hidden} body.kiosk .pbody{padding:0;overflow
 .kiosk-wrap{display:flex;flex-direction:column;gap:calc(18px*var(--kf-h,1));padding:calc(10px*var(--kf-h,1)) calc(8px*var(--kf-h,1));box-sizing:border-box;
   width:100vw;height:100vh;transform-origin:top left}
 html.kiosk-1{--kf-h:.78} html.kiosk-2{--kf-h:.62}
-.ktop{display:flex;align-items:center;gap:calc(22px*var(--kf-h,1));flex-wrap:wrap}
-.kbrand{display:flex;align-items:center;gap:calc(10px*var(--kf-h,1));text-decoration:none;margin-right:auto} .kbrand .mark{width:calc(34px*var(--kf-h,1));height:calc(34px*var(--kf-h,1))} .kbrand .wordmark{font-size:calc(22px*var(--kf-h,1))}
+.ktop{display:flex;align-items:center;gap:calc(18px*var(--kf-h,1));flex-wrap:nowrap;overflow:hidden;width:100%;min-width:0}
+.kpair{flex:0 1 auto;min-width:0}
+.kbrand{display:flex;align-items:center;gap:calc(10px*var(--kf-h,1));text-decoration:none} .kbrand .mark{width:calc(34px*var(--kf-h,1));height:calc(34px*var(--kf-h,1))} .kbrand .wordmark{font-size:calc(22px*var(--kf-h,1))}
 .kbig{display:flex;flex-direction:column;align-items:flex-end} .kbig b{font:800 calc(44px*var(--kf-h,1))/1 var(--mono)} .kbig span,.kclock span{font:calc(11px*var(--kf-h,1)) var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim)}
-.kclock{display:flex;flex-direction:column;align-items:flex-end;padding-left:calc(20px*var(--kf-h,1));border-left:1px solid var(--line)} .kclock b{font:700 calc(44px*var(--kf-h,1))/1 var(--mono)}
+.kclock{display:flex;flex-direction:column;align-items:flex-end;padding-left:calc(20px*var(--kf-h,1));border-left:1px solid var(--line);margin-left:auto;flex:0 0 auto} .kclock b{font:700 calc(44px*var(--kf-h,1))/1 var(--mono)}
+/* header graphs sit directly beside their own number (user, 2026-10-22): graph first, then the
+   number+label it belongs to, so each KPI reads as one unit. Graphs are the flexible part of
+   the row — they give up width before the numbers or the clock are pushed off the screen. */
+.kpair{display:flex;align-items:center;gap:calc(10px*var(--kf-h,1));flex:0 1 auto;min-width:0;overflow:hidden}
+.ktopg{flex:1 1 120px;min-width:60px;max-width:calc(190px*var(--kf-h,1))}
+.ktopg .chart{margin:0}
+.ktopg .ch-h{display:none}
+.ktopg .chart svg{height:44px;width:100%;display:block;border-radius:4px}
+.ktopg .ch-empty{display:none}
 .kslots{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:calc(12px*var(--kf-h,1))}
 .kslot,.knode{background:var(--bg-1);border:1px solid var(--line-soft);border-radius:var(--radius);padding:calc(14px*var(--kf-h,1)) calc(16px*var(--kf-h,1));min-height:0;display:flex;flex-direction:column}
 .kslot.down,.knode.down{border-color:color-mix(in srgb,var(--bad) 55%,var(--line))}
@@ -2267,9 +2277,10 @@ html.kiosk-1{--kf-h:.78} html.kiosk-2{--kf-h:.62}
 .knode .ktrace{flex:1 1 auto;min-height:calc(56px*var(--kf-h,1));margin-top:calc(10px*var(--kf-h,1));position:relative;overflow:hidden}
 .knode .ktrace svg{position:absolute;inset:0}
 .knode .ktrace i{position:absolute;right:calc(4px*var(--kf-h,1));font:600 calc(9.5px*var(--kf-h,1)) var(--sans);letter-spacing:.08em;line-height:1}
-.knode .ktrace i.a{color:var(--accent)} .knode .ktrace i.g{color:var(--ok)}
+.knode .ktrace i.a{color:var(--accent)} .knode .ktrace i.g{color:var(--ok)} .knode .ktrace i.t{color:var(--accent-2)}
 .kspark polyline{fill:none;stroke-width:1.8;vector-effect:non-scaling-stroke;stroke-linejoin:round;opacity:.9}
 .kspark polyline.a{stroke:var(--accent)} .kspark polyline.g{stroke:var(--ok)}
+.kspark polyline.t{stroke:var(--accent-2);stroke-dasharray:3 3;opacity:.85}
 .kspark line.grid{stroke:var(--line-soft);stroke-width:1;vector-effect:non-scaling-stroke}
 .kload{margin-left:auto;font:500 calc(11px*var(--kf-h,1)) var(--sans);color:var(--fg-faint)}
 /* the ticker wraps: every alert is fully readable, nothing cut off (the wall has no pointer,
@@ -3264,17 +3275,26 @@ function kioskTop(M,H,order,I,a,k,pg,pages){
  const byT={};for(const[t,v]of tokSeries)byT[t]=(byT[t]||0)+(+v||0);
  const peak=Object.values(byT).reduce((m,v)=>v>m?v:m,0);
  const gpuW=order.reduce((s,n)=>s+(+(H[n]||{}).gpu_power||0),0);
+ /* fleet GPU-watts history for the header graph: the API's own fleet series when it carries one,
+    else the sum of each node's power sparkline bucketed by timestamp */
+ const gpw=((M.fleet||{}).series||{}).gpu_power||(()=>{const byT={};
+  for(const n of order)for(const[t,v]of (((H[n]||{}).spark||{}).gpu_power||[]))byT[t]=(byT[t]||0)+(+v||0);
+  return Object.entries(byT).map(([t,v])=>[+t,v]).sort((x,y)=>x[0]-y[0])})();
  const act=(a.active||[]).length,crit=(a.active||[]).filter(x=>x.severity=='critical').length;
  const llmN=(I.llm_up!=null&&I.llm_total!=null)?`${Math.round(I.llm_up)}/${Math.round(I.llm_total)}`:null;
  const llmBad=llmN&&I.llm_up<I.llm_total;
  const now=new Date(),tm=now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}).match(/^([\d:.\s]+)(.*)$/)||['',now.toTimeString().slice(0,5),''];
  const dim=pgOn=>k.dense?'':(pgOn?'':' dim'), dn=()=>k.dense?' kdense':'';
  return `<div class=ktop><a class=kbrand href="/"><span class=mark></span><span class=wordmark>Noct<b>yx</b></span></a>
- <div class="kbig${dn()}${pg==0?'':' dim'}" data-k=llm><b data-ghost="${ghost(tps.toFixed(0))}">${tps.toFixed(0)}</b><span>tokens / second</span></div>
- <div class="kbig${dn()}${pg==0?'':' dim'}" data-k=power><b data-ghost="${ghost(Math.round(gpuW))}">${Math.round(gpuW)}</b><span>GPU watts</span></div>
+ <div class="kpair${pg==0?'':' dim'}" data-k=toks>
+  <div class=ktopg>${chart('', Object.entries(tok).map(([m,pts])=>({name:m,pts,cls:'t'})), v=>v.toFixed(0)+' tok/s', {span:'1h'})}</div>
+  <div class="kbig${dn()}"><b data-ghost="${ghost(tps.toFixed(0))}">${tps.toFixed(0)}</b><span>tokens / second</span></div>
+ </div>
+ <div class="kpair${pg==0?'':' dim'}" data-k=watts>
+  <div class=ktopg>${chart('', [{name:'fleet',pts:gpw,cls:'w'}], v=>Math.round(v)+' W', {span:'1h'})}</div>
+  <div class="kbig${dn()}"><b data-ghost="${ghost(Math.round(gpuW))}">${Math.round(gpuW)}</b><span>GPU watts</span></div>
+ </div>
  ${k.dense&&llmN?`<div class="kbig${dn()}${pg==0?'':' dim'}" data-k=ok><b class="${llmBad?'warn':'ok'}" data-ghost="${ghost(llmN)}">${llmN}</b><span>LLM serving</span></div>`:''}
- <div class="kbig${dn()}${pg==2?'':' dim'}" data-k=ok><b class="${I.backups_ok<I.backups_total?'warn':'ok'}" data-ghost="${ghost((I.backups_ok??'?')+'/'+(I.backups_total??'?'))}">${esc(I.backups_ok??'?')}/${esc(I.backups_total??'?')}</b><span>backups on schedule</span></div>
- <div class="kbig${dn()}${pg==1?'':' dim'}" data-k=alert><b class="${crit?'bad':act?'warn':'ok'}" data-ghost="${ghost(act)}">${act}</b><span>alert${act==1?'':'s'}</span></div>
   <div class=kclock><b data-ghost="${ghost(tm[1].trim())}">${esc(tm[1].trim())}${tm[2].trim()?`<small>${esc(tm[2].trim())}</small>`:''}</b><span>${now.toLocaleDateString([], {weekday:'short',month:'short',day:'numeric'})}</span>${pages>1?`<span class=kpg>${pg+1} / ${pages}</span>`:''}</div></div>`}
 /* one node card: metrics, meters, and EVERY serving model with its rate (an idle head-server
    slot no longer masks the model actually running on the node) */
@@ -3282,15 +3302,32 @@ function kioskNode(n,h){const srvs=((h.llm||{}).servers||[]).filter(s=>s.model||
  const mem=h.mem_total?Math.round(100*h.mem_used/h.mem_total):null,up=h.up!==0&&h.up!==false;
  const t=(v,w)=>v==null?'—':`<b class="${v>=w?'bad':v>=w-10?'warn':''}">${fmtT(v)}</b>`;
  const sp=h.spark||{};
+ /* every node now carries its own throughput: the live tok/s for the models it serves plus the
+    last-hour total, and the 30-min generation trace under the GPU/CPU one (user, 2026-10-22). */
+ const gen=srvs.reduce((a,s)=>a+((s.spark&&s.spark.gen_tps&&s.spark.gen_tps.length)?lastV(s.spark.gen_tps):(s.gen_tps||0)),0);
+ const tok1h=srvs.reduce((a,s)=>a+(s.tokens_1h||0),0);
+ const req1h=srvs.reduce((a,s)=>a+(s.requests_1h||0),0);
+ const genspk=srvs.map(s=>s.spark&&s.spark.gen_tps).filter(p=>p&&p.length>1);
+ /* a worker node serves no endpoint of its own: it runs tensor-parallel work for a head, so it
+    has no tok/s of its own to report. Show what it IS doing (worker for X, tp N) rather than a
+    bare dash, which read as "idle" (user, 2026-10-22: worker nodes don't offer toks). */
+ const topo=((h.llm||{}).topology||[]);
+ const wk=topo.find(t=>t.role=='worker');
+ const hasTok=tok1h>0||req1h>0||gen>0;
+ const tpsLine=srvs.length?`<div class=kllm><span class=mut>${esc(srvs.map(s=>s.model||'—').join(', '))}</span><b>${hasTok?gen.toFixed(0):'—'}<small> tok/s</small></b>
+   <span class=mut>${hasTok?`${fmtK(tok1h)} tok · ${Math.round(req1h)} req / 1h`:'no traffic / 1h'}</span></div>`
+   :wk?`<div class=kllm><span class=mut>worker → ${esc(wk.worker_for||'head')}${wk.tp?' · tp '+esc(wk.tp):''}</span><b>—<small> tok/s</small></b>
+     <span class=mut>${esc(wk.model||'tensor-parallel')}</span></div>`
+   :`<div class=kllm><span class=mut>no model served</span><b>—<small> tok/s</small></b><span class=mut>idle</span></div>`;
  /* the 30-min trace fills the tile's middle: a 300x100 user-space box mapped exactly onto the
     measured pixels (none-scaling strokes keep the hairlines crisp); flat lines sit 2px above
     their label so the two never collide. The data window slides one step every tick without the
     box's endpoints moving, so the <svg> carries the window stamp: without it morph() sees an
     identical subtree and never touches the points, and the trace freezes (user, 2026-10-22) */
  const tr=(sp.gpu_util&&sp.gpu_util.length>1)?`<div class=ktrace><svg class=kspark viewBox="0 0 300 100" preserveAspectRatio="none" aria-hidden="true" data-win="${sp.gpu_util[0][0]}|${sp.gpu_util.at(-1)[0]}">
-   <line class=grid x1=0 y1=48.3 x2=300 y2=48.3/><line class=grid x1=0 y1=2.3 x2=300 y2=2.3/>${
-   _lines([{pts:sp.gpu_util,cls:'a'},{pts:sp.cpu,cls:'g'}],300,96,100)}</svg>
-  <i class=a style="top:calc(2px + .3em)">GPU</i><i class=g style="bottom:2px">CPU</i></div>`:'';
+   <line class="grid" x1="0" y1="48.3" x2="300" y2="48.3"/><line class="grid" x1="0" y1="2.3" x2="300" y2="2.3"/>${
+   _lines([{pts:sp.gpu_util,cls:'a'},{pts:sp.cpu,cls:'g'},...genspk.map(p=>({pts:p,cls:'t'}))],300,96,100)}</svg>
+  <i class=a style="top:calc(2px + .3em)">GPU</i><i class=g style="bottom:2px">CPU</i>${genspk.length?'<i class=t style="bottom:calc(2px + 1.4em)">TOK</i>':''}</div>`:'';
  return `<div class="knode ${up?'':'down'}"><div class=kh><span class="dot ${up?'ok':'bad'}"></span><b>${esc(n)}</b>
    ${h.load1!=null?`<span class=kload>load ${(+h.load1).toFixed(1)}</span>`:''}</div>
   <div class=kgrid><span>GPU</span><b>${h.gpu_util!=null?Math.round(h.gpu_util)+'%':'—'}</b><span>GPU temp</span>${t(h.gpu_temp,85)}
@@ -3299,8 +3336,7 @@ function kioskNode(n,h){const srvs=((h.llm||{}).servers||[]).filter(s=>s.model||
   ${tr}
   <div class=kmeters><span>GPU</span>${bar(h.gpu_util,true,'gpu')}<span>CPU</span>${bar(h.cpu,true,'cpu')}
    <span>MEM</span>${bar(mem,true,'mem')}<span>TEMP</span>${bar(h.gpu_temp!=null?h.gpu_temp/95*100:0,false,'temp')}</div>
-  ${srvs.map(s=>{const g=s.spark?lastV(s.spark.gen_tps):(s.gen_tps!=null?s.gen_tps:null);
-   return `<div class=kllm><span class=mut>${esc(s.model||'—')}</span><b>${g!=null?g.toFixed(0):'—'}<small> tok/s</small></b></div>`}).join('')}</div>`}
+  ${tpsLine}</div>`}
 /* the live alert feed (ticker: 1): one line per active alert, colour by severity */
 function kioskTicker(a){const L=(a.active||[]).slice().sort((x,y)=>({critical:0,warning:1,info:2})[x.severity]-({critical:0,warning:1,info:2})[y.severity]);
  if(!L.length)return '<div class="kticker kempty"><b class=ok>✓</b><span class=mut>no active alerts</span></div>';
@@ -3330,9 +3366,9 @@ function kioskRepaint(){const p=PANELS.find(x=>x.id=='kiosk');if(p&&p._data!==un
 function kioskDraw(d,done){
  const M=d.m,H=M.hosts||{},order=M.order||Object.keys(H),I=(M.fleet||{}).infra||{};
  const k=kioskCfg(),pages=kioskPages();let pg=Math.min(kioskPage(),pages-1);
- const slots=Object.entries((d.r||{}).slots||{}).map(([n,s])=>{const L=s.live||{};
-  return `<div class="kslot ${L.ok?'':'down'}"><div class=kh><span class="dot ${L.ok?'ok':'bad'}"></span><b>${esc(n)}</b><span class=mut>${esc(s.head)}${s.worker?' + '+esc(s.worker):''}</span></div>
-   <div class=km>${L.ok?esc((L.models||[]).join(', ')):'not serving'}</div>${L.connections!=null?`<div class=mut>${esc(L.connections)} connected</div>`:''}</div>`}).join('');
+ /* the recipe/slot row is gone (user, 2026-10-22): the wall is nodes only, and every node
+    carries its own trace + throughput. Slot state still drives the per-node LLM readout via
+    H[n].llm below, so nothing is lost — it just stops taking a third of the wall. */
  const top=kioskTop(M,H,order,I,d.a||{},k,pg,pages);
  const ticker=k.ticker>0?kioskTicker(d.a||{}):'';
  let main='',extra=null;
@@ -3340,7 +3376,7 @@ function kioskDraw(d,done){
  else if(pg==2&&k.backups>1){extra=kioskBackupsCached().then(html=>{const el=document.getElementById('kdetail');if(el)el.innerHTML=html;kioskFit()});
   main='<div class=kdetail id=kdetail></div>'}
  else{const nodes=order.map(n=>kioskNode(n,H[n]||{})).join('');
-  main=`${slots?`<div class=kslots>${slots}</div>`:''}<div class=knodes>${nodes}</div>`}
+  main=`<div class=knodes>${nodes}</div>`}
  const out=`<div class="kiosk-wrap${k.fit=='scroll'?' kfit-scroll':''}" data-page="${pg}" data-pages="${pages}">${top}${ticker}${main}</div>`;
  if(done)done();
  if(extra)extra.catch(()=>{});
