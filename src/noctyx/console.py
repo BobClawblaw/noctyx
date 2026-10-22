@@ -2099,7 +2099,7 @@ const NXT=(()=>{
  /* Phosphor effects: all static layers or compositor-only animation (transform, opacity) */
  const FXDEF={glow:'normal',scan:'kiosk',vignette:'on',grain:'off',beam:'off',flicker:'off',fringe:'off'};
  const GLOW={off:0,soft:.5,normal:1,bright:1.6};
- const DEF={mode:'dark',theme:'noctyx',tunit:'F',fx:FXDEF,kiosk:{alerts:1,ticker:1,backups:1,rotation:false,fit:'shrink',dense:true},custom:{bg:'#0b0e1a',panel:'#121629',text:'#e2e8f6',muted:'#97a3c2',accent:'#3fe6ff',line:'#242a47',ok:'#2ecc8f',warn:'#f0b429',bad:'#ef5a5a'}};
+ const DEF={mode:'dark',theme:'noctyx',tunit:'F',fx:FXDEF,kiosk:{alerts:1,ticker:1,backups:1,rotation:false,fit:'scroll',dense:true},custom:{bg:'#0b0e1a',panel:'#121629',text:'#e2e8f6',muted:'#97a3c2',accent:'#3fe6ff',line:'#242a47',ok:'#2ecc8f',warn:'#f0b429',bad:'#ef5a5a'}};
  function derive(b){const f={...b},dark=lum(f.bg)<.4;f.scheme=dark?'dark':'light';
   f.bg0??=mix(f.bg,dark?'#000000':'#ffffff',.25);f.bg2??=mix(f.panel,f.text,dark?.04:.03);f.bg3??=mix(f.panel,f.text,dark?.09:.07);
   f.lineSoft??=mix(f.line,f.bg,.4);f.faint??=mix(f.muted,f.bg,.3);f.accentDim??=mix(f.accent,f.bg,.35);f.accent2??=f.accent;
@@ -2274,21 +2274,27 @@ html.kiosk-1{--kf-h:.78} html.kiosk-2{--kf-h:.62}
  padding:calc(7px*var(--kf-h,1)) calc(10px*var(--kf-h,1));border:1px solid var(--line-soft);border-radius:var(--radius);background:var(--bg-1);
  font:calc(13px*var(--kf-h,1)) var(--sans)}
 .kticker.kempty{gap:8px}
-.kticker .kc{display:inline-flex;align-items:center;gap:calc(6px*var(--kf-h,1));max-width:min(60ch,calc(46vw*var(--kf-h,1)));overflow:hidden;text-overflow:ellipsis;
+ /* the ticker scrolls horizontally; a chip shorter than its text must still show an ellipsis
+    (shrink-to-fit would otherwise clip mid-word: the alerts page holds the full text) */
+.kticker .kc{display:inline-flex;align-items:center;gap:calc(6px*var(--kf-h,1));flex:0 1 auto;min-width:0;
  padding:calc(3px*var(--kf-h,1)) calc(9px*var(--kf-h,1));border:1px solid var(--line-soft);border-radius:99px;background:var(--bg-2)}
-.kticker .kc b{font:700 calc(12px*var(--kf-h,1)) var(--mono)}
+.kticker .kc b{font:700 calc(12px*var(--kf-h,1)) var(--mono);flex:0 0 auto}
+.kticker .kt{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .kticker .kc.critical{border-color:color-mix(in srgb,var(--bad) 55%,var(--line));color:var(--bad)}
 .kticker .kc.warning{border-color:color-mix(in srgb,var(--warn) 55%,var(--line));color:var(--warn)}
-.kticker .dot.info{background:var(--info);box-shadow:0 0 6px color-mix(in srgb,var(--info) 60%,transparent)}
-.kdetail{flex:1 1 auto;min-height:0;overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(calc(340px*var(--kf-h,1)),1fr));gap:calc(12px*var(--kf-h,1));align-content:start}
+.dot.warn{background:var(--warn);box-shadow:0 0 8px color-mix(in srgb,var(--warn) 70%,transparent)}
+.dot.info{background:var(--info);box-shadow:0 0 8px color-mix(in srgb,var(--info) 60%,transparent)}
+.kdetail{flex:0 1 auto;min-height:0;overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(calc(340px*var(--kf-h,1)),1fr));gap:calc(12px*var(--kf-h,1));align-content:start}
 .kcard{background:var(--bg-1);border:1px solid var(--line-soft);border-radius:var(--radius);padding:calc(12px*var(--kf-h,1)) calc(14px*var(--kf-h,1));display:flex;flex-direction:column;gap:calc(6px*var(--kf-h,1))}
 .kcard.critical{border-color:color-mix(in srgb,var(--bad) 55%,var(--line))} .kcard.warning{border-color:color-mix(in srgb,var(--warn) 55%,var(--line))}
 .ksum{font:calc(13px*var(--kf-h,1))/1.45 var(--sans);color:var(--fg-dim)}
 .ktri{font:calc(12px*var(--kf-h,1))/1.45 var(--sans);color:var(--fg-faint);border-top:1px solid var(--line-soft);padding-top:calc(6px*var(--kf-h,1));
  display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
-/* fit:'scroll': natural rows, the wrap scrolls instead of the type shrinking */
-.kiosk-wrap.kfit-scroll{overflow-y:auto;overscroll-behavior:contain}
-.kiosk-wrap.kfit-scroll .knodes{flex:0 0 auto;grid-auto-rows:minmax(0,auto)}
+/* fit:'scroll': natural rows, the grid scrolls inside its own box; the wrap never overflows
+   (body overflow:hidden would make the rest unreachable on the wall) */
+.kiosk-wrap.kfit-scroll{overflow:hidden}
+.kiosk-wrap.kfit-scroll .knodes{flex:1 1 auto;overflow-y:auto;overscroll-behavior:contain;grid-auto-rows:minmax(0,auto)}
+.kiosk-wrap.kfit-scroll .kdetail{flex:1 1 auto}
 .kiosk-wrap.kfit-scroll .knode{min-height:calc(170px*var(--kf-h,1))}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden;background:var(--bg-0)}
 .seg button{background:none;border:0;border-right:1px solid var(--line);color:var(--fg-dim);font:600 11.5px var(--sans);padding:6px 12px;cursor:pointer}
@@ -3041,7 +3047,10 @@ if(VIEW=='kiosk'){
 function kioskArm(){
  if(VIEW!='kiosk'||kioskArm.on)return;
  const k=kioskCfg();
- if(!k.rotation||k.fit=='scroll')return;       /* a scrolling kiosk shows everything: no paging */
+ /* the wall shows one display and stays on it (operator, 2026-10-22): rotation alternates
+    views only when this browser asks for it explicitly with ?rotation=1 in the URL — a
+    site setting alone can never make the wall page through screens */
+ if(!new URLSearchParams(location.search).has('rotation')||new URLSearchParams(location.search).has('page')||!k.rotation||k.fit=='scroll')return;
  kioskArm.on=true;
  setInterval(()=>{if(kioskPages()<2)return;kioskPg=(kioskPg+1)%kioskPages();kioskRepaint();},20000);}
 /* /cluster: only the systems. Both panels read the same fleet metrics call. */
@@ -3146,7 +3155,7 @@ function kioskGroup(s){const k=s.kiosk||NXT.DEF.kiosk,
  ${row('alerts','Alerts',lv,'Off: the count only. On: a one-line feed under the header. Detail: a full page of summaries and triage.')}
  ${row('backups','Backups',lv,'Off: the ratio only. On: the count. Detail: a page of per-host last run, next due, window.')}
  ${row('ticker','Alert ticker',[['0','Off'],['1','On']],'The scrolling feed of active alerts on the nodes page.')}
- ${row('rotation','Rotation',[['false','Off'],['true','On']],'Page through nodes → alerts → backups every 20 seconds.')}
+ ${row('rotation','Rotation',[['false','Off'],['true','On']],'Page through nodes → alerts → backups every 20 seconds. Only takes effect in a browser whose URL asks for it (?rotation=1): the wall never changes views on its own.')}
  ${row('dense','Dense header',[['false','Off'],['true','On']],'Five fleet numbers on the header line (adds LLMs serving); off keeps four with bigger type.')}
  ${row('fit','Fit',[['shrink','Shrink'],['scroll','Scroll']],'Shrink: everything on one screen, the type gets small (the classic kiosk). Scroll: full-size type, the grid scrolls when it overflows.')}</div>`}
 function setCustom(k,v){NXT.save({theme:'custom',custom:{[k]:v}});clearTimeout(setCustom._p);setCustom._p=setTimeout(pushAccount,600);
@@ -3266,7 +3275,8 @@ function kioskNode(n,h){const srvs=((h.llm||{}).servers||[]).filter(s=>s.model||
 /* the live alert feed (ticker: 1): one line per active alert, colour by severity */
 function kioskTicker(a){const L=(a.active||[]).slice().sort((x,y)=>({critical:0,warning:1,info:2})[x.severity]-({critical:0,warning:1,info:2})[y.severity]);
  if(!L.length)return '<div class="kticker kempty"><b class=ok>✓</b><span class=mut>no active alerts</span></div>';
- return `<div class=kticker>${L.map(x=>`<span class="kc ${x.severity}"><i class="dot ${x.severity=='critical'?'bad':x.severity=='warning'?'warn':'info'}"></i><b>${esc(x.host||'fleet')}</b> ${esc(x.summary||x.name)}</span>`).join('')}</div>`}
+ const clip=s=>String(s).replace(/\s*\(?sudo[^\n]*$/,'').replace(/\s*—\s*$/, '').trim();
+ return `<div class=kticker>${L.map(x=>{const txt=clip(x.summary||x.name);return `<span class="kc ${x.severity}" title="${esc(x.summary||x.name)}"><i class="dot ${x.severity=='critical'?'bad':x.severity=='warning'?'warn':'info'}"></i><b>${esc(x.host||'fleet')}</b><span class=kt>${esc(txt)}</span></span>`}).join('')}</div>`}
 /* the alerts page (alerts: 2): name + host + since + summary + the LLM triage, newest-severity first */
 function kioskAlerts(a){const L=(a.active||[]).slice().sort((x,y)=>({critical:0,warning:1,info:2})[x.severity]-({critical:0,warning:1,info:2})[y.severity]);
  if(!L.length)return '<div class=kdetail><div class="kticker kempty"><b class=ok>✓</b><span class=mut>no active alerts</span></div></div>';
@@ -3611,31 +3621,21 @@ _fitPend=true;
    painted the morphed tree compares a half-updated layout and writes back a different answer
    every few ticks — a 4px reflow of the whole wall, which reads as a flash. One settled paint
    of the new markup is enough; two rAFs guarantee the frame between them gets painted. */
-requestAnimationFrame(()=>requestAnimationFrame(()=>{setTimeout(()=>{_fitPend=false;kioskFitNow()},32)}))}
+requestAnimationFrame(()=>requestAnimationFrame(()=>{setTimeout(()=>{_fitPend=false;kioskFitNow();
+ /* one follow-up pass in the same task settles the shrink↔scroll feedback: a fit that shrinks
+    type also shrinks the content it then has to fit, so a single solve can land short */
+ kioskFitNow()},32)}))}
 function kioskFitNow(){
  const wrap=document.querySelector('.kiosk-wrap');if(!wrap)return;
  const H=wrap.clientHeight,W=wrap.clientWidth;
  wrap.style.transform='';
- /* fit:'scroll' (site default or ?fit=scroll): the type never shrinks — rows keep their natural
-    height and whatever doesn't fit scrolls. With rotation on, the pager takes precedence:
-    one page per screen still needs shrinking to be legible from the wall. */
- if(kioskCfg().fit=='scroll'&&!kioskCfg().rotation){kfStyle(0);
-  wrap.classList.add('kfit-scroll');
-  const det=wrap.querySelector('.kdetail');
-  if(det)det.style.maxHeight='0px';           /* the wrap is a flex column: measure after layout */
-  requestAnimationFrame(()=>{const nodes=wrap.querySelector('.knodes');
-   if(det)det.style.maxHeight='';
-   if(nodes&&!nodes.style.gridAutoRows){      /* natural rows: the grid scrolls inside the wrap */
-    nodes.style.gridAutoRows='minmax(0,auto)'}});
-  return}
+ if(kioskCfg().fit=='scroll'&&!kioskCfg().rotation){kfStyle(0);return}
  const nodes=wrap.querySelector('.knodes');if(!nodes||!nodes.children.length){
-  /* no node grid: a detail page (alerts/backups) — cap it to the room under the header so the
-     wrap never overflows the screen, and let it scroll if the list is longer */
+  /* no node grid: a detail page (alerts/backups) in shrink mode — fill exactly the room the
+     wrap has left (header, ticker and gaps already occupy their height in the 100vh column) */
   const det=wrap.querySelector('.kdetail');
   if(det){kfStyle(0);
-   const top=wrap.querySelector('.ktop'),tk=wrap.querySelector('.kticker');
-   const left=H-(top?top.offsetHeight:0)-(tk?tk.offsetHeight:0)-Math.ceil(36*(document.documentElement.classList.contains('kiosk-2')?KF[2]:1));
-   det.style.maxHeight=Math.max(120,left)+'px'}
+   det.style.maxHeight=Math.max(120,wrap.clientHeight-det.offsetTop-Math.ceil(10*(document.documentElement.classList.contains('kiosk-2')?KF[2]:1)))+'px'}
   return}
  const n=nodes.children.length;if(!n){kfStyle(0);return}
  /* measure in a hidden clone of the whole wrap: the top row and the slot cards above the grid
