@@ -2099,7 +2099,7 @@ const NXT=(()=>{
  /* Phosphor effects: all static layers or compositor-only animation (transform, opacity) */
  const FXDEF={glow:'normal',scan:'kiosk',vignette:'on',grain:'off',beam:'off',flicker:'off',fringe:'off'};
  const GLOW={off:0,soft:.5,normal:1,bright:1.6};
- const DEF={mode:'dark',theme:'noctyx',tunit:'F',fx:FXDEF,custom:{bg:'#0b0e1a',panel:'#121629',text:'#e2e8f6',muted:'#97a3c2',accent:'#3fe6ff',line:'#242a47',ok:'#2ecc8f',warn:'#f0b429',bad:'#ef5a5a'}};
+ const DEF={mode:'dark',theme:'noctyx',tunit:'F',fx:FXDEF,kiosk:{alerts:1,ticker:1,backups:1,rotation:false,fit:'shrink'},custom:{bg:'#0b0e1a',panel:'#121629',text:'#e2e8f6',muted:'#97a3c2',accent:'#3fe6ff',line:'#242a47',ok:'#2ecc8f',warn:'#f0b429',bad:'#ef5a5a'}};
  function derive(b){const f={...b},dark=lum(f.bg)<.4;f.scheme=dark?'dark':'light';
   f.bg0??=mix(f.bg,dark?'#000000':'#ffffff',.25);f.bg2??=mix(f.panel,f.text,dark?.04:.03);f.bg3??=mix(f.panel,f.text,dark?.09:.07);
   f.lineSoft??=mix(f.line,f.bg,.4);f.faint??=mix(f.muted,f.bg,.3);f.accentDim??=mix(f.accent,f.bg,.35);f.accent2??=f.accent;
@@ -2109,7 +2109,7 @@ const NXT=(()=>{
  const LS='nx_settings_v1',LSS='nx_site_settings_v1';
  const read=k=>{try{return JSON.parse(localStorage.getItem(k)||'null')}catch(e){return null}};
  const local=()=>read(LS)||{},site=()=>read(LSS)||{};
- const eff=()=>{const s=site(),l=local();return{...DEF,...s,...l,custom:{...DEF.custom,...(s.custom||{}),...(l.custom||{})},fx:{...FXDEF,...(s.fx||{}),...(l.fx||{})}}};
+ const eff=()=>{const s=site(),l=local();return{...DEF,...s,...l,custom:{...DEF.custom,...(s.custom||{}),...(l.custom||{})},fx:{...FXDEF,...(s.fx||{}),...(l.fx||{})},kiosk:{...DEF.kiosk,...(s.kiosk||{}),...(l.kiosk||{})}}};
  const light=()=>{try{return matchMedia('(prefers-color-scheme: light)').matches}catch(e){return false}};
  function face(s){s=s||eff();if(s.theme=='custom')return{id:'custom',...derive(s.custom)};
   const p=PRESETS[s.theme]||PRESETS.noctyx,sc=s.mode=='system'?(light()?'light':'dark'):s.mode=='light'?'light':'dark';
@@ -2124,7 +2124,7 @@ const NXT=(()=>{
   for(const[k,v]of Object.entries(FXDEF))r.dataset['fx'+k[0].toUpperCase()+k.slice(1)]=fx[k]??v;
   if(f.style)r.style.setProperty('--gl',String((GLOW[fx.glow]??1)*f.glowScale));else r.style.removeProperty('--gl');
   r.style.setProperty('color-scheme',f.scheme);r.dataset.theme=f.scheme;r.dataset.palette=f.id;r.dataset.style=f.style||'';return f}
- function save(patch){const l={...local(),...patch};if(patch.custom)l.custom={...(local().custom||{}),...patch.custom};if(patch.fx)l.fx={...(local().fx||{}),...patch.fx};
+ function save(patch){const l={...local(),...patch};if(patch.custom)l.custom={...(local().custom||{}),...patch.custom};if(patch.fx)l.fx={...(local().fx||{}),...patch.fx};if(patch.kiosk)l.kiosk={...(local().kiosk||{}),...patch.kiosk};
   try{localStorage.setItem(LS,JSON.stringify(l))}catch(e){};apply();return l}
  function clearLocal(){try{localStorage.removeItem(LS)}catch(e){};apply()}
  function setSite(s){try{localStorage.setItem(LSS,JSON.stringify(s||{}))}catch(e){};apply()}
@@ -2252,6 +2252,29 @@ html.kiosk-1{--kf-h:.78} html.kiosk-2{--kf-h:.62}
 .kgrid span{color:var(--fg-dim)} .kgrid b{font:700 calc(20px*var(--kf-h,1)) var(--mono)}
 .kllm{display:flex;justify-content:space-between;align-items:baseline;margin-top:auto;padding-top:calc(8px*var(--kf-h,1));border-top:1px solid var(--line-soft);font:calc(12px*var(--kf-h,1)) var(--mono);gap:calc(8px*var(--kf-h,1))}
 .kllm .mut{overflow:hidden;text-overflow:ellipsis;white-space:nowrap} .kllm b{font:800 calc(22px*var(--kf-h,1)) var(--mono);color:var(--accent);white-space:nowrap;flex:0 0 auto} .kllm small{font:calc(11px*var(--kf-h,1)) var(--sans);color:var(--fg-dim)}
+/* kiosk extras: the alert ticker, the detail pages (alerts / backups), and fit:'scroll' */
+.kpg{font:600 calc(11px*var(--kf-h,1)) var(--mono);color:var(--accent);margin-top:calc(4px*var(--kf-h,1))}
+.kbig.dim{opacity:.45}
+.kticker{display:flex;gap:calc(8px*var(--kf-h,1));align-items:center;overflow-x:auto;overflow-y:hidden;white-space:nowrap;flex:0 1 auto;min-height:0;
+ padding:calc(7px*var(--kf-h,1)) calc(10px*var(--kf-h,1));border:1px solid var(--line-soft);border-radius:var(--radius);background:var(--bg-1);
+ font:calc(13px*var(--kf-h,1)) var(--sans)}
+.kticker.kempty{gap:8px}
+.kticker .kc{display:inline-flex;align-items:center;gap:calc(6px*var(--kf-h,1));max-width:min(60ch,calc(46vw*var(--kf-h,1)));overflow:hidden;text-overflow:ellipsis;
+ padding:calc(3px*var(--kf-h,1)) calc(9px*var(--kf-h,1));border:1px solid var(--line-soft);border-radius:99px;background:var(--bg-2)}
+.kticker .kc b{font:700 calc(12px*var(--kf-h,1)) var(--mono)}
+.kticker .kc.critical{border-color:color-mix(in srgb,var(--bad) 55%,var(--line));color:var(--bad)}
+.kticker .kc.warning{border-color:color-mix(in srgb,var(--warn) 55%,var(--line));color:var(--warn)}
+.kticker .dot.info{background:var(--info);box-shadow:0 0 6px color-mix(in srgb,var(--info) 60%,transparent)}
+.kdetail{flex:1 1 auto;min-height:0;overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(calc(340px*var(--kf-h,1)),1fr));gap:calc(12px*var(--kf-h,1));align-content:start}
+.kcard{background:var(--bg-1);border:1px solid var(--line-soft);border-radius:var(--radius);padding:calc(12px*var(--kf-h,1)) calc(14px*var(--kf-h,1));display:flex;flex-direction:column;gap:calc(6px*var(--kf-h,1))}
+.kcard.critical{border-color:color-mix(in srgb,var(--bad) 55%,var(--line))} .kcard.warning{border-color:color-mix(in srgb,var(--warn) 55%,var(--line))}
+.ksum{font:calc(13px*var(--kf-h,1))/1.45 var(--sans);color:var(--fg-dim)}
+.ktri{font:calc(12px*var(--kf-h,1))/1.45 var(--sans);color:var(--fg-faint);border-top:1px solid var(--line-soft);padding-top:calc(6px*var(--kf-h,1));
+ display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+/* fit:'scroll': natural rows, the wrap scrolls instead of the type shrinking */
+.kiosk-wrap.kfit-scroll{overflow-y:auto;overscroll-behavior:contain}
+.kiosk-wrap.kfit-scroll .knodes{flex:0 0 auto;grid-auto-rows:minmax(0,auto)}
+.kiosk-wrap.kfit-scroll .knode{min-height:calc(170px*var(--kf-h,1))}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden;background:var(--bg-0)}
 .seg button{background:none;border:0;border-right:1px solid var(--line);color:var(--fg-dim);font:600 11.5px var(--sans);padding:6px 12px;cursor:pointer}
 .seg button{white-space:nowrap}
@@ -2454,8 +2477,11 @@ input.sw:checked{background:var(--accent);border-color:var(--accent)} input.sw:c
 .key{display:inline-block;width:10px;height:2px;border-radius:1px;background:var(--info);vertical-align:middle;margin-right:5px}
 .tip{position:fixed;z-index:1000;background:var(--bg-2);border:1px solid var(--line);border-radius:6px;padding:6px 9px;font:11px var(--mono);box-shadow:var(--shadow);pointer-events:none;min-width:120px}
 .tip-t{color:var(--fg-faint);margin-bottom:3px} .tip-r{display:flex;gap:6px;align-items:center;white-space:nowrap} .tip-r b{color:var(--fg);font-variant-numeric:tabular-nums} .tip-r span{color:var(--fg-dim)}
-/* dim only when a refresh is slow (>1.2 s) or failed — never on the routine 15 s tick */
+/* dim only when a refresh is slow (>1.2 s) or failed — never on the routine 15 s tick.
+   The wall never dims for a fetch (operator, 2026-10-22: no flash, ever): on /kiosk the stale
+   flag marks the status pill only, the screen itself holds its last good frame */
 .pbody{transition:opacity .3s} .pbody.stale{opacity:.65}
+body.kiosk .pbody{transition:none} body.kiosk .pbody.stale{opacity:1}
 /* categorical series palette: blue, orange, green, magenta, cyan, yellow, red, violet */
 :root{--c0:#3987e5;--c1:#d95926;--c2:#199e70;--c3:#c98500;--c4:#d55181;--c5:#008300;--c6:#9085e9;--c7:#e66767}
 .spk polyline.c0,.chart .ln.c0{stroke:var(--c0)} .chart .wash.c0{fill:var(--c0)} .chart .dot.c0{fill:var(--c0)} .key.c0{background:var(--c0)}
@@ -2996,6 +3022,13 @@ if(VIEW=='kiosk'){
    .then(([m,r,o,a])=>({m,r,o,a}))});
  document.body.classList.add('kiosk');document.getElementById('desk').classList.add('stack');
 }
+/* rotation mode: the pager is armed after buildPanels() creates #b-kiosk (see kioskArm) */
+function kioskArm(){
+ if(VIEW!='kiosk'||kioskArm.on)return;
+ const k=kioskCfg();
+ if(!k.rotation||k.fit=='scroll')return;       /* a scrolling kiosk shows everything: no paging */
+ kioskArm.on=true;
+ setInterval(()=>{if(kioskPages()<2)return;kioskPg=(kioskPg+1)%kioskPages();kioskRepaint();},20000);}
 /* /cluster: only the systems. Both panels read the same fleet metrics call. */
 if(VIEW=='cluster'){
  PANELS.splice(0,PANELS.length,
@@ -3070,6 +3103,7 @@ function setRender(){
   <div class=setrow><label>Theme</label><div class=tcards>${cards}</div><div class=hint>Each has a light and a dark face; the mode picks which. Custom uses the nine colours below.</div></div>
   <div class="setrow${s.theme=='custom'?'':' dim'}"><label>Custom colours</label><div class=cpick>${picks}</div><div class=hint>Only used by the Custom theme. Its mode comes from the background you pick.</div></div></div>
  ${fxGroup(s)}
+ ${kioskGroup(s)}
  <div class=setgrp><h3>Units</h3>
   <div class=setrow><label>Temperature</label>${segH(TU,[['F','°F'],['C','°C']],'setTU')}<div class=hint>Readings and alert thresholds stay in °C underneath; only the display converts.</div></div></div>
  <div class=setgrp><h3>Layout</h3>
@@ -3088,11 +3122,22 @@ function fxGroup(s){const on=NXT.face().style=='phosphor',fx=s.fx||NXT.FXDEF,
   ${row('beam','Beam sweep',oo,'A soft band of light that rolls down the screen every few seconds.')}
   ${row('flicker','Flicker',oo,'A barely-there phosphor flicker. Both moving effects stop when the system asks for reduced motion.')}</div>`}
 function setTheme(id){NXT.save({theme:id});pushAccount();setRender()}
+function setKiosk(k,v){const val=(k=='rotation')?v=='true':(k=='fit'?v:+v);NXT.save({kiosk:{[k]:val}});pushAccount();setRender();
+ if(VIEW=='kiosk'){kioskPg=0;const p=PANELS.find(x=>x.id=='kiosk');if(p&&p._data!==undefined)repaint('kiosk',p._data)}}
+function kioskGroup(s){const k=s.kiosk||NXT.DEF.kiosk,
+ row=(kk,lab,opts,hint)=>`<div class=setrow><label>${lab}</label><div class=seg>${opts.map(([v,l])=>`<button type=button class=\"${String(k[kk])==String(v)?'on':''}\" onclick=\"setKiosk('${kk}','${v}')\">${l}</button>`).join('')}</div><div class=hint>${hint}</div></div>`,
+ lv=[['0','Off'],['1','On'],['2','Detail']];
+ return `<div class=setgrp><h3>Kiosk</h3><p class=gnote>How much the wall display (<code>/kiosk</code>) shows. Any browser can also override this with URL flags: <code>?page=1</code>, <code>?alerts=2</code>, <code>?rotation=1</code>, <code>?fit=scroll</code>.</p>
+ ${row('alerts','Alerts',lv,'Off: the count only. On: a one-line feed under the header. Detail: a full page of summaries and triage.')}
+ ${row('backups','Backups',lv,'Off: the ratio only. On: the count. Detail: a page of per-host last run, next due, window.')}
+ ${row('ticker','Alert ticker',[['0','Off'],['1','On']],'The scrolling feed of active alerts on the nodes page.')}
+ ${row('rotation','Rotation',[['false','Off'],['true','On']],'Page through nodes → alerts → backups every 20 seconds.')}
+ ${row('fit','Fit',[['shrink','Shrink'],['scroll','Scroll']],'Shrink: everything on one screen, the type gets small (the classic kiosk). Scroll: full-size type, the grid scrolls when it overflows.')}</div>`}
 function setCustom(k,v){NXT.save({theme:'custom',custom:{[k]:v}});clearTimeout(setCustom._p);setCustom._p=setTimeout(pushAccount,600);
  /* re-render only the cards/swatches when the pickers settle: keep the open picker */
  clearTimeout(setCustom._t);setCustom._t=setTimeout(setRender,400)}
 function setReset(){NXT.clearLocal();TU=NXT.eff().tunit=='C'?'C':'F';PANELS.forEach(p=>{if(p._data!==undefined&&p.id!='config')repaint(p.id,p._data)});setRender()}
-async function setSaveSite(){const s=NXT.eff(),body={mode:s.mode,theme:s.theme,tunit:TU,custom:s.custom,fx:s.fx};
+async function setSaveSite(){const s=NXT.eff(),body={mode:s.mode,theme:s.theme,tunit:TU,custom:s.custom,fx:s.fx,kiosk:s.kiosk};
  const m=$('setmsg');if(m)m.textContent='saving as the site default…';
  const r=await act('setConsoleDefaults',{settings:body});
  if(m)m.textContent=r&&r.error?'✗ '+r.error:'✓ saved: browsers without their own settings use these';setTimeout(loadSiteSettings,2500)}
@@ -3141,35 +3186,95 @@ function copyAddr(btn,a){const ok=()=>{btn.nextElementSibling.textContent='copie
 
 /* ── Kiosk ── */
 const lastV=s=>Array.isArray(s)&&s.length?+s[s.length-1][1]||0:0;
+/* the identity of the kiosk's current screen (fit hysteresis compares it): page + the
+   settings that change how much room the grid gets. */
+function pgKey(){const k=kioskCfg();return[kioskPage(),!!k.ticker,k.rotation?'r':'-',k.fit].join('/')}
+/* the kiosk's info level: site default (console › settings › Kiosk), overridable per browser by
+   localStorage and by the URL. ?alerts= ?ticker= ?backups= (0 off, 1 line, 2 detail),
+   ?rotation=1 pages through views every 20 s, ?page=n pins one view (0 nodes · 1 alerts ·
+   2 backups; views beyond the first only exist as their detail level allows). */
+let kioskPg=0;
+const kioskCfg=()=>{const q=new URLSearchParams(location.search),k={...NXT.eff().kiosk};
+ for(const p of['alerts','ticker','backups']){const v=+q.get(p);if(q.get(p)!=null&&!isNaN(v))k[p]=v}
+ if(q.get('rotation')!=null)k.rotation=q.get('rotation')!='0';
+ /* extra pages or a rotation must fit one screen — shrink, even if the site prefers scroll */
+ if(['alerts','backups','ticker','rotation'].some(p=>q.get(p)!=null)||k.rotation)k.fit='shrink';
+ if(q.get('fit')=='scroll'||q.get('fit')=='shrink')k.fit=q.get('fit');
+ return k};
+const kioskPages=()=>{const k=kioskCfg();return 1+(k.alerts>0?1:0)+(k.backups>0?1:0)};
+const kioskPage=()=>{const q=new URLSearchParams(location.search);
+ if(q.get('page')!=null)return Math.max(0,Math.min(kioskPages()-1,+q.get('page')||0));
+ return kioskPg%kioskPages()};
+/* the header row: brand + four big numbers + clock. a=alerts, k=kiosk settings */
+function kioskTop(M,H,order,I,a,k,pg,pages){
+ const tok=((M.fleet||{}).series||{}).tokens||{};
+ const tps=Object.values(tok).reduce((s,x)=>s+lastV(x),0);
+ const gpuW=order.reduce((s,n)=>s+(+(H[n]||{}).gpu_power||0),0);
+ const act=(a.active||[]).length,crit=(a.active||[]).filter(x=>x.severity=='critical').length;
+ const now=new Date(),tm=now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}).match(/^([\d:.\s]+)(.*)$/)||['',now.toTimeString().slice(0,5),''];
+ return `<div class=ktop><a class=kbrand href="/"><span class=mark></span><span class=wordmark>Noct<b>yx</b></span></a>
+  <div class="kbig${pg==0?'':' dim'}" data-k=llm><b data-ghost="${ghost(tps.toFixed(0))}">${tps.toFixed(0)}</b><span>tokens / second</span></div>
+  <div class="kbig${pg==0?'':' dim'}" data-k=power><b data-ghost="${ghost(Math.round(gpuW))}">${Math.round(gpuW)}</b><span>GPU watts</span></div>
+  <div class="kbig${pg==2?'':' dim'}" data-k=ok><b class="${I.backups_ok<I.backups_total?'warn':'ok'}" data-ghost="${ghost((I.backups_ok??'?')+'/'+(I.backups_total??'?'))}">${esc(I.backups_ok??'?')}/${esc(I.backups_total??'?')}</b><span>backups on schedule</span></div>
+  <div class="kbig${pg==1?'':' dim'}" data-k=alert><b class="${crit?'bad':act?'warn':'ok'}" data-ghost="${ghost(act)}">${act}</b><span>alert${act==1?'':'s'}</span></div>
+  <div class=kclock><b data-ghost="${ghost(tm[1].trim())}">${esc(tm[1].trim())}${tm[2].trim()?`<small>${esc(tm[2].trim())}</small>`:''}</b><span>${now.toLocaleDateString([], {weekday:'short',month:'short',day:'numeric'})}</span>${pages>1?`<span class=kpg>${pg+1} / ${pages}</span>`:''}</div></div>`}
+/* one node card: metrics, meters, and EVERY serving model with its rate (an idle head-server
+   slot no longer masks the model actually running on the node) */
+function kioskNode(n,h){const srvs=((h.llm||{}).servers||[]).filter(s=>s.model||s.spark);
+ const mem=h.mem_total?Math.round(100*h.mem_used/h.mem_total):null,up=h.up!==0&&h.up!==false;
+ const t=(v,w)=>v==null?'—':`<b class="${v>=w?'bad':v>=w-10?'warn':''}">${fmtT(v)}</b>`;
+ return `<div class="knode ${up?'':'down'}"><div class=kh><span class="dot ${up?'ok':'bad'}"></span><b>${esc(n)}</b></div>
+  <div class=kgrid><span>GPU</span><b>${h.gpu_util!=null?Math.round(h.gpu_util)+'%':'—'}</b><span>GPU temp</span>${t(h.gpu_temp,85)}
+   <span>power</span><b>${h.gpu_power!=null?Math.round(h.gpu_power)+' W':'—'}</b><span>CPU temp</span>${t(h.sys_temp,90)}
+   <span>CPU</span><b>${h.cpu!=null?Math.round(h.cpu)+'%':'—'}</b><span>memory</span><b>${mem!=null?mem+'%':'—'}</b></div>
+  <div class=kmeters><span>GPU</span>${bar(h.gpu_util,true,'gpu')}<span>CPU</span>${bar(h.cpu,true,'cpu')}
+   <span>MEM</span>${bar(mem,true,'mem')}<span>TEMP</span>${bar(h.gpu_temp!=null?h.gpu_temp/95*100:0,false,'temp')}</div>
+  ${srvs.map(s=>{const g=s.spark?lastV(s.spark.gen_tps):(s.gen_tps!=null?s.gen_tps:null);
+   return `<div class=kllm><span class=mut>${esc(s.model||'—')}</span><b>${g!=null?g.toFixed(0):'—'}<small> tok/s</small></b></div>`}).join('')}</div>`}
+/* the live alert feed (ticker: 1): one line per active alert, colour by severity */
+function kioskTicker(a){const L=(a.active||[]).slice().sort((x,y)=>({critical:0,warning:1,info:2})[x.severity]-({critical:0,warning:1,info:2})[y.severity]);
+ if(!L.length)return '<div class="kticker kempty"><b class=ok>✓</b><span class=mut>no active alerts</span></div>';
+ return `<div class=kticker>${L.map(x=>`<span class="kc ${x.severity}"><i class="dot ${x.severity=='critical'?'bad':x.severity=='warning'?'warn':'info'}"></i><b>${esc(x.host||'fleet')}</b> ${esc(x.summary||x.name)}</span>`).join('')}</div>`}
+/* the alerts page (alerts: 2): name + host + since + summary + the LLM triage, newest-severity first */
+function kioskAlerts(a){const L=(a.active||[]).slice().sort((x,y)=>({critical:0,warning:1,info:2})[x.severity]-({critical:0,warning:1,info:2})[y.severity]);
+ if(!L.length)return '<div class=kdetail><div class="kticker kempty"><b class=ok>✓</b><span class=mut>no active alerts</span></div></div>';
+ return `<div class=kdetail>${L.map(x=>`<div class="kcard ${x.severity}"><div class=kh><span class="dot ${x.severity=='critical'?'bad':x.severity=='warning'?'warn':'info'}"></span><b>${esc(x.name)}</b><span class=mut>${esc(x.host||'fleet')}</span><span class=hspacer></span><span class=mut>since ${esc(x.since||'')}</span></div>
+  <div class=ksum>${esc(x.summary||'')}</div>${x.triage?`<div class=ktri>${esc(x.triage)}</div>`:''}</div>`).join('')}</div>`}
+/* the backups page (backups: 2): one row per host/profile — last run, next due, health */
+async function kioskBackups(){let S={rows:[]};try{S=await fetchJSON('/api/v1/schedule')}catch(e){}
+ const ago=t=>{if(!t)return '—';const s=(Date.now()/1000-t)/3600;return s<1?Math.round(s*60)+' min':s<48?Math.round(s)+' h':Math.round(s/24)+' d'};
+ const nxt=t=>t?new Date(t*1000).toLocaleString([], {weekday:'short',hour:'2-digit',minute:'2-digit'}):'—';
+ return `<div class=kdetail>${(S.rows||[]).map(r=>`<div class="kcard ${r.health=='ok'?'info':r.failed_at?'critical':'warning'}"><div class=kh><span class="dot ${r.health=='ok'?'ok':r.failed_at?'bad':'warn'}"></span><b>${esc(r.host)}</b><span class=mut>${esc(r.profile)}</span></div>
+  <div class=kgrid style="grid-template-columns:auto 1fr auto 1fr"><span>last</span><b>${ago(r.last_ts)}</b><span>next</span><b>${nxt(r.next_ts)}</b><span>every</span><b>${r.every?Math.round(r.every/3600)+' h':'—'}</b><span>window</span><b>${esc(r.window||'—')}</b></div>
+  ${r.why?`<div class=ksum>${esc(r.why)}</div>`:''}</div>`).join('')}</div>`}
+let _kbHtml='',_kbAt=0;
+async function kioskBackupsCached(){if(Date.now()-_kbAt>60000){_kbAt=Date.now();_kbHtml=await kioskBackups()}return _kbHtml}
 function rKiosk(d){
  if(!d||!d.m)return '<div class=empty>loading…</div>';
- const M=d.m,H=M.hosts||{},order=M.order||Object.keys(H),I=(M.fleet||{}).infra||{},tok=((M.fleet||{}).series||{}).tokens||{};
- const tps=Object.values(tok).reduce((a,s)=>a+lastV(s),0);
- const gpuW=order.reduce((a,n)=>a+(+(H[n]||{}).gpu_power||0),0);
- const act=(d.a.active||[]).length,crit=(d.a.active||[]).filter(x=>x.severity=='critical').length;
+ return kioskDraw(d,()=>kioskFit())}
+/* the rotation pager asks for a redraw with the new page; the panel loop repaints itself
+   every int seconds — this only matters if that tick hasn't come round yet */
+function kioskRepaint(){const p=PANELS.find(x=>x.id=='kiosk');if(p&&p._data!==undefined)repaint('kiosk',p._data)}
+/* rKiosk stays synchronous for morph(); when a page needs an extra fetch (the backups rows),
+   kioskDraw paints the rest now and patches the detail area in, then refits. */
+function kioskDraw(d,done){
+ const M=d.m,H=M.hosts||{},order=M.order||Object.keys(H),I=(M.fleet||{}).infra||{};
+ const k=kioskCfg(),pg=Math.min(kioskPage(),kioskPages()-1),pages=kioskPages();
  const slots=Object.entries((d.r||{}).slots||{}).map(([n,s])=>{const L=s.live||{};
   return `<div class="kslot ${L.ok?'':'down'}"><div class=kh><span class="dot ${L.ok?'ok':'bad'}"></span><b>${esc(n)}</b><span class=mut>${esc(s.head)}${s.worker?' + '+esc(s.worker):''}</span></div>
    <div class=km>${L.ok?esc((L.models||[]).join(', ')):'not serving'}</div>${L.connections!=null?`<div class=mut>${esc(L.connections)} connected</div>`:''}</div>`}).join('');
- const nodes=order.map(n=>{const h=H[n]||{},srv=((h.llm||{}).servers||[])[0],g=srv&&srv.spark?lastV(srv.spark.gen_tps):null;
-  const mem=h.mem_total?Math.round(100*h.mem_used/h.mem_total):null,up=h.up!==0&&h.up!==false;
-  const t=(v,w)=>v==null?'—':`<b class="${v>=w?'bad':v>=w-10?'warn':''}">${fmtT(v)}</b>`;
-  return `<div class="knode ${up?'':'down'}"><div class=kh><span class="dot ${up?'ok':'bad'}"></span><b>${esc(n)}</b></div>
-   <div class=kgrid><span>GPU</span><b>${h.gpu_util!=null?Math.round(h.gpu_util)+'%':'—'}</b><span>GPU temp</span>${t(h.gpu_temp,85)}
-    <span>power</span><b>${h.gpu_power!=null?Math.round(h.gpu_power)+' W':'—'}</b><span>CPU temp</span>${t(h.sys_temp,90)}
-    <span>CPU</span><b>${h.cpu!=null?Math.round(h.cpu)+'%':'—'}</b><span>memory</span><b>${mem!=null?mem+'%':'—'}</b></div>
-   <div class=kmeters><span>GPU</span>${bar(h.gpu_util,true,'gpu')}<span>CPU</span>${bar(h.cpu,true,'cpu')}
-    <span>MEM</span>${bar(mem,true,'mem')}<span>TEMP</span>${bar(h.gpu_temp!=null?h.gpu_temp/95*100:0,false,'temp')}</div>
-   ${srv?`<div class=kllm><span class=mut>${esc(srv.model)}</span><b>${g!=null?g.toFixed(0):'—'}<small> tok/s</small></b></div>`:''}</div>`}).join('');
- const now=new Date(),tm=now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}).match(/^([\d:.\s]+)(.*)$/)||['',now.toTimeString().slice(0,5),''];
- return `<div class=kiosk-wrap>
-  <div class=ktop><a class=kbrand href="/"><span class=mark></span><span class=wordmark>Noct<b>yx</b></span></a>
-   <div class=kbig data-k=llm><b data-ghost="${ghost(tps.toFixed(0))}">${tps.toFixed(0)}</b><span>tokens / second</span></div>
-   <div class=kbig data-k=power><b data-ghost="${ghost(Math.round(gpuW))}">${Math.round(gpuW)}</b><span>GPU watts</span></div>
-   <div class=kbig data-k=ok><b class="${I.backups_ok<I.backups_total?'warn':'ok'}" data-ghost="${ghost((I.backups_ok??'?')+'/'+(I.backups_total??'?'))}">${esc(I.backups_ok??'?')}/${esc(I.backups_total??'?')}</b><span>backups on schedule</span></div>
-   <div class=kbig data-k=alert><b class="${crit?'bad':act?'warn':'ok'}" data-ghost="${ghost(act)}">${act}</b><span>alert${act==1?'':'s'}</span></div>
-   <div class=kclock><b data-ghost="${ghost(tm[1].trim())}">${esc(tm[1].trim())}${tm[2].trim()?`<small>${esc(tm[2].trim())}</small>`:''}</b><span>${now.toLocaleDateString([], {weekday:'short',month:'short',day:'numeric'})}</span></div></div>
-  ${slots?`<div class=kslots>${slots}</div>`:''}
-  <div class=knodes>${nodes}</div></div>`}
+ const top=kioskTop(M,H,order,I,d.a||{},k,pg,pages);
+ const ticker=k.ticker>0?kioskTicker(d.a||{}):'';
+ let main='',extra=null;
+ if(pg==1&&k.alerts>1)main=kioskAlerts(d.a||{});
+ else if(pg==2&&k.backups>1){extra=kioskBackupsCached().then(html=>{const el=document.getElementById('kdetail');if(el)el.innerHTML=html;kioskFit()});
+  main='<div class=kdetail id=kdetail></div>'}
+ else{const nodes=order.map(n=>kioskNode(n,H[n]||{})).join('');
+  main=`${slots?`<div class=kslots>${slots}</div>`:''}<div class=knodes>${nodes}</div>`}
+ const out=`<div class="kiosk-wrap${k.fit=='scroll'?' kfit-scroll':''}" data-page="${pg}" data-pages="${pages}">${top}${ticker}${main}</div>`;
+ if(done)done();
+ if(extra)extra.catch(()=>{});
+ return out}
 
 function llmStats(s){const ms=v=>v==null?'—':v<1?Math.round(v*1000)+'<span class=u> ms</span>':v.toFixed(1)+'<span class=u> s</span>';
  const kv=(k,v)=>`<div><span class=k>${k}</span><span class=v>${v}</span></div>`;
@@ -3426,21 +3531,31 @@ function morphKids(a,b){const ac=a.childNodes,bc=Array.from(b.childNodes);
   morph(x,y)}
  while(ac.length>bc.length)a.removeChild(a.lastChild)}
 function repaint(id,data){const p=PANELS.find(x=>x.id==id),b=$('b-'+id);if(!b||!p)return;
- /* the kiosk's fit lives in inline styles on the rendered tree, and morph() clears style
-    attributes the fresh markup doesn't carry — snapshot them and put them back */
- const fit=id=='kiosk'?kioskFitSnap(b):null;
+  /* the kiosk's fit lives in inline styles on the rendered tree, and morph() clears style
+     attributes the fresh markup doesn't carry — snapshot them and put them back. But not
+     across a page switch (rotation): the old page's column/row fit must not squash the new one. */
+  const prevW=b.querySelector('.kiosk-wrap'),prevPg=prevW?prevW.dataset.page:null;
+  const pageSw=id=='kiosk'&&prevPg!=null&&prevPg!=String(kioskPage());
+  const fit=id=='kiosk'&&!pageSw?kioskFitSnap(b):null;
  if(id=='kiosk'&&_kfSaved)kfStyle(_kfSaved);    /* morph() can't restore <html>'s class: the step it
                                                    chose would evaporate on the next 10s refresh */
  const t=document.createElement('template');t.innerHTML=p.render(data)||'<div class=empty>no data</div>';
  morphKids(b,t.content);b.classList.remove('stale');
+ /* morph matches children positionally: a kiosk page whose markup shifted (a new ticker line,
+    an alert cleared) is a different screen — swap wholesale, then let the fit re-solve */
+ if(id=='kiosk'){const cur=b.firstElementChild,nw=t.content.firstElementChild;
+  if(cur&&nw&&(cur.className!==nw.className||(cur.dataset.page||'')!==(nw.dataset.page||'')))b.replaceChildren(nw)}
  if(id=='kiosk'){kioskFitRestore(b,fit);kioskFit()}
  for(const k in CH)if(!document.querySelector(`[data-ch="${k}"]`))delete CH[k];
  if(id=='actions')wireActions()}
 function kioskFitSnap(b){const w=b.querySelector('.kiosk-wrap'),n=b.querySelector('.knodes');
- return w||n?{wrap:w&&w.style.transform,nodes:n&&n.getAttribute('style'),cls:n&&n.className}:null}
+ return w||n?{wrap:w&&w.style.transform,nodes:n&&n.getAttribute('style'),cls:n&&n.className,page:w&&w.dataset.page,pages:w&&w.dataset.pages,kf:_kfSaved}:null}
 function kioskFitRestore(b,f){if(!f)return;
  const w=b.querySelector('.kiosk-wrap'),n=b.querySelector('.knodes');
  if(w&&f.wrap!=null)w.style.transform=f.wrap;
+ if(w&&f.page!=null)w.dataset.page=f.page;
+ if(w&&f.pages!=null)w.dataset.pages=f.pages;
+ if(f.kf)kfStyle(f.kf);                          /* the step <html> lost with the old tree */
  if(n&&f.nodes!=null)n.setAttribute('style',f.nodes);
  if(n&&f.cls)n.className=f.cls}
 /* /kiosk: everything on one screen, always. The wrap is exactly the viewport (body overflow:hidden)
@@ -3455,17 +3570,41 @@ function kioskFitRestore(b,f){if(!f)return;
    too. One fit per frame; if the applied tree still overflows its rows (a late theme class, a font
    load, a repaint mid-solve), the settled check refits, guard-bounded to converge. */
 const KF={1:.78,2:.62};
-let _kfSaved=0,_fitPend=0,_fitPass=0;
+let _kfSaved=0,_fitPend=0,_fitPass=0,_lastFit=null;
 function kfStyle(s){_kfSaved=s;document.documentElement.classList.toggle('kiosk-1',s==1);document.documentElement.classList.toggle('kiosk-2',s==2)}
 function kioskFit(){
- if(_fitPend||!document.querySelector('.kiosk-wrap'))return;   /* not on /kiosk: nothing to size */
- _fitPend=true;
- requestAnimationFrame(()=>requestAnimationFrame(()=>{_fitPend=false;kioskFitNow()}))}
+if(_fitPend||!document.querySelector('.kiosk-wrap'))return;   /* not on /kiosk: nothing to size */
+_fitPend=true;
+/* the fit is inline styles on a tree we morph in place: re-solving it before the browser has
+   painted the morphed tree compares a half-updated layout and writes back a different answer
+   every few ticks — a 4px reflow of the whole wall, which reads as a flash. One settled paint
+   of the new markup is enough; two rAFs guarantee the frame between them gets painted. */
+requestAnimationFrame(()=>requestAnimationFrame(()=>{setTimeout(()=>{_fitPend=false;kioskFitNow()},32)}))}
 function kioskFitNow(){
  const wrap=document.querySelector('.kiosk-wrap');if(!wrap)return;
  const H=wrap.clientHeight,W=wrap.clientWidth;
  wrap.style.transform='';
- const nodes=wrap.querySelector('.knodes');if(!nodes||!nodes.children.length){kfStyle(0);return}
+ /* fit:'scroll' (site default or ?fit=scroll): the type never shrinks — rows keep their natural
+    height and whatever doesn't fit scrolls. With rotation on, the pager takes precedence:
+    one page per screen still needs shrinking to be legible from the wall. */
+ if(kioskCfg().fit=='scroll'&&!kioskCfg().rotation){kfStyle(0);
+  wrap.classList.add('kfit-scroll');
+  const det=wrap.querySelector('.kdetail');
+  if(det)det.style.maxHeight='0px';           /* the wrap is a flex column: measure after layout */
+  requestAnimationFrame(()=>{const nodes=wrap.querySelector('.knodes');
+   if(det)det.style.maxHeight='';
+   if(nodes&&!nodes.style.gridAutoRows){      /* natural rows: the grid scrolls inside the wrap */
+    nodes.style.gridAutoRows='minmax(0,auto)'}});
+  return}
+ const nodes=wrap.querySelector('.knodes');if(!nodes||!nodes.children.length){
+  /* no node grid: a detail page (alerts/backups) — cap it to the room under the header so the
+     wrap never overflows the screen, and let it scroll if the list is longer */
+  const det=wrap.querySelector('.kdetail');
+  if(det){kfStyle(0);
+   const top=wrap.querySelector('.ktop'),tk=wrap.querySelector('.kticker');
+   const left=H-(top?top.offsetHeight:0)-(tk?tk.offsetHeight:0)-Math.ceil(36*(document.documentElement.classList.contains('kiosk-2')?KF[2]:1));
+   det.style.maxHeight=Math.max(120,left)+'px'}
+  return}
  const n=nodes.children.length;if(!n){kfStyle(0);return}
  /* measure in a hidden clone of the whole wrap: the top row and the slot cards above the grid
     shrink with the step too, so they are part of the room. The clone must sit inside the DOM —
@@ -3516,6 +3655,12 @@ function kioskFitNow(){
  if(!best)best=soft;
  probe.remove();
  if(!best){kfStyle(0);return}
+ /* a tick that re-solves the same page a pixel or two differently rewrites every card's
+    height: the whole wall reflows and it reads as a flash (operator, 2026-10-22). Hysteresis:
+    keep the last fit when the new one lands within 6px of it on the same step and columns. */
+ if(_lastFit&&_lastFit.pg==pgKey()&&_lastFit.s==best.s&&_lastFit.cols==best.cols&&
+    _lastFit.scale===best.scale&&Math.abs(_lastFit.rh-best.rh)<=6)best=_lastFit;
+ _lastFit=best;
  kfStyle(best.s);                               /* settle the step before measuring the live tree */
  nodes.style.gridTemplateColumns=`repeat(${best.cols},minmax(0,1fr))`;
  nodes.style.gridAutoRows=best.rh.toFixed(1)+'px';
@@ -4460,6 +4605,10 @@ if(VIEW=='main')repaint('actions',null);
 for(const p of PANELS)if(!p.api&&p.id!='actions')repaint(p.id,p._data);   /* on-demand panels (Snapshot Browser) show their empty state, not “loading…” */
 tickClock();setInterval(tickClock,1000);
 for(const p of PANELS){tick(p);if(p.int>0)setInterval(()=>tick(p),p.int*1000)}
+kioskArm();                                        /* /kiosk rotation pager, once the panels exist */
+async function kioskArmAfterSite(){                /* site defaults arrive async: re-arm once they do */
+ if(VIEW=='kiosk'){await loadSiteSettings();kioskArm()}}
+kioskArmAfterSite();
 setInterval(pollAll,2000);
 adoptRunning();
 if(VIEW=='main'&&H0.panel)setTimeout(()=>goTo(H0),250);      /* a link from /cluster or an alert: land on the panel */

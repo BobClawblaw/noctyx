@@ -121,7 +121,19 @@ Saving runs the same validated CLI commands (`policy-set`, `assistant-set`). See
 
 A wall display with no menus and large type: GPU slots, a tile per node, fleet totals and alerts — laid out to fit
 one screen, whatever the display's resolution (the console sizes the node grid to the room left, down to scaling
-the whole view on very small screens). Every source refreshes together every 10 seconds.
+the whole view on very small screens). Every source refreshes together every 10 seconds; the wall never dims or
+reflows for a slow fetch — it holds its last good frame.
+
+What the kiosk shows is a site setting (settings › **Kiosk**, saved with *save as site default*, or
+`noctyx console-set`): **Alerts** and **Backups** at *Detail* add full pages — alert summaries with their LLM
+triage, and per-host backup last run / next due / window — and the **alert ticker** puts a live one-line feed of
+active alerts under the header on the nodes page. Each node tile lists every model it serves with its own tok/s.
+**Rotation** pages through nodes → alerts → backups every 20 seconds; **Fit** chooses whether the type shrinks to
+keep one screen (`shrink`, the default) or stays full-size and the grid scrolls (`scroll`, no rotation).
+
+Any wall browser can override the site's choice in the URL without touching settings:
+`/kiosk?rotation=1&page=2` (pin one view: 0 nodes, 1 alerts, 2 backups), `?alerts=2`, `?backups=2`, `?ticker=1`,
+`?fit=scroll`. Extra pages and rotation always use `shrink`: one screen per page is the point.
 
 ## About (`/about`)
 

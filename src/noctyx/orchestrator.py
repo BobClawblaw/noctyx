@@ -3105,6 +3105,32 @@ def validate_console(s):
             errs.append("custom: #rrggbb colours for " + ", ".join(keys))
         else:
             out["custom"] = {k: cu[k].lower() for k in keys if k in cu}
+    if "kiosk" in s:
+        # the wall display's info level: how much rKiosk() draws per page of its rotation
+        kio = s["kiosk"]
+        if not isinstance(kio, dict):
+            errs.append("kiosk: an object")
+        else:
+            ko = {}
+            for k in ("alerts", "ticker", "backups", "rotation", "fit"):
+                if k in kio:
+                    v = kio[k]
+                    if k == "rotation":
+                        if not isinstance(v, bool):
+                            errs.append("kiosk.rotation: true or false")
+                        else:
+                            ko[k] = v
+                    elif k == "fit":
+                        if v not in ("shrink", "scroll"):
+                            errs.append("kiosk.fit: shrink or scroll")
+                        else:
+                            ko[k] = v
+                    elif v not in (0, 1, 2):
+                        errs.append(f"kiosk.{k}: 0, 1 or 2")
+                    else:
+                        ko[k] = int(v)
+            if not errs:
+                out["kiosk"] = ko
     return out, errs
 
 
