@@ -940,7 +940,7 @@ LLM_Q = {   # all keyed by (host, model_name)
     "tokens_1h": 'sum by(host,model_name)(increase(vllm:generation_tokens_total[1h]))',
     "requests_1h": 'sum by(host,model_name)(increase(vllm:request_success_total[1h]))',
 }
-LLM_SPARK = ("gen_tps", "running", "prompt_tps")
+LLM_SPARK = ("gen_tps", "running", "prompt_tps", "prefill_tps")
 LLM_TOPO = pathlib.Path(P["console_state"]) / "llm-topology.json"
 
 
@@ -2277,10 +2277,12 @@ html.kiosk-1{--kf-h:.78} html.kiosk-2{--kf-h:.62}
 .knode .ktrace{flex:1 1 auto;min-height:calc(56px*var(--kf-h,1));margin-top:calc(10px*var(--kf-h,1));position:relative;overflow:hidden}
 .knode .ktrace svg{position:absolute;inset:0}
 .knode .ktrace i{position:absolute;right:calc(4px*var(--kf-h,1));font:600 calc(9.5px*var(--kf-h,1)) var(--sans);letter-spacing:.08em;line-height:1}
-.knode .ktrace i.a{color:var(--accent)} .knode .ktrace i.g{color:var(--ok)} .knode .ktrace i.t{color:var(--accent-2)}
+.knode .ktrace i.a{color:var(--accent)} .knode .ktrace i.g{color:var(--ok)} .knode .ktrace i.t{color:var(--accent-2)} .knode .ktrace i.p{color:var(--warn)}
 .kspark polyline{fill:none;stroke-width:1.8;vector-effect:non-scaling-stroke;stroke-linejoin:round;opacity:.9}
 .kspark polyline.a{stroke:var(--accent)} .kspark polyline.g{stroke:var(--ok)}
 .kspark polyline.t{stroke:var(--accent-2);stroke-dasharray:3 3;opacity:.85}
+/* prefill: dash-dot so it reads as a different phase from generation, on its own scale */
+.kspark polyline.p{stroke:var(--warn);stroke-dasharray:5 2 1 2;opacity:.85}
 .kspark line.grid{stroke:var(--line-soft);stroke-width:1;vector-effect:non-scaling-stroke}
 .kload{margin-left:auto;font:500 calc(11px*var(--kf-h,1)) var(--sans);color:var(--fg-faint)}
 /* the ticker wraps: every alert is fully readable, nothing cut off (the wall has no pointer,
@@ -3308,12 +3310,24 @@ function kioskNode(n,h){const srvs=((h.llm||{}).servers||[]).filter(s=>s.model||
  const tok1h=srvs.reduce((a,s)=>a+(s.tokens_1h||0),0);
  const req1h=srvs.reduce((a,s)=>a+(s.requests_1h||0),0);
  const genspk=srvs.map(s=>s.spark&&s.spark.gen_tps).filter(p=>p&&p.length>1);
+ /* prefill is a separate phase from decode: prompt tokens per second of prompt-processing time.
+    It gets its own trace per endpoint so a burst of prompt work is visible next to generation
+    (user, 2026-10-22). Prefill tok/s is orders of magnitude above decode, so it is drawn on its
+    own scale against the tile's max, not overlaid on the generation trace's scale. */
+ const pfsrv=srvs.map(s=>({model:s.model,pts:((s.spark&&s.spark.prefill_tps)||[]).filter(p=>p[1]!=null)})).filter(x=>x.pts.length>1);
+ const pfspk=pfsrv.map(x=>x.pts);
+ const pfNow=srvs.reduce((a,s)=>a+(s.prefill_tps||0),0);
  /* a worker node serves no endpoint of its own: it runs tensor-parallel work for a head, so it
     has no tok/s of its own to report. Show what it IS doing (worker for X, tp N) rather than a
     bare dash, which read as "idle" (user, 2026-10-22: worker nodes don't offer toks). */
  const topo=((h.llm||{}).topology||[]);
  const wk=topo.find(t=>t.role=='worker');
  const hasTok=tok1h>0||req1h>0||gen>0;
+ /* prefill readout: per endpoint, because prefill is a property of the endpoint's own prompt
+    processing, not of the node. A dash when the endpoint is idle — a 0 tok/s prefill figure is
+    misleading, since prefill only exists while a prompt is being processed. */
+ const pfLine=srvs.length&&pfsrv.length?`<div class=kllm><span class=mut>${esc(pfsrv.map(x=>x.model||'—').join(', '))}</span><b>${pfNow>0?fmtK(pfNow):'—'}<small> prefill tok/s</small></b>
+   <span class=mut>${pfNow>0?'prompt processing':'idle'}</span></div>`:'';
  const tpsLine=srvs.length?`<div class=kllm><span class=mut>${esc(srvs.map(s=>s.model||'—').join(', '))}</span><b>${hasTok?gen.toFixed(0):'—'}<small> tok/s</small></b>
    <span class=mut>${hasTok?`${fmtK(tok1h)} tok · ${Math.round(req1h)} req / 1h`:'no traffic / 1h'}</span></div>`
    :wk?`<div class=kllm><span class=mut>worker → ${esc(wk.worker_for||'head')}${wk.tp?' · tp '+esc(wk.tp):''}</span><b>—<small> tok/s</small></b>
@@ -3324,10 +3338,9 @@ function kioskNode(n,h){const srvs=((h.llm||{}).servers||[]).filter(s=>s.model||
     their label so the two never collide. The data window slides one step every tick without the
     box's endpoints moving, so the <svg> carries the window stamp: without it morph() sees an
     identical subtree and never touches the points, and the trace freezes (user, 2026-10-22) */
- const tr=(sp.gpu_util&&sp.gpu_util.length>1)?`<div class=ktrace><svg class=kspark viewBox="0 0 300 100" preserveAspectRatio="none" aria-hidden="true" data-win="${sp.gpu_util[0][0]}|${sp.gpu_util.at(-1)[0]}">
-   <line class="grid" x1="0" y1="48.3" x2="300" y2="48.3"/><line class="grid" x1="0" y1="2.3" x2="300" y2="2.3"/>${
-   _lines([{pts:sp.gpu_util,cls:'a'},{pts:sp.cpu,cls:'g'},...genspk.map(p=>({pts:p,cls:'t'}))],300,96,100)}</svg>
-  <i class=a style="top:calc(2px + .3em)">GPU</i><i class=g style="bottom:2px">CPU</i>${genspk.length?'<i class=t style="bottom:calc(2px + 1.4em)">TOK</i>':''}</div>`:'';
+ const tr=(sp.gpu_util&&sp.gpu_util.length>1)?`<div class=ktrace><svg class=kspark viewBox="0 0 300 100" preserveAspectRatio="none" aria-hidden="true" data-win="${sp.gpu_util[0][0]}|${sp.gpu_util.at(-1)[0]}|pf${pfspk.length}">
+   <line class="grid" x1="0" y1="48.3" x2="300" y2="48.3"/><line class="grid" x1="0" y1="2.3" x2="300" y2="2.3"/>${_lines([{pts:sp.gpu_util,cls:'a'},{pts:sp.cpu,cls:'g'},...genspk.map(p=>({pts:p,cls:'t'}))],300,96,100)}${pfspk.length?_lines(pfspk.map(p=>({pts:p,cls:'p'})),300,96,Math.max(...pfspk.flat().map(p=>p[1]).filter(v=>v!=null))||1):''}</svg>
+  <i class=a style="top:calc(2px + .3em)">GPU</i><i class=g style="bottom:2px">CPU</i>${genspk.length?'<i class=t style="bottom:calc(2px + 1.4em)">TOK</i>':''}${pfspk.length?'<i class=p style="top:calc(2px + 1.4em)">PF</i>':''}</div>`:'';
  return `<div class="knode ${up?'':'down'}"><div class=kh><span class="dot ${up?'ok':'bad'}"></span><b>${esc(n)}</b>
    ${h.load1!=null?`<span class=kload>load ${(+h.load1).toFixed(1)}</span>`:''}</div>
   <div class=kgrid><span>GPU</span><b>${h.gpu_util!=null?Math.round(h.gpu_util)+'%':'—'}</b><span>GPU temp</span>${t(h.gpu_temp,85)}
@@ -3336,7 +3349,7 @@ function kioskNode(n,h){const srvs=((h.llm||{}).servers||[]).filter(s=>s.model||
   ${tr}
   <div class=kmeters><span>GPU</span>${bar(h.gpu_util,true,'gpu')}<span>CPU</span>${bar(h.cpu,true,'cpu')}
    <span>MEM</span>${bar(mem,true,'mem')}<span>TEMP</span>${bar(h.gpu_temp!=null?h.gpu_temp/95*100:0,false,'temp')}</div>
-  ${tpsLine}</div>`}
+  ${tpsLine}${pfLine}</div>`}
 /* the live alert feed (ticker: 1): one line per active alert, colour by severity */
 function kioskTicker(a){const L=(a.active||[]).slice().sort((x,y)=>({critical:0,warning:1,info:2})[x.severity]-({critical:0,warning:1,info:2})[y.severity]);
  if(!L.length)return '<div class="kticker kempty"><b class=ok>✓</b><span class=mut>no active alerts</span></div>';
