@@ -2245,6 +2245,10 @@ html.kiosk-1{--kf-h:.78} html.kiosk-2{--kf-h:.62}
    number+label it belongs to, so each KPI reads as one unit. Graphs are the flexible part of
    the row — they give up width before the numbers or the clock are pushed off the screen. */
 .kpair{display:flex;align-items:center;gap:calc(10px*var(--kf-h,1));flex:0 1 auto;min-width:0;overflow:hidden}
+.kvitals{display:flex;align-items:stretch;gap:calc(16px*var(--kf-h,1));flex:0 1 auto;min-width:0;overflow:hidden;padding-left:calc(16px*var(--kf-h,1));border-left:1px solid var(--line)}
+.kvital{display:flex;flex-direction:column;align-items:flex-start;min-width:0;flex:0 0 auto}
+.kvital b{font:800 calc(23px*var(--kf-h,1))/1 var(--mono);color:var(--fg)}
+.kvital span{font:calc(9.5px*var(--kf-h,1)) var(--sans);letter-spacing:.09em;text-transform:uppercase;color:var(--fg-faint);white-space:nowrap}
 .ktopg{flex:1 1 120px;min-width:60px;max-width:calc(190px*var(--kf-h,1))}
 .ktopg .chart{margin:0}
 .ktopg .ch-h{display:none}
@@ -3236,6 +3240,9 @@ function copyAddr(btn,a){const ok=()=>{btn.nextElementSibling.textContent='copie
 
 /* ── Kiosk ── */
 const lastV=s=>Array.isArray(s)&&s.length?+s[s.length-1][1]||0:0;
+/* compact magnitude for the header vitals: no space before the unit, so the number and its
+   suffix read as one token at kiosk distance. */
+const kTok=v=>v>=1e9?(v/1e9).toFixed(2)+'G':v>=1e6?(v/1e6).toFixed(v>=1e7?0:1)+'M':v>=1e3?(v/1e3).toFixed(v>=1e5?0:1)+'k':String(Math.round(v));
 /* the identity of the kiosk's current screen (fit hysteresis compares it): page + the
    settings that change how much room the grid gets. */
 function pgKey(){const k=kioskCfg();return[kioskPage(),!!k.ticker,k.rotation?'r':'-',k.fit].join('/')}
@@ -3283,6 +3290,20 @@ function kioskTop(M,H,order,I,a,k,pg,pages){
   for(const n of order)for(const[t,v]of (((H[n]||{}).spark||{}).gpu_power||[]))byT[t]=(byT[t]||0)+(+v||0);
   return Object.entries(byT).map(([t,v])=>[+t,v]).sort((x,y)=>x[0]-y[0])})();
  const act=(a.active||[]).length,crit=(a.active||[]).filter(x=>x.severity=='critical').length;
+ /* fleet thermal ceiling: the hottest GPU anywhere, and its trend. The tiles show each node's
+    own temp; this is the one number that says "something is running hot" from across the room,
+    and it pairs with watts as the two physical-risk readings on the wall. */
+ const tmaxSpk=((M.fleet||{}).series||{}).gpu_temp_max||(()=>{const byT={};
+  for(const n of order)for(const[t,v]of (((H[n]||{}).spark||{}).gpu_temp||[]))byT[t]=Math.max(byT[t]||0,+v||0);
+  return Object.entries(byT).map(([t,v])=>[+t,v]).sort((x,y)=>x[0]-y[0])})();
+ const tmaxNow=order.reduce((m,n)=>Math.max(m,+(H[n]||{}).gpu_temp||0),0)||
+  (tmaxSpk.length?lastV(tmaxSpk):null);
+ const tmaxCls=tmaxNow==null?'':tmaxNow>=85?'bad':tmaxNow>=80?'warn':'';
+ /* fleet vitals: saturation and the day's totals. Queue depth is the only saturation signal the
+    tiles do not carry — a per-node card shows what it serves, not what is waiting behind it. */
+ const qNow=lastV(((M.fleet||{}).series||{}).waiting)||0;
+ const kwh=I.gpu_wh_24h!=null?I.gpu_wh_24h/1000:null;
+ const tok24=I.tokens_24h;
  const llmN=(I.llm_up!=null&&I.llm_total!=null)?`${Math.round(I.llm_up)}/${Math.round(I.llm_total)}`:null;
  const llmBad=llmN&&I.llm_up<I.llm_total;
  const now=new Date(),tm=now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}).match(/^([\d:.\s]+)(.*)$/)||['',now.toTimeString().slice(0,5),''];
@@ -3295,6 +3316,15 @@ function kioskTop(M,H,order,I,a,k,pg,pages){
  <div class="kpair${pg==0?'':' dim'}" data-k=watts>
   <div class=ktopg>${chart('', [{name:'fleet',pts:gpw,cls:'w'}], v=>Math.round(v)+' W', {span:'1h'})}</div>
   <div class="kbig${dn()}"><b data-ghost="${ghost(Math.round(gpuW))}">${Math.round(gpuW)}</b><span>GPU watts</span></div>
+ </div>
+ <div class="kpair${pg==0?'':' dim'}" data-k=temp>
+  <div class=ktopg>${chart('', [{name:'hottest',pts:tmaxSpk,cls:'c1'}], v=>Math.round(v)+' °C', {span:'1h'})}</div>
+  <div class="kbig${dn()}"><b class="${tmaxCls}" data-ghost="${ghost(Math.round(tmaxNow||0))}">${tmaxNow!=null?Math.round(tmaxNow):'—'}</b><span>GPU temp max</span></div>
+ </div>
+ <div class="kvitals${pg==0?'':' dim'}">
+  <div class=kvital><b class="${qNow>2?'bad':qNow>0?'warn':''}" data-ghost="${ghost(Math.round(qNow))}">${Math.round(qNow)}</b><span>queued</span></div>
+  <div class=kvital><b data-ghost="${ghost(kwh!=null?kwh.toFixed(1):'—')}">${kwh!=null?kwh.toFixed(1):'—'}</b><span>kWh / 24h</span></div>
+  <div class=kvital><b data-ghost="${ghost(tok24!=null?kTok(tok24):'—')}">${tok24!=null?kTok(tok24):'—'}</b><span>tok / 24h</span></div>
  </div>
  ${k.dense&&llmN?`<div class="kbig${dn()}${pg==0?'':' dim'}" data-k=ok><b class="${llmBad?'warn':'ok'}" data-ghost="${ghost(llmN)}">${llmN}</b><span>LLM serving</span></div>`:''}
   <div class=kclock><b data-ghost="${ghost(tm[1].trim())}">${esc(tm[1].trim())}${tm[2].trim()?`<small>${esc(tm[2].trim())}</small>`:''}</b><span>${now.toLocaleDateString([], {weekday:'short',month:'short',day:'numeric'})}</span>${pages>1?`<span class=kpg>${pg+1} / ${pages}</span>`:''}</div></div>`}
