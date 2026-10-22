@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "noctyx"
 version = "0.1.0"
-description = "The night-shift operator for your AI cluster: deploy model recipes, cache models, back up and watch the fleet."
+description = "The night-shift operator for your AI cluster: deploy model recipes, cache Hugging Face models, back up every Linux node, and watch the fleet with an LLM that explains what it sees. Head runs on Linux or macOS. Free and open source (Apache 2.0). Alpha."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
