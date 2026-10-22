@@ -2264,8 +2264,8 @@ html.kiosk-1{--kf-h:.78} html.kiosk-2{--kf-h:.62}
    shrink --kf-h, which every kiosk size above derives from */
 .kgrid{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:calc(6px*var(--kf-h,1)) calc(10px*var(--kf-h,1));margin-top:calc(10px*var(--kf-h,1));font:calc(12px*var(--kf-h,1)) var(--sans);align-items:baseline}
 .kgrid span{color:var(--fg-dim)} .kgrid b{font:700 calc(20px*var(--kf-h,1)) var(--mono)}
-.kllm{display:flex;justify-content:space-between;align-items:baseline;margin-top:auto;padding-top:calc(8px*var(--kf-h,1));border-top:1px solid var(--line-soft);font:calc(12px*var(--kf-h,1)) var(--mono);gap:calc(8px*var(--kf-h,1))}
-.kllm .mut{white-space:normal;overflow-wrap:anywhere;line-height:1.3} .kllm b{font:800 calc(22px*var(--kf-h,1)) var(--mono);color:var(--accent);white-space:nowrap;flex:0 0 auto} .kllm small{font:calc(11px*var(--kf-h,1)) var(--sans);color:var(--fg-dim)}
+.kllm{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;margin-top:auto;padding-top:calc(8px*var(--kf-h,1));border-top:1px solid var(--line-soft);font:calc(12px*var(--kf-h,1)) var(--mono);gap:calc(8px*var(--kf-h,1))}
+.kllm .mut:first-child{flex:1 0 100%;white-space:normal;overflow-wrap:break-word;line-height:1.3} .kllm .mut:last-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0} .kllm b{font:800 calc(22px*var(--kf-h,1)) var(--mono);color:var(--accent);white-space:nowrap;flex:0 0 auto} .kllm small{font:calc(11px*var(--kf-h,1)) var(--sans);color:var(--fg-dim)}
 /* kiosk extras: the alert ticker, the detail pages (alerts / backups), and fit:'scroll' */
 .kpg{font:600 calc(11px*var(--kf-h,1)) var(--mono);color:var(--accent);margin-top:calc(4px*var(--kf-h,1))}
 .kbig.dim{opacity:.45}
