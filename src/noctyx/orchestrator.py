@@ -3112,12 +3112,12 @@ def validate_console(s):
             errs.append("kiosk: an object")
         else:
             ko = {}
-            for k in ("alerts", "ticker", "backups", "rotation", "fit"):
+            for k in ("alerts", "ticker", "backups", "rotation", "fit", "dense"):
                 if k in kio:
                     v = kio[k]
-                    if k == "rotation":
+                    if k in ("rotation", "dense"):
                         if not isinstance(v, bool):
-                            errs.append("kiosk.rotation: true or false")
+                            errs.append(f"kiosk.{k}: true or false")
                         else:
                             ko[k] = v
                     elif k == "fit":

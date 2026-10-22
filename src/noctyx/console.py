@@ -2099,7 +2099,7 @@ const NXT=(()=>{
  /* Phosphor effects: all static layers or compositor-only animation (transform, opacity) */
  const FXDEF={glow:'normal',scan:'kiosk',vignette:'on',grain:'off',beam:'off',flicker:'off',fringe:'off'};
  const GLOW={off:0,soft:.5,normal:1,bright:1.6};
- const DEF={mode:'dark',theme:'noctyx',tunit:'F',fx:FXDEF,kiosk:{alerts:1,ticker:1,backups:1,rotation:false,fit:'shrink'},custom:{bg:'#0b0e1a',panel:'#121629',text:'#e2e8f6',muted:'#97a3c2',accent:'#3fe6ff',line:'#242a47',ok:'#2ecc8f',warn:'#f0b429',bad:'#ef5a5a'}};
+ const DEF={mode:'dark',theme:'noctyx',tunit:'F',fx:FXDEF,kiosk:{alerts:1,ticker:1,backups:1,rotation:false,fit:'shrink',dense:true},custom:{bg:'#0b0e1a',panel:'#121629',text:'#e2e8f6',muted:'#97a3c2',accent:'#3fe6ff',line:'#242a47',ok:'#2ecc8f',warn:'#f0b429',bad:'#ef5a5a'}};
  function derive(b){const f={...b},dark=lum(f.bg)<.4;f.scheme=dark?'dark':'light';
   f.bg0??=mix(f.bg,dark?'#000000':'#ffffff',.25);f.bg2??=mix(f.panel,f.text,dark?.04:.03);f.bg3??=mix(f.panel,f.text,dark?.09:.07);
   f.lineSoft??=mix(f.line,f.bg,.4);f.faint??=mix(f.muted,f.bg,.3);f.accentDim??=mix(f.accent,f.bg,.35);f.accent2??=f.accent;
@@ -2255,6 +2255,21 @@ html.kiosk-1{--kf-h:.78} html.kiosk-2{--kf-h:.62}
 /* kiosk extras: the alert ticker, the detail pages (alerts / backups), and fit:'scroll' */
 .kpg{font:600 calc(11px*var(--kf-h,1)) var(--mono);color:var(--accent);margin-top:calc(4px*var(--kf-h,1))}
 .kbig.dim{opacity:.45}
+/* dense headers: five KPIs on one line, slightly smaller so they never wrap the clock away */
+.kbig.kdense b{font-size:calc(34px*var(--kf-h,1))} .kbig.kdense span{font-size:calc(10px*var(--kf-h,1))}
+/* the 30-min GPU/CPU trace that fills the empty middle of a node tile (accent=gpu, ok=cpu):
+   stretched to fill its box (a short SVG at height:100% would sit at the top and leave a void),
+   with a hairline grid at 50/100% and the two lines labelled at their own height — no legend
+   needed on the wall. */
+.kspark{width:100%;height:100%;display:block}
+.knode .ktrace{flex:1 1 auto;min-height:calc(56px*var(--kf-h,1));margin-top:calc(10px*var(--kf-h,1));position:relative;overflow:hidden}
+.knode .ktrace svg{position:absolute;inset:0}
+.knode .ktrace i{position:absolute;right:calc(4px*var(--kf-h,1));font:600 calc(9.5px*var(--kf-h,1)) var(--sans);letter-spacing:.08em;line-height:1}
+.knode .ktrace i.a{color:var(--accent)} .knode .ktrace i.g{color:var(--ok)}
+.kspark polyline{fill:none;stroke-width:1.8;vector-effect:non-scaling-stroke;stroke-linejoin:round;opacity:.9}
+.kspark polyline.a{stroke:var(--accent)} .kspark polyline.g{stroke:var(--ok)}
+.kspark line.grid{stroke:var(--line-soft);stroke-width:1;vector-effect:non-scaling-stroke}
+.kload{margin-left:auto;font:500 calc(11px*var(--kf-h,1)) var(--sans);color:var(--fg-faint)}
 .kticker{display:flex;gap:calc(8px*var(--kf-h,1));align-items:center;overflow-x:auto;overflow-y:hidden;white-space:nowrap;flex:0 1 auto;min-height:0;
  padding:calc(7px*var(--kf-h,1)) calc(10px*var(--kf-h,1));border:1px solid var(--line-soft);border-radius:var(--radius);background:var(--bg-1);
  font:calc(13px*var(--kf-h,1)) var(--sans)}
@@ -3132,6 +3147,7 @@ function kioskGroup(s){const k=s.kiosk||NXT.DEF.kiosk,
  ${row('backups','Backups',lv,'Off: the ratio only. On: the count. Detail: a page of per-host last run, next due, window.')}
  ${row('ticker','Alert ticker',[['0','Off'],['1','On']],'The scrolling feed of active alerts on the nodes page.')}
  ${row('rotation','Rotation',[['false','Off'],['true','On']],'Page through nodes → alerts → backups every 20 seconds.')}
+ ${row('dense','Dense header',[['false','Off'],['true','On']],'Five fleet numbers on the header line (adds LLMs serving); off keeps four with bigger type.')}
  ${row('fit','Fit',[['shrink','Shrink'],['scroll','Scroll']],'Shrink: everything on one screen, the type gets small (the classic kiosk). Scroll: full-size type, the grid scrolls when it overflows.')}</div>`}
 function setCustom(k,v){NXT.save({theme:'custom',custom:{[k]:v}});clearTimeout(setCustom._p);setCustom._p=setTimeout(pushAccount,600);
  /* re-render only the cards/swatches when the pickers settle: keep the open picker */
@@ -3197,6 +3213,7 @@ let kioskPg=0;
 const kioskCfg=()=>{const q=new URLSearchParams(location.search),k={...NXT.eff().kiosk};
  for(const p of['alerts','ticker','backups']){const v=+q.get(p);if(q.get(p)!=null&&!isNaN(v))k[p]=v}
  if(q.get('rotation')!=null)k.rotation=q.get('rotation')!='0';
+ if(q.get('dense')!=null)k.dense=q.get('dense')!='0';
  /* extra pages or a rotation must fit one screen — shrink, even if the site prefers scroll */
  if(['alerts','backups','ticker','rotation'].some(p=>q.get(p)!=null)||k.rotation)k.fit='shrink';
  if(q.get('fit')=='scroll'||q.get('fit')=='shrink')k.fit=q.get('fit');
@@ -3205,28 +3222,43 @@ const kioskPages=()=>{const k=kioskCfg();return 1+(k.alerts>0?1:0)+(k.backups>0?
 const kioskPage=()=>{const q=new URLSearchParams(location.search);
  if(q.get('page')!=null)return Math.max(0,Math.min(kioskPages()-1,+q.get('page')||0));
  return kioskPg%kioskPages()};
-/* the header row: brand + four big numbers + clock. a=alerts, k=kiosk settings */
+/* the header row: brand + big numbers + clock. a=alerts, k=kiosk settings.
+   dense (default) packs five KPIs; spare keeps the classic four with bigger type. */
 function kioskTop(M,H,order,I,a,k,pg,pages){
  const tok=((M.fleet||{}).series||{}).tokens||{};
  const tps=Object.values(tok).reduce((s,x)=>s+lastV(x),0);
  const gpuW=order.reduce((s,n)=>s+(+(H[n]||{}).gpu_power||0),0);
  const act=(a.active||[]).length,crit=(a.active||[]).filter(x=>x.severity=='critical').length;
+ const llmN=(I.llm_up!=null&&I.llm_total!=null)?`${Math.round(I.llm_up)}/${Math.round(I.llm_total)}`:null;
+ const llmBad=llmN&&I.llm_up<I.llm_total;
  const now=new Date(),tm=now.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}).match(/^([\d:.\s]+)(.*)$/)||['',now.toTimeString().slice(0,5),''];
+ const dim=pgOn=>k.dense?'':(pgOn?'':' dim'), dn=()=>k.dense?' kdense':'';
  return `<div class=ktop><a class=kbrand href="/"><span class=mark></span><span class=wordmark>Noct<b>yx</b></span></a>
-  <div class="kbig${pg==0?'':' dim'}" data-k=llm><b data-ghost="${ghost(tps.toFixed(0))}">${tps.toFixed(0)}</b><span>tokens / second</span></div>
-  <div class="kbig${pg==0?'':' dim'}" data-k=power><b data-ghost="${ghost(Math.round(gpuW))}">${Math.round(gpuW)}</b><span>GPU watts</span></div>
-  <div class="kbig${pg==2?'':' dim'}" data-k=ok><b class="${I.backups_ok<I.backups_total?'warn':'ok'}" data-ghost="${ghost((I.backups_ok??'?')+'/'+(I.backups_total??'?'))}">${esc(I.backups_ok??'?')}/${esc(I.backups_total??'?')}</b><span>backups on schedule</span></div>
-  <div class="kbig${pg==1?'':' dim'}" data-k=alert><b class="${crit?'bad':act?'warn':'ok'}" data-ghost="${ghost(act)}">${act}</b><span>alert${act==1?'':'s'}</span></div>
+ <div class="kbig${dn()}${pg==0?'':' dim'}" data-k=llm><b data-ghost="${ghost(tps.toFixed(0))}">${tps.toFixed(0)}</b><span>tokens / second</span></div>
+ <div class="kbig${dn()}${pg==0?'':' dim'}" data-k=power><b data-ghost="${ghost(Math.round(gpuW))}">${Math.round(gpuW)}</b><span>GPU watts</span></div>
+ ${llmN?`<div class="kbig${dn()}${pg==0?'':' dim'}" data-k=ok><b class="${llmBad?'warn':'ok'}" data-ghost="${ghost(llmN)}">${llmN}</b><span>LLM serving</span></div>`:''}
+ <div class="kbig${dn()}${pg==2?'':' dim'}" data-k=ok><b class="${I.backups_ok<I.backups_total?'warn':'ok'}" data-ghost="${ghost((I.backups_ok??'?')+'/'+(I.backups_total??'?'))}">${esc(I.backups_ok??'?')}/${esc(I.backups_total??'?')}</b><span>backups on schedule</span></div>
+ <div class="kbig${dn()}${pg==1?'':' dim'}" data-k=alert><b class="${crit?'bad':act?'warn':'ok'}" data-ghost="${ghost(act)}">${act}</b><span>alert${act==1?'':'s'}</span></div>
   <div class=kclock><b data-ghost="${ghost(tm[1].trim())}">${esc(tm[1].trim())}${tm[2].trim()?`<small>${esc(tm[2].trim())}</small>`:''}</b><span>${now.toLocaleDateString([], {weekday:'short',month:'short',day:'numeric'})}</span>${pages>1?`<span class=kpg>${pg+1} / ${pages}</span>`:''}</div></div>`}
 /* one node card: metrics, meters, and EVERY serving model with its rate (an idle head-server
    slot no longer masks the model actually running on the node) */
 function kioskNode(n,h){const srvs=((h.llm||{}).servers||[]).filter(s=>s.model||s.spark);
  const mem=h.mem_total?Math.round(100*h.mem_used/h.mem_total):null,up=h.up!==0&&h.up!==false;
  const t=(v,w)=>v==null?'—':`<b class="${v>=w?'bad':v>=w-10?'warn':''}">${fmtT(v)}</b>`;
- return `<div class="knode ${up?'':'down'}"><div class=kh><span class="dot ${up?'ok':'bad'}"></span><b>${esc(n)}</b></div>
+ const sp=h.spark||{};
+ /* the 30-min trace fills the tile's middle: a 300x100 user-space box mapped exactly onto the
+    measured pixels (none-scaling strokes keep the hairlines crisp); flat lines sit 2px above
+    their label so the two never collide */
+ const tr=(sp.gpu_util&&sp.gpu_util.length>1)?`<div class=ktrace><svg class=kspark viewBox="0 0 300 100" preserveAspectRatio="none" aria-hidden="true">
+   <line class=grid x1=0 y1=48.3 x2=300 y2=48.3/><line class=grid x1=0 y1=2.3 x2=300 y2=2.3/>${
+   _lines([{pts:sp.gpu_util,cls:'a'},{pts:sp.cpu,cls:'g'}],300,96,100)}</svg>
+  <i class=a style="top:calc(2px + .3em)">GPU</i><i class=g style="bottom:2px">CPU</i></div>`:'';
+ return `<div class="knode ${up?'':'down'}"><div class=kh><span class="dot ${up?'ok':'bad'}"></span><b>${esc(n)}</b>
+   ${h.load1!=null?`<span class=kload>load ${(+h.load1).toFixed(1)}</span>`:''}</div>
   <div class=kgrid><span>GPU</span><b>${h.gpu_util!=null?Math.round(h.gpu_util)+'%':'—'}</b><span>GPU temp</span>${t(h.gpu_temp,85)}
    <span>power</span><b>${h.gpu_power!=null?Math.round(h.gpu_power)+' W':'—'}</b><span>CPU temp</span>${t(h.sys_temp,90)}
    <span>CPU</span><b>${h.cpu!=null?Math.round(h.cpu)+'%':'—'}</b><span>memory</span><b>${mem!=null?mem+'%':'—'}</b></div>
+  ${tr}
   <div class=kmeters><span>GPU</span>${bar(h.gpu_util,true,'gpu')}<span>CPU</span>${bar(h.cpu,true,'cpu')}
    <span>MEM</span>${bar(mem,true,'mem')}<span>TEMP</span>${bar(h.gpu_temp!=null?h.gpu_temp/95*100:0,false,'temp')}</div>
   ${srvs.map(s=>{const g=s.spark?lastV(s.spark.gen_tps):(s.gen_tps!=null?s.gen_tps:null);
@@ -3508,7 +3540,7 @@ async function tick(p){
   const why=String((e&&e.stack)||e).split('\n').slice(0,2).join(' ').slice(0,300);
   console.error('panel '+p.id+':',e);
   const st=$('st-'+p.id);if(st){st.textContent='err';st.title=why;st.classList.remove('live')}
-  if(body&&!p._painted)body.innerHTML=`<div class="empty bad">panel failed: ${esc(why.split(' at ')[0])}<br><span class=mut>details on the “err” pill · retries in ${p.int}s</span></div>`}
+  if(body&&!p._painted&&VIEW!='kiosk')body.innerHTML=`<div class="empty bad">panel failed: ${esc(why.split(' at ')[0])}<br><span class=mut>details on the “err” pill · retries in ${p.int}s</span></div>`}
  finally{clearTimeout(slow)}
 }
 /* in-place DOM patch: the renderer stays a pure string function, but the live tree is
@@ -3622,6 +3654,7 @@ function kioskFitNow(){
   probe.innerHTML='';
   const copy=wrap.cloneNode(true);
   copy.querySelectorAll('.kmeters .bar').forEach(b=>{b.className='barx';b.style.cssText='height:8px'});
+  copy.querySelectorAll('.ktrace').forEach(s=>s.style.cssText='height:calc(64px*var(--kf-h,1))');   /* fixed, data-independent */
   copy.querySelectorAll('.kiosk-wrap,.knodes').forEach(e=>e.removeAttribute('style'));
   copy.querySelectorAll('.knodes>*').forEach(e=>{e.style.position='';e.style.transform=''});
   probe.appendChild(copy);
