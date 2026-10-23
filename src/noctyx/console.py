@@ -2323,7 +2323,9 @@ html.kiosk-1{--kf-h:.78} html.kiosk-2{--kf-h:.62}
 .ktop{display:flex;align-items:center;gap:calc(18px*var(--kf-h,1));flex-wrap:nowrap;overflow:hidden;width:100%;min-width:0}
 .kpair{flex:0 1 auto;min-width:0}
 .kbrand{display:flex;align-items:center;gap:calc(10px*var(--kf-h,1));text-decoration:none} .kbrand .mark{width:calc(34px*var(--kf-h,1));height:calc(34px*var(--kf-h,1))} .kbrand .wordmark{font-size:calc(22px*var(--kf-h,1))}
-.kbig{display:flex;flex-direction:column;align-items:flex-end} .kbig b{font:800 calc(44px*var(--kf-h,1))/1 var(--mono)} .kbig span,.kclock span{font:calc(11px*var(--kf-h,1)) var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim)}
+/* each header number sits centred over its label (user, 2026-10-23) */
+.kbig{display:flex;flex-direction:column;align-items:center} .kbig>span{text-align:center}
+.kbig b{font:800 calc(44px*var(--kf-h,1))/1 var(--mono)} .kbig span,.kclock span{font:calc(11px*var(--kf-h,1)) var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim)}
 .kclock{display:flex;flex-direction:column;align-items:flex-end;padding-left:calc(20px*var(--kf-h,1));border-left:1px solid var(--line);margin-left:auto;flex:0 0 auto} .kclock b{font:700 calc(44px*var(--kf-h,1))/1 var(--mono);white-space:nowrap}
 /* header graphs sit directly beside their own number (user, 2026-10-22): graph first, then the
    number+label it belongs to, so each KPI reads as one unit. Graphs are the flexible part of
