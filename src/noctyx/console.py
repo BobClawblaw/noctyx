@@ -2329,7 +2329,7 @@ html.kiosk-1{--kf-h:.78} html.kiosk-2{--kf-h:.62}
    number+label it belongs to, so each KPI reads as one unit. Graphs are the flexible part of
    the row — they give up width before the numbers or the clock are pushed off the screen. */
 .kpair{display:flex;align-items:center;gap:calc(10px*var(--kf-h,1));flex:0 1 auto;min-width:0;overflow:hidden}
-.kvitals{display:flex;align-items:stretch;gap:calc(16px*var(--kf-h,1));flex:0 1 auto;min-width:0;overflow:hidden;padding-left:calc(16px*var(--kf-h,1));border-left:1px solid var(--line)}
+.kvitals{display:flex;align-items:stretch;gap:calc(16px*var(--kf-h,1));flex:0 0 auto;padding-left:calc(16px*var(--kf-h,1));border-left:1px solid var(--line)}
 .kvital{display:flex;flex-direction:column;align-items:flex-start;min-width:0;flex:0 0 auto}
 .kvital b{font:800 calc(23px*var(--kf-h,1))/1 var(--mono);color:var(--fg)}
 .kvital span{font:calc(9.5px*var(--kf-h,1)) var(--sans);letter-spacing:.09em;text-transform:uppercase;color:var(--fg-faint);white-space:nowrap}
