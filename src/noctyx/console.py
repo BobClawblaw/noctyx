@@ -2348,10 +2348,13 @@ html.kiosk-1{--kf-h:.78} html.kiosk-2{--kf-h:.62}
 .kvital{display:flex;flex-direction:column;align-items:flex-start;min-width:0;flex:0 0 auto}
 .kvital b{font:800 calc(23px*var(--kf-h,1))/1 var(--mono);color:var(--fg)}
 .kvital span{font:calc(9.5px*var(--kf-h,1)) var(--sans);letter-spacing:.09em;text-transform:uppercase;color:var(--fg-faint);white-space:nowrap}
-.ktopg{grid-area:1/1;min-width:0;overflow:hidden}
-.ktopg .chart{margin:0}
+/* the graph fills its whole cell, edge to edge and as tall as the number and its label together
+   (user, 2026-10-23): a compact chart (no axes, stretched viewBox) inside a column flex */
+.ktopg{grid-area:1/1/3/2;align-self:stretch;display:flex;min-width:0;overflow:hidden}
+.ktopg .chart{margin:0;flex:1;display:flex;min-width:0}
 .ktopg .ch-h{display:none}
-.ktopg .chart svg{height:calc(40px*var(--kf-h,1));width:100%;display:block;border-radius:4px}
+.ktopg .chart svg,.ktopg .chart svg.cmp{flex:1;height:auto;min-height:calc(40px*var(--kf-h,1));width:100%;display:block;border-radius:4px}
+.ktopg .chart svg path,.ktopg .chart svg line{vector-effect:non-scaling-stroke}
 .ktopg .ch-empty{display:none}
 .kslots{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:calc(12px*var(--kf-h,1))}
 .kslot,.knode{background:var(--bg-1);border:1px solid var(--line-soft);border-radius:var(--radius);padding:calc(14px*var(--kf-h,1)) calc(16px*var(--kf-h,1));min-height:0;display:flex;flex-direction:column}
@@ -3428,15 +3431,15 @@ function kioskTop(M,H,order,I,a,k,pg,pages){
  const dim=pgOn=>k.dense?'':(pgOn?'':' dim'), dn=()=>k.dense?' kdense':'';
  return `<div class=ktop><a class=kbrand href="/"><span class=mark></span><span class=wordmark>Noct<b>yx</b></span></a>
  <div class="kpair${pg==0?'':' dim'}" data-k=toks>
-  <div class=ktopg>${chart('', Object.entries(tok).map(([m,pts])=>({name:m,pts,cls:'t'})), v=>v.toFixed(0)+' tok/s', {span:'1h'})}</div>
+  <div class=ktopg>${chart('', Object.entries(tok).map(([m,pts])=>({name:m,pts,cls:'t'})), v=>v.toFixed(0)+' tok/s', {span:'1h',compact:1})}</div>
   <div class="kbig${dn()}"><b data-ghost="${ghost(tps.toFixed(0))}">${tps.toFixed(0)}</b><span>tokens /<br>second</span></div>
  </div>
  <div class="kpair${pg==0?'':' dim'}" data-k=watts>
-  <div class=ktopg>${chart('', [{name:'fleet',pts:gpw,cls:'w'}], v=>Math.round(v)+' W', {span:'1h'})}</div>
+  <div class=ktopg>${chart('', [{name:'fleet',pts:gpw,cls:'w'}], v=>Math.round(v)+' W', {span:'1h',compact:1})}</div>
   <div class="kbig${dn()}"><b data-ghost="${ghost(Math.round(gpuW))}">${Math.round(gpuW)}</b><span>GPU<br>watts</span></div>
  </div>
  <div class="kpair${pg==0?'':' dim'}" data-k=temp>
-  <div class=ktopg>${chart('', [{name:'hottest',pts:tmaxSpk,cls:'c1'}], v=>Math.round(v)+' °C', {span:'1h'})}</div>
+  <div class=ktopg>${chart('', [{name:'hottest',pts:tmaxSpk,cls:'c1'}], v=>Math.round(v)+' °C', {span:'1h',compact:1})}</div>
   <div class="kbig${dn()}"><b class="${tmaxCls}" data-ghost="${ghost(Math.round(tmaxNow||0))}">${tmaxNow!=null?Math.round(tmaxNow):'—'}</b><span>GPU temp<br>max</span></div>
  </div>
  <div class="kvitals${pg==0?'':' dim'}">
