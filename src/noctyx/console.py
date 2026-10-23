@@ -2067,7 +2067,7 @@ def overview():
 FAVICON = 'data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%20%3Cdefs%3E%20%3ClinearGradient%20id%3D%22tile%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%220%22%20y2%3D%221%22%3E%20%3Cstop%20offset%3D%220%22%20stop-color%3D%22%23151b3d%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%2305060d%22%2F%3E%20%3C%2FlinearGradient%3E%20%3ClinearGradient%20id%3D%22neon%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%20%3Cstop%20offset%3D%220%22%20stop-color%3D%22%233ff0ff%22%2F%3E%3Cstop%20offset%3D%22.55%22%20stop-color%3D%22%235b8cff%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%23b45cff%22%2F%3E%20%3C%2FlinearGradient%3E%20%3CradialGradient%20id%3D%22iris%22%20cx%3D%22.5%22%20cy%3D%22.42%22%20r%3D%22.62%22%3E%20%3Cstop%20offset%3D%220%22%20stop-color%3D%22%23f0feff%22%2F%3E%3Cstop%20offset%3D%22.3%22%20stop-color%3D%22%235ff3ff%22%2F%3E%3Cstop%20offset%3D%22.78%22%20stop-color%3D%22%235b6cff%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%237a3cff%22%2F%3E%20%3C%2FradialGradient%3E%20%3Cfilter%20id%3D%22glow%22%20x%3D%22-30%25%22%20y%3D%22-30%25%22%20width%3D%22160%25%22%20height%3D%22160%25%22%3E%20%3CfeGaussianBlur%20stdDeviation%3D%222%22%20result%3D%22b%22%2F%3E%3CfeMerge%3E%3CfeMergeNode%20in%3D%22b%22%2F%3E%3CfeMergeNode%20in%3D%22SourceGraphic%22%2F%3E%3C%2FfeMerge%3E%20%3C%2Ffilter%3E%20%3C%2Fdefs%3E%20%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2215%22%20fill%3D%22url%28%23tile%29%22%2F%3E%20%3Crect%20x%3D%22.75%22%20y%3D%22.75%22%20width%3D%2262.5%22%20height%3D%2262.5%22%20rx%3D%2214.25%22%20fill%3D%22none%22%20stroke%3D%22%233ff0ff%22%20stroke-opacity%3D%22.25%22%20stroke-width%3D%221.5%22%2F%3E%20%3Cg%20fill%3D%22%23d6ecff%22%3E%3Ccircle%20cx%3D%2212%22%20cy%3D%2212.5%22%20r%3D%221.1%22%2F%3E%3Ccircle%20cx%3D%2251.5%22%20cy%3D%2210%22%20r%3D%22.8%22%2F%3E%3Ccircle%20cx%3D%2254%22%20cy%3D%2252.5%22%20r%3D%221%22%2F%3E%3Ccircle%20cx%3D%229.5%22%20cy%3D%2250%22%20r%3D%22.7%22%2F%3E%3C%2Fg%3E%20%3Cg%20filter%3D%22url%28%23glow%29%22%3E%20%3Cpath%20d%3D%22M6.5%2032%20Q32%207%2057.5%2032%20Q32%2057%206.5%2032%20Z%22%20fill%3D%22none%22%20stroke%3D%22url%28%23neon%29%22%20stroke-width%3D%223.8%22%20stroke-linejoin%3D%22round%22%2F%3E%20%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2210.8%22%20fill%3D%22url%28%23iris%29%22%2F%3E%20%3C%2Fg%3E%20%3Cpath%20d%3D%22M32%2021.8%20Q35.6%2032%2032%2042.2%20Q28.4%2032%2032%2021.8%20Z%22%20fill%3D%22%2305060d%22%2F%3E%20%3Ccircle%20cx%3D%2228.2%22%20cy%3D%2227.9%22%20r%3D%222.1%22%20fill%3D%22%23fff%22%20fill-opacity%3D%22.92%22%2F%3E%20%3C%2Fsvg%3E'
 LOGIN_PAGE = r"""<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
 <title>Noctyx · sign in</title><link rel=icon href="/assets/favicon.svg">__THEME_JS__<style>
-:root{--bg:#070913;--bg-1:#0d1020;--bg-0:#05060d;--line:#242a47;--fg:#e2e8f6;--fg-dim:#97a3c2;--fg-faint:#67718f;--accent:#3fe6ff;--accent-2:#b45cff;--accent-ink:#0a0d14;--bad:#ef5a5a;--glow:#0b1124;
+:root{--bg:#070913;--bg-1:#0d1020;--bg-0:#05060d;--line:#242a47;--fg:#e2e8f6;--fg-dim:#97a3c2;--fg-faint:#67718f;--accent:#3fe6ff;--accent-2:#c3a6ff;--accent-ink:#0a0d14;--bad:#ef5a5a;--glow:#0b1124;
  --sans:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;--mono:ui-monospace,Menlo,Consolas,monospace}
 html,body{height:100%;margin:0}
 body{display:grid;place-items:center;background:radial-gradient(900px 500px at 70% -10%,var(--glow),transparent 60%),var(--bg);color:var(--fg);font:14px var(--sans)}
@@ -2133,34 +2133,34 @@ const NXT=(()=>{
  const KK=['cpu','gpu','temp','mem','net','disk','power','llm','ok','alert'];
  const PRESETS={
   noctyx:{label:'Noctyx',blurb:'Night console — navy and neon cyan',
-   dark:{bg:'#070913',panel:'#0d1020',bg2:'#121629',bg3:'#191e36',bg0:'#05060d',line:'#242a47',lineSoft:'#1a1f38',text:'#e2e8f6',muted:'#97a3c2',faint:'#67718f',accent:'#3fe6ff',accentDim:'#1f93b3',accent2:'#b45cff',ok:'#2ecc8f',warn:'#f0b429',bad:'#ef5a5a',info:'#58a6ff'},
+   dark:{bg:'#070913',panel:'#0d1020',bg2:'#121629',bg3:'#191e36',bg0:'#05060d',line:'#242a47',lineSoft:'#1a1f38',text:'#e2e8f6',muted:'#a9c0cc',faint:'#9db4c2',accent:'#3fe6ff',accentDim:'#1f93b3',accent2:'#c3a6ff',ok:'#2ecc8f',warn:'#f0b429',bad:'#ef5a5a',info:'#58a6ff'},
    light:{bg:'#eef1f8',panel:'#ffffff',bg2:'#f5f7fc',bg3:'#e7ebf5',bg0:'#e3e8f2',line:'#cfd6e6',lineSoft:'#e0e5f0',text:'#121729',muted:'#525d78',faint:'#8790a6',accent:'#0a9cc0',accentDim:'#077a96',accent2:'#8a3fe0',ok:'#1b9460',warn:'#a87a08',bad:'#d13c3c',info:'#2f6fd6'}},
   phosphor:{label:'Phosphor',blurb:'Instrument panel — LED meters, scope traces, LCD numerals',style:'phosphor',
-   dark:{k:{cpu:'#3dff8f',gpu:'#3b8cff',temp:'#ffb020',mem:'#b45cff',net:'#22d3ee',disk:'#2ee6a6',power:'#ffd60a',llm:'#ff4fd8',ok:'#3dff8f',alert:'#ff4d5e'},bg:'#04070a',panel:'#0a1015',bg2:'#0d151b',bg3:'#132029',bg0:'#020406',line:'#1a2a35',lineSoft:'#12202a',text:'#e4f1f7',muted:'#8ba3b3',faint:'#587083',accent:'#1fd1ff',accentDim:'#118aab',accent2:'#3dff8f',ok:'#3dff8f',warn:'#ffb020',bad:'#ff4d5e',info:'#3b8cff'},
+   dark:{k:{cpu:'#3dff8f',gpu:'#3b8cff',temp:'#ffb020',mem:'#c3a6ff',net:'#22d3ee',disk:'#2ee6a6',power:'#ffd60a',llm:'#6ff5d2',ok:'#3dff8f',alert:'#ff4d5e'},bg:'#04070a',panel:'#0a1015',bg2:'#0d151b',bg3:'#132029',bg0:'#020406',line:'#1a2a35',lineSoft:'#12202a',text:'#e4f1f7',muted:'#a9c0cc',faint:'#9db4c2',accent:'#1fd1ff',accentDim:'#118aab',accent2:'#3dff8f',ok:'#3dff8f',warn:'#ffb020',bad:'#ff4d5e',info:'#3b8cff'},
    light:{...PHL,accent:'#0a8fc0',accentDim:'#086f95',accent2:'#0f9d58'}},
   p1green:PH('Phosphor · P1 Green','Green-phosphor CRT: lime, mint and teal on black',
-   {bg:'#030806',panel:'#07100c',bg2:'#0a1510',bg3:'#0f1f17',bg0:'#010402',line:'#173525',lineSoft:'#0f2419',text:'#ddf5e5',muted:'#86b896',faint:'#4f7a5e',accent:'#33ff77',accentDim:'#1a9944',accent2:'#b6ff4d',ok:'#33ff77',warn:'#e8ff4d',bad:'#ff5c5c',info:'#4dffc3',
+   {bg:'#030806',panel:'#07100c',bg2:'#0a1510',bg3:'#0f1f17',bg0:'#010402',line:'#173525',lineSoft:'#0f2419',text:'#ddf5e5',muted:'#a5d2b2',faint:'#93c4a2',accent:'#33ff77',accentDim:'#1a9944',accent2:'#b6ff4d',ok:'#33ff77',warn:'#e8ff4d',bad:'#ff5c5c',info:'#4dffc3',
     k:{cpu:'#33ff77',gpu:'#4dffc3',temp:'#e8ff4d',mem:'#9dff4d',net:'#22e6a8',disk:'#7dffa8',power:'#d4ff33',llm:'#00ffb3',ok:'#33ff77',alert:'#ff5c5c'}}),
   p3amber:PH('Phosphor · P3 Amber','Amber terminal: gold, orange and honey',
-   {bg:'#090704',panel:'#110d08',bg2:'#16110a',bg3:'#1f180e',bg0:'#040302',line:'#3a2b17',lineSoft:'#2a1f11',text:'#f6ead8',muted:'#c2a37c',faint:'#86704f',accent:'#ffb000',accentDim:'#a87100',accent2:'#ffd27a',ok:'#ffc94d',warn:'#ff8a1f',bad:'#ff4a3d',info:'#ffd27a',
+   {bg:'#090704',panel:'#110d08',bg2:'#16110a',bg3:'#1f180e',bg0:'#040302',line:'#3a2b17',lineSoft:'#2a1f11',text:'#f6ead8',muted:'#dcc0a0',faint:'#c4a885',accent:'#ffb000',accentDim:'#a87100',accent2:'#ffd27a',ok:'#ffc94d',warn:'#ff8a1f',bad:'#ff4a3d',info:'#ffd27a',
     k:{cpu:'#ffb000',gpu:'#ffd27a',temp:'#ff8a1f',mem:'#ff9e5e',net:'#ffe08a',disk:'#ffc94d',power:'#fff07a',llm:'#ff7a3d',ok:'#ffc94d',alert:'#ff4a3d'}}),
   nixie:PH('Phosphor · Nixie','Neon tubes behind smoked glass, green indicator lamps',
-   {bg:'#080707',panel:'#100e0d',bg2:'#151210',bg3:'#1d1815',bg0:'#040303',line:'#33261f',lineSoft:'#251c17',text:'#f2e8e1',muted:'#b89c8c',faint:'#7d665a',accent:'#ff6a1a',accentDim:'#b2440a',accent2:'#ffa15c',ok:'#6fe36f',warn:'#ffb347',bad:'#ff3b30',info:'#ff9a5c',
+   {bg:'#080707',panel:'#100e0d',bg2:'#151210',bg3:'#1d1815',bg0:'#040303',line:'#33261f',lineSoft:'#251c17',text:'#f2e8e1',muted:'#d4b8a8',faint:'#bfa090',accent:'#ff6a1a',accentDim:'#b2440a',accent2:'#ffa15c',ok:'#6fe36f',warn:'#ffb347',bad:'#ff3b30',info:'#ff9a5c',
     k:{cpu:'#ff6a1a',gpu:'#ff9a3d',temp:'#ffc04d',mem:'#ff4f6e',net:'#ffb37a',disk:'#ff8c42',power:'#ffd166',llm:'#ff5a36',ok:'#6fe36f',alert:'#ff3b30'}}),
   synthwave:PH('Phosphor · Synthwave','Magenta, violet and cyan on midnight purple',
-   {bg:'#0a0812',panel:'#110e1d',bg2:'#161226',bg3:'#1e1832',bg0:'#05040a',line:'#30264c',lineSoft:'#221b38',text:'#efe9fb',muted:'#a99cc6',faint:'#706590',accent:'#ff2fd0',accentDim:'#a3188a',accent2:'#2de2ff',ok:'#2dffb3',warn:'#ffcc33',bad:'#ff3d6e',info:'#2de2ff',
+   {bg:'#0a0812',panel:'#110e1d',bg2:'#161226',bg3:'#1e1832',bg0:'#05040a',line:'#30264c',lineSoft:'#221b38',text:'#efe9fb',muted:'#c6badf',faint:'#ab9fd0',accent:'#ff2fd0',accentDim:'#a3188a',accent2:'#2de2ff',ok:'#2dffb3',warn:'#ffcc33',bad:'#ff3d6e',info:'#2de2ff',
     k:{cpu:'#2dffb3',gpu:'#2de2ff',temp:'#ffcc33',mem:'#a96bff',net:'#5ab0ff',disk:'#39f5d0',power:'#ffe14d',llm:'#ff2fd0',ok:'#2dffb3',alert:'#ff3d6e'}}),
   arctic:PH('Phosphor · Arctic','Ice blue, glacier cyan and frost on cold navy',
-   {bg:'#050a12',panel:'#0a1220',bg2:'#0e1828',bg3:'#132134',bg0:'#03060b',line:'#1c2e47',lineSoft:'#142338',text:'#e8f4ff',muted:'#92aac6',faint:'#5d7591',accent:'#7fdcff',accentDim:'#3a95c2',accent2:'#d6f3ff',ok:'#6ff5d2',warn:'#ffd36b',bad:'#ff6b8a',info:'#8fb8ff',
+   {bg:'#050a12',panel:'#0a1220',bg2:'#0e1828',bg3:'#132134',bg0:'#03060b',line:'#1c2e47',lineSoft:'#142338',text:'#e8f4ff',muted:'#a9c4e0',faint:'#96b2d0',accent:'#7fdcff',accentDim:'#3a95c2',accent2:'#d6f3ff',ok:'#6ff5d2',warn:'#ffd36b',bad:'#ff6b8a',info:'#8fb8ff',
     k:{cpu:'#6ff5d2',gpu:'#8fb8ff',temp:'#ffd36b',mem:'#c3a6ff',net:'#7fdcff',disk:'#a8f0ff',power:'#fff2a8',llm:'#d6f3ff',ok:'#6ff5d2',alert:'#ff6b8a'}}),
   redops:PH('Phosphor · Red Ops','All red, for a dark room: keeps your night vision',
-   {bg:'#060202',panel:'#0c0404',bg2:'#110606',bg3:'#190909',bg0:'#030101',line:'#341010',lineSoft:'#240b0b',text:'#f0b8b2',muted:'#b27470',faint:'#7a4a47',accent:'#ff2a2a',accentDim:'#a31616',accent2:'#ff6b6b',ok:'#d94a4a',warn:'#ff8a5c',bad:'#ffd0d0',info:'#ff5c5c',
+   {bg:'#060202',panel:'#0c0404',bg2:'#110606',bg3:'#190909',bg0:'#030101',line:'#341010',lineSoft:'#240b0b',text:'#f0b8b2',muted:'#d69a96',faint:'#c0807c',accent:'#ff2a2a',accentDim:'#a31616',accent2:'#ff6b6b',ok:'#d94a4a',warn:'#ff8a5c',bad:'#ffd0d0',info:'#ff5c5c',
     k:{cpu:'#ff3b3b',gpu:'#ff6b5c',temp:'#ff8a5c',mem:'#e04870',net:'#ff5c7a',disk:'#ff4d4d',power:'#ff9466',llm:'#ff2a55',ok:'#d94a4a',alert:'#ffd0d0'}}),
   aurora:PH('Phosphor · Aurora','Northern lights: teal, violet and rose over a polar night',
-   {bg:'#04090d',panel:'#09131a',bg2:'#0c1820',bg3:'#11202b',bg0:'#020507',line:'#1a3040',lineSoft:'#12232f',text:'#e6f4f2',muted:'#8fb0b4',faint:'#5a777c',accent:'#5cffc8',accentDim:'#2a9e7c',accent2:'#b18cff',ok:'#5cffc8',warn:'#ffcf6b',bad:'#ff6b81',info:'#6aa8ff',
+   {bg:'#04090d',panel:'#09131a',bg2:'#0c1820',bg3:'#11202b',bg0:'#020507',line:'#1a3040',lineSoft:'#12232f',text:'#e6f4f2',muted:'#a9d0d4',faint:'#93bcc0',accent:'#5cffc8',accentDim:'#2a9e7c',accent2:'#b18cff',ok:'#5cffc8',warn:'#ffcf6b',bad:'#ff6b81',info:'#6aa8ff',
     k:{cpu:'#5cffc8',gpu:'#6aa8ff',temp:'#ffcf6b',mem:'#b18cff',net:'#4de0ff',disk:'#7af0b0',power:'#ffe58a',llm:'#ff7ad9',ok:'#5cffc8',alert:'#ff6b81'}}),
   outrun:PH('Phosphor · Outrun','Sunset over a neon grid: orange, hot pink and teal',
-   {bg:'#0a0718',panel:'#110d24',bg2:'#16112e',bg3:'#1e173c',bg0:'#05030c',line:'#33275a',lineSoft:'#241c44',text:'#f5ecf7',muted:'#b4a3cc',faint:'#776a95',accent:'#ff8a3d',accentDim:'#b0571f',accent2:'#ff3dac',ok:'#2ef2d8',warn:'#ffd23f',bad:'#ff4f5e',info:'#5b8cff',
+   {bg:'#0a0718',panel:'#110d24',bg2:'#16112e',bg3:'#1e173c',bg0:'#05030c',line:'#33275a',lineSoft:'#241c44',text:'#f5ecf7',muted:'#d4c3ea',faint:'#b8a9d0',accent:'#ff8a3d',accentDim:'#b0571f',accent2:'#ff3dac',ok:'#2ef2d8',warn:'#ffd23f',bad:'#ff4f5e',info:'#5b8cff',
     k:{cpu:'#2ef2d8',gpu:'#5b8cff',temp:'#ffb347',mem:'#c77dff',net:'#53d8ff',disk:'#3ee6a0',power:'#ffd23f',llm:'#ff3dac',ok:'#2ef2d8',alert:'#ff4f5e'}}),
   lcd:{label:'Phosphor · LCD',blurb:'Reflective calculator LCD by day; blue backlight by night',style:'phosphor',glow:{light:0,dark:.6},
    light:{bg:'#b8c3a0',panel:'#c8d2b1',bg2:'#c2cdab',bg3:'#b4bf98',bg0:'#aab68c',line:'#94a07a',lineSoft:'#a5b08b',text:'#1b2416',muted:'#46533b',faint:'#6a7660',accent:'#1f2e18',accentDim:'#3c4d33',accent2:'#2b3d22',ok:'#1f5a1f',warn:'#7a5200',bad:'#8a1a1a',info:'#1b2f4a',
@@ -2226,8 +2226,8 @@ const NXT=(()=>{
 :root{
   --bg:#070913; --bg-1:#0d1020; --bg-2:#121629; --bg-3:#191e36;
   --line:#242a47; --line-soft:#1a1f38;
-  --fg:#e2e8f6; --fg-dim:#97a3c2; --fg-faint:#67718f;
-  --accent:#3fe6ff; --accent-dim:#1f93b3; --accent-2:#b45cff;
+  --fg:#e2e8f6; --fg-dim:#a9c0cc; --fg-faint:#9db4c2;
+  --accent:#3fe6ff; --accent-dim:#1f93b3; --accent-2:#c3a6ff;
   --ok:#2ecc8f; --warn:#f0b429; --bad:#ef5a5a; --info:#58a6ff;
   --bg-0:#05060d; --radius:10px; --radius-sm:6px;
   --accent-ink:#0a0d14; --scrim:rgba(2,4,10,.62); --glow:#0b1124; --dots:#151a2a;
@@ -2751,7 +2751,7 @@ td.acts{white-space:nowrap} td.acts a,td.acts button.lnk{margin-right:6px}
 @font-face{font-family:Michroma;src:url(/assets/fonts/michroma.woff2) format('woff2');font-display:swap}
 @font-face{font-family:DSEG7;src:url(/assets/fonts/dseg7.woff2) format('woff2');font-display:block}
 html[data-style=phosphor]{
- --k-cpu:#3dff8f;--k-gpu:#3b8cff;--k-temp:#ffb020;--k-mem:#b45cff;--k-net:#22d3ee;--k-disk:#2ee6a6;--k-power:#ffd60a;--k-llm:#ff4fd8;--k-ok:#3dff8f;--k-alert:#ff4d5e;
+ --k-cpu:#3dff8f;--k-gpu:#3b8cff;--k-temp:#ffb020;--k-mem:#c3a6ff;--k-net:#22d3ee;--k-disk:#2ee6a6;--k-power:#ffd60a;--k-llm:#6ff5d2;--k-ok:#3dff8f;--k-alert:#ff4d5e;
  --k:var(--accent);--gl:1;--display:Michroma,var(--sans);--lcd:DSEG7,var(--mono);--radius:9px;--radius-sm:6px;
  --c0:var(--k-gpu);--c1:var(--k-temp);--c2:var(--k-cpu);--c3:var(--k-power);--c4:var(--k-llm);--c5:var(--k-disk);--c6:var(--k-mem);--c7:var(--k-alert)}
 html[data-style=phosphor][data-theme=light]{--gl:.35;
