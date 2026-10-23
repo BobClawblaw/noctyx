@@ -3790,10 +3790,12 @@ function repaint(id,data){const p=PANELS.find(x=>x.id==id),b=$('b-'+id);if(!b||!
  for(const k in CH)if(!document.querySelector(`[data-ch="${k}"]`))delete CH[k];
  if(id=='actions')wireActions()}
 function kioskFitSnap(b){const w=b.querySelector('.kiosk-wrap'),n=b.querySelector('.knodes');
- return w||n?{wrap:w&&w.style.transform,nodes:n&&n.getAttribute('style'),cls:n&&n.className,page:w&&w.dataset.page,pages:w&&w.dataset.pages,kf:_kfSaved}:null}
+ return w||n?{wrap:w&&w.style.transform,boxW:w&&w.style.width,boxH:w&&w.style.height,nodes:n&&n.getAttribute('style'),cls:n&&n.className,page:w&&w.dataset.page,pages:w&&w.dataset.pages,kf:_kfSaved}:null}
 function kioskFitRestore(b,f){if(!f)return;
  const w=b.querySelector('.kiosk-wrap'),n=b.querySelector('.knodes');
  if(w&&f.wrap!=null)w.style.transform=f.wrap;
+ if(w&&f.boxW!=null)w.style.width=f.boxW;        /* the box goes with the transform: scale() on a */
+ if(w&&f.boxH!=null)w.style.height=f.boxH;       /* 100vw wrap would paint a corner of the screen */
  if(w&&f.page!=null)w.dataset.page=f.page;
  if(w&&f.pages!=null)w.dataset.pages=f.pages;
  if(f.kf)kfStyle(f.kf);                          /* the step <html> lost with the old tree */
@@ -3805,12 +3807,26 @@ function kioskFitRestore(b,f){if(!f)return;
    wrap — the live grid can't be measured (its rows are stretched by the flex container) and a bare
    detached tree resolves no inherited --kf-h and none of the theme selectors — then keeps the
    roomiest step whose rows fit full-size, shares the leftover height between them, and falls back
-   to scaling the whole wrap (floor .5) when even the tightest step overflows. The three type steps
+   to scaling the whole wrap when even the tightest step overflows. The three type steps
    come from --kf-h: all the kiosk CSS above derives from it, and kfStyle steps the ROOT — morph()
    can patch neither body's class list nor <html>, and a root class inherits into the probe's clone
    too. One fit per frame; if the applied tree still overflows its rows (a late theme class, a font
    load, a repaint mid-solve), the settled check refits, guard-bounded to converge. */
 const KF={1:.78,2:.62};
+/* The wall is painted at scale S: the wrap is laid out in a box of viewport/S and
+   transform:scale(S)d from the top left, so it always covers exactly the viewport — type,
+   gaps and the rows the solver measured all scale together. S = T x shrink:
+   - T, the type scale, grows the wall on viewports taller than 1080p (a 4K panel at 1x, a
+     zoomed-out browser), where fixed-px type is tiny on the physical screen. The smaller
+     dimension sets it: a wall's room is its height. ?kf= pins it per browser.
+   - shrink (< 1) is the last resort when even the smallest type step overflows. It widens
+     and heightens the box by the same factor, so the shrunk wall still fills the screen
+     (scaling a viewport-sized box would leave it in the top-left corner). */
+const kioskT=(w,h)=>{const q=new URLSearchParams(location.search);
+ if(q.get('kf'))return Math.max(.5,Math.min(3,+q.get('kf')||1));
+ return Math.max(1,Math.min(2.2,Math.min(w,h)/1080))};
+function kioskBox(wrap,S){wrap.style.width=(innerWidth/S)+'px';wrap.style.height=(innerHeight/S)+'px';
+ wrap.style.transformOrigin='top left';wrap.style.transform=S==1?'':`scale(${S.toFixed(4)})`}
 let _kfSaved=0,_fitPend=0,_fitPass=0,_lastFit=null;
 function kfStyle(s){_kfSaved=s;document.documentElement.classList.toggle('kiosk-1',s==1);document.documentElement.classList.toggle('kiosk-2',s==2)}
 function kioskFit(){
@@ -3826,9 +3842,10 @@ requestAnimationFrame(()=>requestAnimationFrame(()=>{setTimeout(()=>{_fitPend=fa
  kioskFitNow()},32)}))}
 function kioskFitNow(){
  const wrap=document.querySelector('.kiosk-wrap');if(!wrap)return;
- const H=wrap.clientHeight,W=wrap.clientWidth;
- wrap.style.transform='';
- if(kioskCfg().fit=='scroll'&&!kioskCfg().rotation){kfStyle(0);return}
+ if(kioskCfg().fit=='scroll'&&!kioskCfg().rotation){kfStyle(0);      /* natural size: no box, no scale */
+  wrap.style.width=wrap.style.height=wrap.style.transform='';return}
+ const T=kioskT(innerWidth,innerHeight),W=innerWidth/T,H=innerHeight/T;
+ kioskBox(wrap,T);
  const nodes=wrap.querySelector('.knodes');if(!nodes||!nodes.children.length){
   /* no node grid: a detail page (alerts/backups) in shrink mode — fill exactly the room the
      wrap has left (header, ticker and gaps already occupy their height in the 100vh column) */
@@ -3856,6 +3873,7 @@ function kioskFitNow(){
   copy.querySelectorAll('.ktrace').forEach(s=>s.style.cssText='height:calc(64px*var(--kf-h,1))');   /* fixed, data-independent */
   copy.querySelectorAll('.kiosk-wrap,.knodes').forEach(e=>e.removeAttribute('style'));
   copy.querySelectorAll('.knodes>*').forEach(e=>{e.style.position='';e.style.transform=''});
+  copy.style.width=W+'px';copy.style.height=H+'px';  /* the layout box at T (100vw is the viewport) */
   probe.appendChild(copy);
   const pn=copy.querySelector('.knodes');
   if(!pn||!pn.children.length)return null;
@@ -3863,7 +3881,10 @@ function kioskFitNow(){
      trade vertical space for horizontal — what a wall with rows to spare (or tall cards to
      read) wants. Clamped to the node count and to one card per column. */
   const want=kioskCfg().cols;
-  const maxCols=Math.max(1,Math.min(n,(want>=1&&want<=8)?want:Math.floor((W+12)/262)));
+  let maxCols=Math.max(1,Math.min(n,(want>=1&&want<=8)?want:Math.floor((W+12)/262)));
+  /* auto: the fewest columns that keep the same row count — 6 nodes in 4 columns is two
+     rows with two holes; 3 columns is the same two rows with wider cards */
+  if(!(want>=1&&want<=8))maxCols=Math.ceil(n/Math.ceil(n/maxCols));
   const kfh=s?KF[s]:1,bottom=Math.ceil(10*kfh);
   const fitc=(cols,rows)=>{const avail=pn.offsetHeight;
     const gw=pn.getBoundingClientRect().width;const colW=(gw-(cols-1)*12)/cols;
@@ -3874,7 +3895,9 @@ function kioskFitNow(){
     if(!cell)return null;
     const nat=rows*cell+(rows-1)*12;
     if(nat<=avail+1)return {cols,rows,rh:(avail-(rows-1)*12)/rows,s,_slack:avail-rows*cell-(rows-1)*12,_cell:cell,_avail:avail};
-    if(cols>=maxCols)return {cols,rows,rh:cell,s,scale:avail/nat};   /* the widest we may go: scale down */
+    /* the widest we may go: shrink. The box grows by 1/scale, and only the grid needs the
+       room — the header above it keeps its layout height — so H/(header+grid) fits it. */
+    if(cols>=maxCols)return {cols,rows,rh:cell,s,scale:H/(H-avail+nat)};
     return null};
   for(let cols=maxCols;cols>=1;cols--){
    pn.style.gridTemplateColumns=`repeat(${cols},minmax(0,1fr))`;
@@ -3889,28 +3912,33 @@ function kioskFitNow(){
     the cards' natural height and the leftover just pooled into empty graph space — the wall
     looked sparse and "too small" (operator, 2026-10-23). At step 0, grow the rows instead:
     spread the slack across the rows, which stretches the trace (.ktrace flex:1) and every
-    proportional size with it, and the wall fills the screen at the largest type. */
- let best=null;
+    proportional size with it, and the wall fills the screen at the largest type.
+    When no step fits, the one that paints largest after its shrink wins (step size x
+    shrink): the full-size step overflows the most, so it is rarely that one. */
+ let best=null;const eff=m=>(m.s?KF[m.s]:1)*(m.scale||1);
  for(const s of[0,1,2]){
   const m=solve(s);if(!m)continue;
-  if(m.scale===undefined){best=m;break}
-  if(!best)best=m}
+  if(m.scale===undefined){if(!best||eff(m)>=eff(best))best=m;break}
+  if(!best||eff(m)>eff(best))best=m}
  probe.remove();
  if(!best){kfStyle(0);return}
  /* a tick that re-solves the same page a pixel or two differently rewrites every card's
     height: the whole wall reflows and it reads as a flash (operator, 2026-10-22). Hysteresis:
     keep the last fit when the new one lands within 6px of it on the same step and columns. */
- if(_lastFit&&_lastFit.pg==pgKey()&&_lastFit.s==best.s&&_lastFit.cols==best.cols&&
+ best.vw=innerWidth;best.vh=innerHeight;
+ if(_lastFit&&_lastFit.pg==pgKey()&&_lastFit.vw==innerWidth&&_lastFit.vh==innerHeight&&_lastFit.s==best.s&&_lastFit.cols==best.cols&&
     _lastFit.scale===best.scale&&Math.abs(_lastFit.rh-best.rh)<=6)best=_lastFit;
  _lastFit=best;
  kfStyle(best.s);                               /* settle the step before measuring the live tree */
  nodes.style.gridTemplateColumns=`repeat(${best.cols},minmax(0,1fr))`;
- nodes.style.gridAutoRows=best.rh.toFixed(1)+'px';
- wrap.style.transform=best.scale?`scale(${Math.min(1,Math.max(.5,best.scale)).toFixed(4)})`:'';
+ /* shrunk: the enlarged box has room to spare below the measured rows; share it out */
+ nodes.style.gridAutoRows=best.scale?'minmax(0,1fr)':best.rh.toFixed(1)+'px';
+ const S=T*(best.scale?Math.min(1,Math.max(.3,best.scale)):1);
+ kioskBox(wrap,S);
  /* settle: if the applied tree's content still overflows its rows (a late theme class, a font
     that loaded mid-solve, stretched heights lying to the probe), refit from the true state —
     guard-bounded, the fit converges in one or two extra passes */
- const sc=parseFloat(wrap.style.transform)||1,box=nodes.firstElementChild.getBoundingClientRect().height/sc;
+ const box=nodes.firstElementChild.getBoundingClientRect().height/S;
  if(++_fitPass<5&&[...nodes.children].some(c=>c.scrollHeight>box+2))kioskFit();else _fitPass=0}
 if(VIEW=='kiosk'){addEventListener('resize',kioskFit);new MutationObserver(kioskFit).observe($('desk'),{childList:true,subtree:true})}
 
