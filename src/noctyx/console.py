@@ -2240,7 +2240,7 @@ html.kiosk-1{--kf-h:.78} html.kiosk-2{--kf-h:.62}
 .kpair{flex:0 1 auto;min-width:0}
 .kbrand{display:flex;align-items:center;gap:calc(10px*var(--kf-h,1));text-decoration:none} .kbrand .mark{width:calc(34px*var(--kf-h,1));height:calc(34px*var(--kf-h,1))} .kbrand .wordmark{font-size:calc(22px*var(--kf-h,1))}
 .kbig{display:flex;flex-direction:column;align-items:flex-end} .kbig b{font:800 calc(44px*var(--kf-h,1))/1 var(--mono)} .kbig span,.kclock span{font:calc(11px*var(--kf-h,1)) var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim)}
-.kclock{display:flex;flex-direction:column;align-items:flex-end;padding-left:calc(20px*var(--kf-h,1));border-left:1px solid var(--line);margin-left:auto;flex:0 0 auto} .kclock b{font:700 calc(44px*var(--kf-h,1))/1 var(--mono)}
+.kclock{display:flex;flex-direction:column;align-items:flex-end;padding-left:calc(20px*var(--kf-h,1));border-left:1px solid var(--line);margin-left:auto;flex:0 1 auto;min-width:0} .kclock b{font:700 calc(44px*var(--kf-h,1))/1 var(--mono);white-space:normal}
 /* header graphs sit directly beside their own number (user, 2026-10-22): graph first, then the
    number+label it belongs to, so each KPI reads as one unit. Graphs are the flexible part of
    the row — they give up width before the numbers or the clock are pushed off the screen. */
@@ -3775,12 +3775,18 @@ function kioskFitNow(){
    const rows=Math.ceil(n/cols);
    const avail=pn.offsetHeight;               /* the flex box at this step (height:auto:100vh) */
    /* the card's natural height: rows stretch to fill the grid, so offsetHeight can be the row,
-      not the content — measure with the cards out of flow (grid-area keeps each in its cell, so
-      the row height still comes from content, never from the grid box) */
+      not the content — measure with the cards out of flow. Pinning the out-of-flow width to the
+      real column is the point: auto leaves a static-position card as wide as the grid, so a long
+      model name fits one line in the probe and wraps to two in the live card, and the row comes
+      out shorter than the footer (operator, 2026-10-23: footer still running off the panel).
+      Take the widest footer: cards differ, and every row is as tall as its worst card. */
+   const gw=pn.getBoundingClientRect().width;
+   const colW=(gw-(cols-1)*12)/cols;
    const cells=[...pn.children];
-   cells.forEach(c=>{c.style.position='absolute'});
-   const cell=pn.firstElementChild.offsetHeight||pn.firstElementChild.scrollHeight;
-   cells.forEach(c=>{c.style.position=''});
+   cells.forEach(c=>{c.style.position='absolute';c.style.width=colW+'px'});
+   let cell=0;
+   cells.forEach(c=>{cell=Math.max(cell,c.offsetHeight||c.scrollHeight)});
+   cells.forEach(c=>{c.style.position='';c.style.width=''});
    if(!cell)continue;
    const nat=rows*cell+(rows-1)*12;           /* rows stacked at natural size, none stretched */
    if(nat<=avail+1)                          /* every row full-size: share the slack evenly */
