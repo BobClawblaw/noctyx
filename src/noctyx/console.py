@@ -2324,16 +2324,17 @@ html.kiosk-1{--kf-h:.78} html.kiosk-2{--kf-h:.62}
 .kpair{flex:0 1 auto;min-width:0}
 .kbrand{display:flex;align-items:center;gap:calc(10px*var(--kf-h,1));text-decoration:none} .kbrand .mark{width:calc(34px*var(--kf-h,1));height:calc(34px*var(--kf-h,1))} .kbrand .wordmark{font-size:calc(22px*var(--kf-h,1))}
 .kbig{display:flex;flex-direction:column;align-items:flex-end} .kbig b{font:800 calc(44px*var(--kf-h,1))/1 var(--mono)} .kbig span,.kclock span{font:calc(11px*var(--kf-h,1)) var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim)}
-.kclock{display:flex;flex-direction:column;align-items:flex-end;padding-left:calc(20px*var(--kf-h,1));border-left:1px solid var(--line);margin-left:auto;flex:0 1 auto;min-width:0} .kclock b{font:700 calc(44px*var(--kf-h,1))/1 var(--mono);white-space:normal}
+.kclock{display:flex;flex-direction:column;align-items:flex-end;padding-left:calc(20px*var(--kf-h,1));border-left:1px solid var(--line);margin-left:auto;flex:0 0 auto} .kclock b{font:700 calc(44px*var(--kf-h,1))/1 var(--mono);white-space:nowrap}
 /* header graphs sit directly beside their own number (user, 2026-10-22): graph first, then the
    number+label it belongs to, so each KPI reads as one unit. Graphs are the flexible part of
-   the row — they give up width before the numbers or the clock are pushed off the screen. */
+   the row — they give up width (down to nothing) before a number is squeezed; the clock and
+   the vitals never shrink, or the clock's digits spill left over 'tok / 24h' (user, 2026-10-23). */
 .kpair{display:flex;align-items:center;gap:calc(10px*var(--kf-h,1));flex:0 1 auto;min-width:0;overflow:hidden}
 .kvitals{display:flex;align-items:stretch;gap:calc(16px*var(--kf-h,1));flex:0 0 auto;padding-left:calc(16px*var(--kf-h,1));border-left:1px solid var(--line)}
 .kvital{display:flex;flex-direction:column;align-items:flex-start;min-width:0;flex:0 0 auto}
 .kvital b{font:800 calc(23px*var(--kf-h,1))/1 var(--mono);color:var(--fg)}
 .kvital span{font:calc(9.5px*var(--kf-h,1)) var(--sans);letter-spacing:.09em;text-transform:uppercase;color:var(--fg-faint);white-space:nowrap}
-.ktopg{flex:1 1 120px;min-width:60px;max-width:calc(190px*var(--kf-h,1))}
+.ktopg{flex:1 1 120px;min-width:0;overflow:hidden;max-width:calc(190px*var(--kf-h,1))}
 .ktopg .chart{margin:0}
 .ktopg .ch-h{display:none}
 .ktopg .chart svg{height:44px;width:100%;display:block;border-radius:4px}
@@ -2840,6 +2841,8 @@ html[data-style=phosphor] .dot{box-shadow:0 0 calc(9px * var(--gl)) color-mix(in
 /* LCD numerals: digits lit over their unlit 8s */
 html[data-style=phosphor] .hero .hv,html[data-style=phosphor] .kbig b,html[data-style=phosphor] .kclock b{
  font-family:var(--lcd);font-weight:700;letter-spacing:.04em;position:relative;z-index:0}
+/* the ghost 8s are positioned against their own number: without this the vitals' ghosts land at the page's top left */
+html[data-style=phosphor] .kvital b{position:relative;z-index:0}
 html[data-style=phosphor] .hero .hv{font-size:clamp(34px,3vw,50px);color:var(--accent);
  text-shadow:0 0 calc(20px * var(--gl)) color-mix(in srgb,var(--accent) 55%,transparent),0 0 2px color-mix(in srgb,var(--accent) 80%,transparent)}
 html[data-style=phosphor] [data-ghost]::before{content:attr(data-ghost);position:absolute;left:0;top:0;z-index:-1;
