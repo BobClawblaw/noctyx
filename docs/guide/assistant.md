@@ -3,7 +3,8 @@
 The assistant is an LLM that Noctyx asks for plain-text help: it triages firing alerts, explains hygiene findings,
 and writes the dashboard's morning brief. It is usually one of the cluster's own model servers. You point it at
 any OpenAI-compatible endpoint. Every prompt is built only from data the console already holds, and every answer
-is shown with the name of the model that wrote it. The assistant only produces text. Nothing it says is run.
+is shown with the name of the model that wrote it. In the console the assistant only produces text: nothing it
+says is run. The one place it may change something is the web setup, and there only what you approve runs.
 
 It is also the first thing a new site sets up: during the install it explains what went wrong, on Linux and
 on macOS alike.
@@ -12,7 +13,7 @@ on macOS alike.
 
 `sudo noctyx init` asks for the assistant before anything else, so that it can help with the rest of the install:
 
-1. **Find one.** It looks for OpenAI-compatible servers on the usual ports (30000, 8000, 8080, 9501–9503, 11434,
+1. **Find one.** It looks for OpenAI-compatible servers on the usual ports (30000, 8000, 8080, 8888, 9501–9503, 11434,
    1234, 5000) of `127.0.0.1`, the head's own LAN address, and any machines you name, and lists those whose
    `/v1/models` serves a model, fastest first. A site's configured endpoint is always listed first. Pick a
    number, type a URL (`http://host:port/v1`), or answer `none` (setup works without one; it just cannot explain
@@ -31,7 +32,12 @@ a failure as a warning.
 
 ### Help during the install
 
-Once it answers, the assistant helps in three places:
+**In a browser** (`sudo noctyx init --web`), the assistant does more than explain: it probes machines, reads
+the guide and proposes each change (the head, the storage, sign-in, a node, a setup step, an agent or metrics
+install) for you to edit and approve. Only what you approve runs, through the same code as `noctyx init` and
+`noctyx setup`. It never sees a password. See [Installing: in a browser](install.md#in-a-browser-noctyx-init---web).
+
+**In the terminal**, once it answers, the assistant helps in three places:
 
 - **Any question in `init`** takes `?`: the question, its default, what it is for and this machine's facts go
   to the assistant, which says what to enter and recommends a value.

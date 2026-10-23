@@ -16,8 +16,8 @@ import urllib.request
 
 from .paths import P, CONFIG
 
-# where OpenAI-compatible servers usually listen: recipe slots, vLLM/SGLang, llama.cpp, MTPLX, Ollama, LM Studio
-COMMON_PORTS = (30000, 8000, 8080, 9502, 9503, 9501, 11434, 1234, 5000)
+# where OpenAI-compatible servers usually listen: recipe slots, vLLM/SGLang, llama.cpp, TensorFold, MTPLX, Ollama, LM Studio
+COMMON_PORTS = (30000, 8000, 8080, 8888, 9502, 9503, 9501, 11434, 1234, 5000)
 
 SETUP_PROMPT = """You are the setup assistant of Noctyx, a self-hosted operator for small AI clusters (a head node \
 running a web console, a directory service, a Hugging Face mirror and restic backups to a NAS or a local disk, \
@@ -51,17 +51,25 @@ def models(url, key=None, timeout=5):
     return [m.get("id") for m in d.get("data", []) if isinstance(m, dict) and m.get("id")]
 
 
-def chat(url, messages, model=None, key=None, timeout=60, max_tokens=400, temperature=0.2):
-    """-> (text, model). Thinking off where the server supports the switch: setup help wants an answer, not a
-    long reasoning trace. An empty model means the endpoint's first."""
+def complete(url, messages, model=None, key=None, timeout=60, max_tokens=400, temperature=0.2, tools=None):
+    """-> (message, model): the assistant's whole message, tool_calls and all (OpenAI tools API). Thinking off
+    where the server supports the switch: setup help wants an answer, not a long reasoning trace. An empty
+    model means the endpoint's first."""
     model = model or (models(url, key, timeout=10) or [""])[0]
     body = {"model": model, "temperature": temperature, "max_tokens": max_tokens,
             "chat_template_kwargs": {"enable_thinking": False}, "messages": messages}
+    if tools:
+        body["tools"] = tools
     req = urllib.request.Request(url.rstrip("/") + "/chat/completions", data=json.dumps(body).encode(), headers=_hdr(key))
     with urllib.request.urlopen(req, timeout=timeout) as r:
         d = json.loads(r.read())
-    m = (d.get("choices") or [{}])[0].get("message") or {}
-    return (m.get("content") or m.get("reasoning_content") or "").strip(), d.get("model") or model
+    return (d.get("choices") or [{}])[0].get("message") or {}, d.get("model") or model
+
+
+def chat(url, messages, model=None, key=None, timeout=60, max_tokens=400, temperature=0.2):
+    """-> (text, model)."""
+    m, used = complete(url, messages, model, key, timeout, max_tokens, temperature)
+    return (m.get("content") or m.get("reasoning_content") or "").strip(), used
 
 
 def test(url, model=None, key=None, timeout=60):

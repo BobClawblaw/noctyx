@@ -1,6 +1,7 @@
 """noctyx — the night-shift operator for your AI cluster.
 
   noctyx init                 first-time setup: the assistant first, then a site config from questions
+                              (--web: the same in a browser, the assistant proposing each step)
   noctyx setup [STEP|all|verify]  set the head up step by step, and prove it works end to end
   noctyx ask QUESTION         the setup assistant (the site's LLM), grounded in the install guide
   noctyx console              the web console (head node)

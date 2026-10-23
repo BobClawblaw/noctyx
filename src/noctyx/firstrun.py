@@ -9,6 +9,8 @@ its values are the defaults.
     sudo noctyx init --assistant-only      just the LLM link (works before there is a config)
     sudo noctyx init --yes [flags]         no questions: flags and detected values (see noctyx init -h);
                                            an assistant API key comes from NOCTYX_ASSISTANT_KEY, never a flag
+    sudo noctyx init --web [--port N]      the same setup in a browser, with the assistant beside it
+                                           (setupweb.py: it calls these step functions through apply())
 """
 import argparse
 import getpass
@@ -147,7 +149,14 @@ def step_assistant(c, a):
             return
         if not INTERACTIVE:
             sys.exit("the assistant did not answer (--assistant URL, or leave it out)")
-    blk = {"enabled": True, "url": url, "model": model or t.get("model") or "",
+    ASSISTANT = save_assistant(c, url, model or t.get("model") or "", key)
+    say("  saved. From here on, answer any question with ? to ask it")
+
+
+def save_assistant(c, url, model, key=None):
+    """The assistant block for an endpoint that answered (its key, if any, to <llm_keys>/assistant, 0600)."""
+    old = c.get("assistant") or {}
+    blk = {"enabled": True, "url": url, "model": model,
            "timeout_seconds": old.get("timeout_seconds", 120), "fallback": old.get("fallback", True)}
     if key:
         d = pathlib.Path(P["llm_keys"])
@@ -160,8 +169,7 @@ def step_assistant(c, a):
     elif old.get("key_host"):
         blk["key_host"] = old["key_host"]
     c["assistant"] = blk
-    ASSISTANT = blk
-    say("  saved. From here on, answer any question with ? to ask it")
+    return blk
 
 
 # ── 2. the head ─────────────────────────────────────────────────────────────
@@ -377,8 +385,7 @@ def make_admin(a):
     say(f"  admin {name}: made")
 
 
-def main(argv):
-    global INTERACTIVE, ASSISTANT
+def parser():
     p = argparse.ArgumentParser(prog="noctyx init", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--yes", action="store_true", help="no questions: flags, then detected values and defaults")
     p.add_argument("--assistant-only", action="store_true", help="only the LLM link")
@@ -395,7 +402,44 @@ def main(argv):
     p.add_argument("--no-auth", action="store_true", help="console open on the LAN, no sign-in")
     p.add_argument("--admin", help="the first admin's name"); p.add_argument("--admin-password-stdin", action="store_true")
     p.add_argument("--setup", action="store_true", help="then run `noctyx setup all`")
-    a = p.parse_args(argv)
+    p.add_argument("--web", action="store_true", help="set up in a browser instead (sudo noctyx init --web)")
+    p.add_argument("--port", type=int, default=20992, help="--web: the setup page's HTTPS port")
+    return p
+
+
+STEPS = {"head": step_head, "storage": step_storage, "hosts": step_hosts, "console": step_console}
+
+
+def apply(c, steps, **values):
+    """Run init's steps on c with values instead of questions (the web setup's backend): each value is the
+    flag of the same name (hostname=, storage=, node=[NAME=ADDRESS], ...). Returns what the steps said."""
+    global INTERACTIVE
+    import contextlib
+    import io
+    a = parser().parse_args([])
+    for k, v in values.items():
+        if not hasattr(a, k):
+            raise ValueError(f"no such setting: {k}")
+        setattr(a, k, v)
+    was, INTERACTIVE = INTERACTIVE, False
+    out = io.StringIO()
+    try:
+        with contextlib.redirect_stdout(out):
+            for name in steps:
+                STEPS[name](c, a)
+    finally:
+        INTERACTIVE = was
+    return out.getvalue().strip()
+
+
+def main(argv):
+    global INTERACTIVE, ASSISTANT
+    a = parser().parse_args(argv)
+    if a.web:
+        if os.geteuid() != 0:
+            sys.exit("run as root: sudo noctyx init --web (it writes the config, keys and system user)")
+        from . import setupweb
+        return setupweb.main(a.port)
     INTERACTIVE = not a.yes and sys.stdin.isatty()
     if os.geteuid() != 0:
         sys.exit("run as root: sudo noctyx init (it writes the config, keys and system user)")

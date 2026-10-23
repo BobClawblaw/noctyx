@@ -103,6 +103,39 @@ defaults. Enter takes the `[default]`. It asks, in this order:
 
 At the end `init` prints the next commands and offers to run `noctyx setup all`.
 
+### In a browser: `noctyx init --web`
+
+```bash
+sudo noctyx init --web            # --port N for another port than 20992
+```
+
+The same setup as a web page, with the assistant beside every step. `init --web` prints a one-time link
+(`https://<this machine>:20992/?t=…`). Opening it sets a cookie in that browser, and only that browser gets in.
+The page uses the site's certificate once `setup tls` has made one, else a self-signed certificate made for this
+run, so the browser warns once. **Finish** spends the link and stops the page; the console takes over.
+
+1. **The assistant** first, in a form: the page looks for LLM servers (as `init` does), you pick one or type a
+   URL, and it is tested and saved. The assistant must support OpenAI tool calls (vLLM, SGLang, llama.cpp,
+   TensorFold and Ollama do, with a model that was trained for them).
+2. **Then you talk to it.** It looks before it proposes: it reads the site config, scans this machine's `/24` for
+   machines with SSH or a node_exporter, probes a machine (SSH login with the head's key, arch, OS, passwordless
+   sudo), lists a NAS's NFS exports and reads this guide. Those run as soon as it asks.
+3. **Every change is a proposal**: setting up the head, the storage, sign-in, adding a machine, running a
+   `noctyx setup` step, installing the agent or a node's metrics. A proposal shows its values and the
+   assistant's reason. You can change any value, then approve or reject it. Only an approved proposal runs, and
+   it runs the same code as `noctyx init` and `noctyx setup`. Setup steps and installs run as jobs whose output
+   shows live; when one fails, the assistant reads the output and says what to fix.
+4. **Passwords never reach the LLM.** The first admin's password and an SMB share's password (Linux heads) go into
+   forms in the side panel. Escrow's passphrase is typed in a terminal: `sudo noctyx setup escrow`.
+
+The side panel shows where the site stands (assistant, head, storage, sign-in, the head's setup steps, the
+machines), the head's public key with the exact line to authorise it on a node, and a **by hand** form for each
+change, for when you would rather not ask. A Mac added as a machine is monitored, never backed up; its metrics
+are installed over SSH from the head (it needs Homebrew).
+
+The assistant only reaches what its tools reach: no shell, nothing outside this list, and every argument is
+checked (names, addresses, paths, ports) before it touches anything.
+
 **Re-running `init`** edits the existing config: its values are the defaults. A site that is already set up keeps
 its storage (spindles, `repo_root`, the mirror store), every repository, every host entry as it is, its assistant
 and its sign-in setting, unless you change them in the answers. New nodes are only added. `init --assistant-only`
@@ -428,6 +461,7 @@ curl --cacert /etc/noctyx/tls/ca.crt https://192.0.2.10:20999/health
 | 20994 TCP, loopback | the head's own node_exporter (`setup metrics`) |
 | 9090 TCP, loopback | Prometheus (`setup metrics`; `NOCTYX_PROM` points the console elsewhere) |
 | 20993 TCP, loopback | the demo |
+| 20992 TCP | the setup page, only while `noctyx init --web` runs |
 
 ## Optional: more metrics, alerting, recovery media
 

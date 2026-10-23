@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Noctyx Setup</title>
+<link rel="icon" href="/favicon.svg">
+<style nonce="{{NONCE}}">
+:root{--bg:#0b1016;--bg1:#111922;--bg2:#17212c;--line:#22303e;--fg:#d6e4ee;--dim:#8ba0b2;--faint:#5d7184;
+ --accent:#38c6f4;--ok:#3ddc97;--warn:#f5b84a;--bad:#ff6b6b;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+ --sans:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 var(--sans)}
+header{display:flex;align-items:center;gap:12px;padding:12px 20px;border-bottom:1px solid var(--line);background:var(--bg1)}
+header img{width:28px;height:28px} header h1{font:600 17px var(--sans);margin:0;letter-spacing:.04em}
+header .m{margin-left:auto;color:var(--dim);font:12px var(--mono)}
+main{display:grid;grid-template-columns:300px minmax(0,1fr);height:calc(100vh - 53px)}
+aside{border-right:1px solid var(--line);overflow:auto;padding:14px;background:var(--bg1)}
+.step{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:10px;background:var(--bg)}
+.step h3{margin:0;font:600 13px var(--sans);display:flex;align-items:center;gap:8px}
+.step .d{width:9px;height:9px;border-radius:50%;background:var(--faint);flex:0 0 auto}
+.step.ok .d{background:var(--ok)} .step.now .d{background:var(--accent)}
+.step p{margin:6px 0 0;color:var(--dim);font-size:12px;word-break:break-word}
+.step button{margin-top:8px}
+#pane{display:flex;flex-direction:column;min-height:0}
+#log{flex:1;overflow:auto;padding:18px 22px}
+#ask{display:flex;gap:8px;padding:12px 18px;border-top:1px solid var(--line);background:var(--bg1)}
+#ask textarea{flex:1;resize:none;height:44px}
+input,textarea,select{background:var(--bg2);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:7px 9px;font:13px var(--sans);width:100%}
+input[type=checkbox]{width:auto}
+button{background:var(--bg2);color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:7px 12px;font:600 13px var(--sans);cursor:pointer}
+button.p{background:var(--accent);color:#04121a;border-color:var(--accent)} button.x{color:var(--bad)}
+button:disabled{opacity:.5;cursor:default}
+.it{max-width:860px;margin:0 0 14px}
+.it.user{margin-left:auto;max-width:640px;background:var(--bg2);border-radius:10px;padding:9px 12px;white-space:pre-wrap}
+.it.assistant{white-space:pre-wrap} .it .who{font:11px var(--mono);color:var(--faint);margin-bottom:3px}
+.it.error{color:var(--bad)}
+code{font:12.5px var(--mono);background:var(--bg2);padding:1px 5px;border-radius:4px;color:#bfe9ff}
+details.tool{font-size:12.5px;color:var(--dim)} details.tool summary{cursor:pointer}
+pre.blk{background:#070b10;border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin:6px 0;font:12.5px/1.4 var(--mono);color:#bfe9ff;white-space:pre-wrap;word-break:break-all}
+.step pre{white-space:pre-wrap;word-break:break-all;font:11px/1.35 var(--mono);color:var(--dim);margin:6px 0 0}
+details.tool pre,.job pre{background:#070b10;border:1px solid var(--line);border-radius:6px;padding:9px;max-height:320px;overflow:auto;font:12px/1.4 var(--mono);color:#b9c9d6;white-space:pre-wrap;word-break:break-word}
+.card{border:1px solid var(--accent);border-radius:10px;padding:12px 14px;background:var(--bg1)}
+.card.done{border-color:var(--line);opacity:.8}
+.card h4{margin:0 0 4px;font:600 14px var(--sans)} .card .why{color:var(--dim);font-size:12px;margin-bottom:10px}
+.fl{display:grid;grid-template-columns:150px minmax(0,1fr);gap:7px 10px;align-items:center;margin-bottom:10px}
+.fl label{color:var(--dim);font-size:12px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.st{font:600 12px var(--mono)} .st.approved,.st.ok{color:var(--ok)} .st.rejected,.st.bad{color:var(--bad)} .st.run{color:var(--accent)}
+.job{border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--bg1)}
+#setup{max-width:760px;margin:30px auto;padding:0 20px}
+#setup h2{font:600 20px var(--sans);margin:0 0 6px} #setup .lead{color:var(--dim);margin:0 0 18px}
+.cand{display:flex;gap:10px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin:6px 0;cursor:pointer}
+.cand:hover{border-color:var(--accent)} .cand code{background:none;padding:0}
+.busy{color:var(--accent);font:12px var(--mono);padding:0 22px 8px}
+.note{color:var(--dim);font-size:12px;margin-top:6px}
+.gap{margin:8px 0 14px} .mt{margin-top:14px} a{color:var(--accent)}
+@media (max-width:820px){main{grid-template-columns:1fr;height:auto} aside{border-right:0;border-bottom:1px solid var(--line)} #log{max-height:none}}
+</style>
+</head>
+<body>
+<header><img src="/favicon.svg" alt=""><h1>NOCTYX SETUP</h1><span class="m" id="me"></span></header>
+<main>
+ <aside id="steps"></aside>
+ <section id="pane">
+  <div id="log"></div>
+  <div class="busy" id="busy" hidden>the assistant is working…</div>
+  <form id="ask"><textarea id="q" placeholder="Ask the assistant, e.g. “set this machine up as the head and back up to my Synology”"></textarea><button class="p" id="send">Send</button></form>
+ </section>
+</main>
+<script nonce="{{NONCE}}">
+"use strict";
+const $=s=>document.querySelector(s);
+const el=(tag,props={},...kids)=>{const e=document.createElement(tag);for(const[k,v]of Object.entries(props)){if(k==='class')e.className=v;else if(k==='text')e.textContent=v;else if(k.startsWith('on'))e.addEventListener(k.slice(2),v);else e.setAttribute(k,v)}for(const k of kids)if(k!=null)e.append(k);return e};
+async function post(path,body){const r=await fetch(path,{method:'POST',headers:{'Content-Type':'application/json','X-Noctyx-Setup':'1'},body:JSON.stringify(body)});
+ const d=await r.json().catch(()=>({error:'no answer'}));if(!r.ok)throw new Error(d.error||r.status);return d}
+/* the LLM's text, built as text nodes (never HTML): ```fenced``` blocks, `code` and **bold** */
+function inline(t){const f=document.createDocumentFragment();t.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/).forEach(p=>{
+ if(p.length>2&&p.startsWith('`')&&p.endsWith('`'))f.append(el('code',{text:p.slice(1,-1)}));
+ else if(p.length>4&&p.startsWith('**')&&p.endsWith('**'))f.append(el('b',{text:p.slice(2,-2)}));else f.append(p)});return f}
+function rich(text){const f=document.createDocumentFragment();text.split(/```[a-z]*\n?([\s\S]*?)```/).forEach((p,k)=>{
+ if(k%2)f.append(el('pre',{class:'blk',text:p.replace(/\n$/,'')}));else f.append(inline(p.replace(/^\n|\n$/g,'')))});return f}
+
+/* what each change is called, and its fields */
+const TOOLS={
+ configure_head:{t:'Set up this machine as the head',f:[['hostname','name','text'],['address','LAN address','text'],['ui_port','console port','number'],['ssh_user','user on the nodes','text'],['back_up_head','back the head up','bool']]},
+ configure_storage:{t:'Storage for backups and the model mirror',f:[['kind','kind','sel:local,nfs,smb'],['path','local directory','text'],['nas_server','NAS address','text'],['nas_path','export / share','text'],['nas_user','SMB user','text'],['mount','mount at','text'],['subdir','folder on the share','text'],['owner_uid','NFS owner uid','number']]},
+ set_sign_in:{t:'Console sign-in',f:[['required','require sign-in','bool']]},
+ add_node:{t:'Add a machine',f:[['name','name','text'],['address','address','text']]},
+ run_setup:{t:'Run a setup step on the head',f:[['step','step','sel:all,verify,tools,owner,mount,tls,repos,endpoint,units,metrics,privacy']]},
+ install_agent:{t:'Install the backup agent',f:[['host','host','text']]},
+ install_node_metrics:{t:'Install node metrics',f:[['host','host','text']]},
+};
+/* what an empty field means, filled in so the operator sees it */
+const DEF={ui_port:20996,ssh_user:'root',subdir:'noctyx'};
+function form(tool,args,onGo,goLabel,onNo){
+ const spec=TOOLS[tool]||{t:tool,f:Object.keys(args||{}).map(k=>[k,k,'text'])};const inp={};
+ const fl=el('div',{class:'fl'});
+ const keep={};if(args&&args.why)keep.why=args.why;   /* the assistant's reason rides along unedited */
+ for(const[k,lab,ty]of spec.f){let i;const v=(args||{})[k];
+  if(ty==='bool'){i=el('input',{type:'checkbox'});i.checked=v!==false&&v!=null?!!v:(k==='back_up_head'||k==='required')}
+  else if(ty.startsWith('sel:')){i=el('select');for(const o of ty.slice(4).split(','))i.append(el('option',{value:o,text:o}));if(v!=null)i.value=v}
+  else{i=el('input',{type:ty==='number'?'number':'text'});if(v!=null)i.value=v;else if(DEF[k]!=null)i.value=DEF[k]}
+  inp[k]=[i,ty];fl.append(el('label',{text:lab}),i)}
+ const read=()=>{const o={...keep};for(const[k,[i,ty]]of Object.entries(inp)){if(ty==='bool')o[k]=i.checked;else if(i.value!=='')o[k]=ty==='number'?+i.value:i.value}return o};
+ const go=el('button',{class:'p',text:goLabel,onclick:async e=>{e.preventDefault();go.disabled=true;try{await onGo(read())}catch(x){alert(x.message);go.disabled=false}}});
+ const row=el('div',{class:'row'},go,onNo?el('button',{class:'x',text:'Reject',onclick:e=>{e.preventDefault();onNo()}}):null);
+ return el('div',{},el('h4',{text:spec.t}),fl,row)}
+
+let since=0,ST=null,BUSY=false;const ITEMS=new Map(),DATA=new Map(),JOBS={};
+function render(i){
+ if(i.kind==='user')return el('div',{class:'it user',text:i.text});
+ if(i.kind==='assistant')return el('div',{class:'it assistant'},el('div',{class:'who',text:'assistant · '+(i.model||'')}),rich(i.text));
+ if(i.kind==='error')return el('div',{class:'it error',text:i.text});
+ if(i.kind==='tool'){const d=el('details',{class:'it tool'},el('summary',{},(i.ok?'✓ ':'✗ ')+(i.by==='operator'?'you: ':'')+i.tool+' '+JSON.stringify(i.args)),el('pre',{text:i.out}));return d}
+ if(i.kind==='proposal'){const c=el('div',{class:'it card'+(i.status?' done':'')});
+  if(!i.status)c.append(i.args.why?el('div',{class:'why',text:i.args.why}):'',form(i.tool,i.args,a=>post('/api/decide',{pid:i.pid,approve:true,args:a}).then(poll),'Approve',()=>post('/api/decide',{pid:i.pid,approve:false}).then(poll)),
+    el('div',{class:'note',text:'Proposed by the assistant. Change any value, then approve, or reject it.'}));
+  else c.append(el('h4',{text:(TOOLS[i.tool]||{t:i.tool}).t}),el('div',{class:'why',text:JSON.stringify(Object.fromEntries(Object.entries(i.args).filter(([k])=>k!=='why')))}),el('span',{class:'st '+i.status,text:i.status}));
+  return c}
+ if(i.kind==='job'){const j=JOBS[i.job]||{};const pre=el('pre',{text:(j.tail||[]).join('\n')});
+  const st=i.rc==null?el('span',{class:'st run',text:'running…'}):el('span',{class:'st '+(i.rc?'bad':'ok'),text:i.rc?'failed (exit '+i.rc+')':'done'});
+  const c=el('div',{class:'it job'},el('div',{class:'row'},el('b',{text:i.what}),st),pre);setTimeout(()=>{pre.scrollTop=pre.scrollHeight});return c}
+ return el('div',{class:'it',text:JSON.stringify(i)})}
+/* an item is drawn again only when it changed: a proposal being edited keeps what was typed */
+const SIG=new Map();
+function place(i){const log=$('#log');const sig=JSON.stringify(i)+(i.kind==='job'?(JOBS[i.job]||{}).tail?.length:'');
+ if(SIG.get(i.id)===sig)return;SIG.set(i.id,sig);const n=render(i);const old=ITEMS.get(i.id);
+ const stick=log.scrollTop+log.clientHeight>=log.scrollHeight-40;
+ if(old)old.replaceWith(n);else log.append(n);ITEMS.set(i.id,n);if(stick&&!old)log.scrollTop=log.scrollHeight}
+
+/* the checklist: where the site is, and each step by hand */
+let STSIG='';
+function steps(){const s=ST,box=$('#steps');if(!s||JSON.stringify(s)===STSIG)return;STSIG=JSON.stringify(s);box.replaceChildren();
+ const done=n=>(s.setup_steps||[]).find(x=>x.step===n)?.done;
+ const allDone=(s.setup_steps||[]).length&&(s.setup_steps||[]).every(x=>x.done||x.step==='escrow'||x.step==='privacy');
+ const hand=(tool,args)=>()=>{const c=el('div',{class:'it card'});c.append(form(tool,args,a=>post('/api/act',{tool,args:a}).then(()=>{c.remove();poll()}),'Apply',()=>c.remove()));$('#log').append(c);c.scrollIntoView({behavior:'smooth'})};
+ const me=s.this_machine||{};
+ const list=[
+  ['Assistant',!!s.assistant,s.assistant?`${s.assistant.model} at ${s.assistant.url}`:'an OpenAI-compatible LLM server',null],
+  ['The head',!!s.head,s.head?`${s.head.hostname} · ${s.head.address} · console port ${s.head.ui_port}`:'this machine runs the console and the backups',
+   s.assistant?['Set by hand',hand('configure_head',s.head||{hostname:me.hostname,address:me.address,ui_port:20996,ssh_user:'root',back_up_head:true})]:null],
+  ['Storage',!!s.storage,s.storage?Object.entries(s.storage).map(([n,v])=>v.share?`${v.share.proto} ${v.share.server}:${v.share.path} at ${v.mount}`:`local ${v.mount}`).join('; '):'a NAS share or a local disk',
+   s.head?['Set by hand',hand('configure_storage',{kind:'local'})]:null],
+  ['Sign-in',s.sign_in!=null&&(!s.sign_in||s.admin),s.sign_in==null?'who may use the console':s.sign_in?(s.admin?'on; an admin exists':'on; make the first admin below'):'off: open on the LAN',
+   s.head?['Set by hand',hand('set_sign_in',{required:s.sign_in!==false})]:null],
+  ['Head services',!!allDone,(s.setup_steps||[]).length?(s.setup_steps||[]).map(x=>(x.done?'✓ ':'· ')+x.step).join('  '):'noctyx setup all: tools, TLS, repositories, services',
+   s.storage?['Run setup all',hand('run_setup',{step:'all'})]:null],
+  ['Machines',(s.hosts||[]).length>1,(s.hosts||[]).map(h=>`${h.name} ${h.address}${h.local?' (head)':''}`).join(', ')||'Linux nodes to back up and watch',
+   s.storage?['Add by hand',hand('add_node',{})]:null],
+ ];
+ let now=false;for(const[t,ok,p,btn]of list){const cls=ok?'ok':(!now?(now=true,'now'):'');
+  box.append(el('div',{class:'step '+cls},el('h3',{},el('span',{class:'d'}),t),el('p',{text:p}),btn?el('button',{text:btn[0],onclick:btn[1]}):null))}
+ if(s.sign_in&&!s.admin)box.append(adminForm());
+ if(s.storage&&Object.values(s.storage).some(v=>v.share&&v.share.proto==='smb'))box.append(smbForm());
+ if(s.head_public_key)box.append(el('div',{class:'step'},el('h3',{text:"The head's SSH key"}),el('p',{text:'On each node, as its admin:'}),
+   el('pre',{class:'note',text:`echo '${s.head_public_key}' | sudo tee -a ~${(s.head||{}).ssh_user||'root'}/.ssh/authorized_keys`})));
+ const fin=el('button',{class:'p',text:'Finish',onclick:async()=>{try{const d=await post('/api/finish',{});document.body.replaceChildren(el('div',{id:'setup'},el('h2',{text:'Setup is finished'}),el('p',{class:'lead',text:'This page is closed. The console:'}),el('a',{href:d.console,text:d.console})))}catch(x){alert(x.message)}}});
+ box.append(el('div',{class:'step'},el('h3',{text:'Finish'}),el('p',{text:'Closes this page and its link; the console takes over.'}),fin))}
+let ADMIN=null,SMB=null;
+function adminForm(){if(ADMIN)return ADMIN;const n=el('input',{placeholder:'name',autocomplete:'username'}),p1=el('input',{type:'password',placeholder:'password (10+)',autocomplete:'new-password'}),p2=el('input',{type:'password',placeholder:'again',autocomplete:'new-password'});
+ return ADMIN=el('div',{class:'step now'},el('h3',{text:'First admin'}),el('p',{text:'Typed here only: the assistant never sees it.'}),n,p1,p2,
+  el('button',{class:'p',text:'Make the admin',onclick:async()=>{if(p1.value!==p2.value)return alert('the passwords differ');try{await post('/api/admin',{name:n.value,password:p1.value});poll()}catch(x){alert(x.message)}}}))}
+function smbForm(){if(SMB)return SMB;const p=el('input',{type:'password',placeholder:"the share's password",autocomplete:'off'});
+ return SMB=el('div',{class:'step'},el('h3',{text:'SMB password'}),el('p',{text:'For `setup mount`; the assistant never sees it.'}),p,
+  el('button',{text:'Save',onclick:async()=>{try{await post('/api/smb',{password:p.value});p.value='';alert('saved')}catch(x){alert(x.message)}}}))}
+
+/* before there is an assistant: find one, test it, save it */
+function assistantSetup(){const log=$('#log');if($('#setup'))return;log.replaceChildren();ITEMS.clear();
+ const url=el('input',{placeholder:'http://host:port/v1'}),key=el('input',{type:'password',placeholder:'API key (only if it needs one)',autocomplete:'off'}),model=el('input',{placeholder:'model (empty: the first it serves)'});
+ const more=el('input',{placeholder:'other machines to look on, e.g. 192.0.2.21, gpu-01'});const list=el('div'),msg=el('div',{class:'note'});
+ const find=el('button',{text:'Look for LLM servers',onclick:async()=>{find.disabled=true;msg.textContent='looking…';try{const d=await post('/api/discover',{addresses:more.value.split(',').map(x=>x.trim()).filter(Boolean)});
+  list.replaceChildren(...d.found.map(f=>el('div',{class:'cand',onclick:()=>{url.value=f.url;model.value=f.models[0]||''}},el('code',{text:f.url}),el('span',{class:'note',text:f.models.slice(0,3).join(', ')+` · ${f.ms} ms`}))));
+  msg.textContent=d.found.length?'pick one, or type a URL':'none found: type a URL'}catch(x){msg.textContent=x.message}find.disabled=false}});
+ const save=el('button',{class:'p',text:'Test and save',onclick:async()=>{save.disabled=true;msg.textContent='testing…';try{const d=await post('/api/assistant',{url:url.value,key:key.value,model:model.value});
+  if(d.ok){msg.textContent=`✓ ${d.model} answered in ${d.ms} ms`;$('#setup').remove();poll()}else msg.textContent='✗ '+d.error}catch(x){msg.textContent=x.message}save.disabled=false}});
+ log.append(el('div',{id:'setup'},el('h2',{text:'First, the assistant'}),el('p',{class:'lead',text:'An OpenAI-compatible LLM server (vLLM, SGLang, llama.cpp, TensorFold, Ollama, LM Studio…). It helps with every step after this one: it probes your machines and proposes each change, and you approve it. It never sees a password.'}),
+  more,el('div',{class:'row gap'},find),list,el('div',{class:'fl mt'},el('label',{text:'URL'}),url,el('label',{text:'model'}),model,el('label',{text:'API key'}),key),save,msg))}
+
+async function poll(){try{const r=await fetch('/api/view?since='+since);if(!r.ok)return;const d=await r.json();ST=d.state;Object.assign(JOBS,d.jobs);
+ const me=ST.this_machine||{};$('#me').textContent=`${me.hostname} · ${me.address} · ${me.os} ${me.arch}`;
+ if(!ST.assistant){assistantSetup();$('#ask').hidden=true}else{if($('#setup'))$('#setup').remove();$('#ask').hidden=false;
+  if(!since&&!d.items.length&&!ITEMS.size)place({id:0,kind:'assistant',model:ST.assistant.model,text:'Ready. Tell me about your machines (the head, the NAS, the GPU nodes) and I will look at them and propose each step; you approve what runs. Or say “start” and I will begin with this machine.'});
+  for(const i of d.items){DATA.set(i.id,i);place(i)}since=Math.max(since,d.rev||0);
+  for(const i of DATA.values())if(i.kind==='job')place(i)}   /* a running job's log grows without its item changing */
+ BUSY=d.busy;$('#busy').hidden=!BUSY;$('#send').disabled=BUSY;steps()}catch(e){}}
+$('#ask').addEventListener('submit',async e=>{e.preventDefault();const t=$('#q').value.trim();if(!t)return;$('#send').disabled=true;try{await post('/api/chat',{text:t});$('#q').value='';poll()}catch(x){alert(x.message);$('#send').disabled=false}});
+$('#q').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('#ask').requestSubmit()}});
+poll();setInterval(poll,1500);
+</script>
+</body>
+</html>
