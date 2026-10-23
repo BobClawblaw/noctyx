@@ -2366,11 +2366,11 @@ html.kiosk-1{--kf-h:.78} html.kiosk-2{--kf-h:.62}
 .knode .ktrace svg{position:absolute;inset:0}
 .knode .ktrace i{position:absolute;right:calc(4px*var(--kf-h,1));font:600 calc(9.5px*var(--kf-h,1)) var(--sans);letter-spacing:.08em;line-height:1}
 .knode .ktrace i.a{color:var(--accent)} .knode .ktrace i.g{color:var(--ok)} .knode .ktrace i.t{color:var(--accent-2)} .knode .ktrace i.p{color:var(--warn)}
-.kspark polyline{fill:none;stroke-width:1.8;vector-effect:non-scaling-stroke;stroke-linejoin:round;opacity:.9}
-.kspark polyline.a{stroke:var(--accent)} .kspark polyline.g{stroke:var(--ok)}
-.kspark polyline.t{stroke:var(--accent-2);stroke-dasharray:3 3;opacity:.85}
+.kspark path{fill:none;stroke-width:1.8;vector-effect:non-scaling-stroke;stroke-linejoin:round;opacity:.9}
+.kspark path.a{stroke:var(--accent)} .kspark path.g{stroke:var(--ok)}
+.kspark path.t{stroke:var(--accent-2);stroke-dasharray:3 3;opacity:.85}
 /* prefill: dash-dot so it reads as a different phase from generation, on its own scale */
-.kspark polyline.p{stroke:var(--warn);stroke-dasharray:5 2 1 2;opacity:.85}
+.kspark path.p{stroke:var(--warn);stroke-dasharray:5 2 1 2;opacity:.85}
 .kspark line.grid{stroke:var(--line-soft);stroke-width:1;vector-effect:non-scaling-stroke}
 .kload{margin-left:auto;font:500 calc(11px*var(--kf-h,1)) var(--sans);color:var(--fg-faint)}
 /* the ticker wraps: every alert is fully readable, nothing cut off (the wall has no pointer,
@@ -2598,8 +2598,8 @@ input.sw:checked{background:var(--accent);border-color:var(--accent)} input.sw:c
 .mcell{display:grid;grid-template-columns:28px 1fr 70px;align-items:center;gap:6px;font:11px var(--mono);color:var(--fg-faint)}
 .mcell .mv{color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
 .spk{width:70px;height:18px;display:block}
-.spk polyline{fill:none;stroke:var(--info);stroke-width:1.5;vector-effect:non-scaling-stroke;stroke-linejoin:round}
-.spk polyline.a{stroke:var(--accent)} .spk polyline.g{stroke:var(--ok)} .spk polyline.w{stroke:var(--warn)} .spk polyline.dim{stroke:var(--fg-faint)}
+.spk path{fill:none;stroke:var(--info);stroke-width:1.5;vector-effect:non-scaling-stroke;stroke-linejoin:round}
+.spk path.a{stroke:var(--accent)} .spk path.g{stroke:var(--ok)} .spk path.w{stroke:var(--warn)} .spk path.dim{stroke:var(--fg-faint)}
 /* chart marks (dataviz: 2px lines, 10% wash, ringed end-dot, hairline grid, ink text) */
 .chart .ln{fill:none;stroke:var(--info);stroke-width:2;stroke-linejoin:round;stroke-linecap:round;vector-effect:non-scaling-stroke}
 .chart .wash{fill:var(--info);opacity:.11} .chart .dot{fill:var(--info);stroke:var(--bg-0);stroke-width:2}
@@ -2620,14 +2620,14 @@ input.sw:checked{background:var(--accent);border-color:var(--accent)} input.sw:c
 body.kiosk .pbody{transition:none} body.kiosk .pbody.stale{opacity:1}
 /* categorical series palette: blue, orange, green, magenta, cyan, yellow, red, violet */
 :root{--c0:#3987e5;--c1:#d95926;--c2:#199e70;--c3:#c98500;--c4:#d55181;--c5:#008300;--c6:#9085e9;--c7:#e66767}
-.spk polyline.c0,.chart .ln.c0{stroke:var(--c0)} .chart .wash.c0{fill:var(--c0)} .chart .dot.c0{fill:var(--c0)} .key.c0{background:var(--c0)}
-.spk polyline.c1,.chart .ln.c1{stroke:var(--c1)} .chart .wash.c1{fill:var(--c1)} .chart .dot.c1{fill:var(--c1)} .key.c1{background:var(--c1)}
-.spk polyline.c2,.chart .ln.c2{stroke:var(--c2)} .chart .wash.c2{fill:var(--c2)} .chart .dot.c2{fill:var(--c2)} .key.c2{background:var(--c2)}
-.spk polyline.c3,.chart .ln.c3{stroke:var(--c3)} .chart .wash.c3{fill:var(--c3)} .chart .dot.c3{fill:var(--c3)} .key.c3{background:var(--c3)}
-.spk polyline.c4,.chart .ln.c4{stroke:var(--c4)} .chart .wash.c4{fill:var(--c4)} .chart .dot.c4{fill:var(--c4)} .key.c4{background:var(--c4)}
-.spk polyline.c5,.chart .ln.c5{stroke:var(--c5)} .chart .wash.c5{fill:var(--c5)} .chart .dot.c5{fill:var(--c5)} .key.c5{background:var(--c5)}
-.spk polyline.c6,.chart .ln.c6{stroke:var(--c6)} .chart .wash.c6{fill:var(--c6)} .chart .dot.c6{fill:var(--c6)} .key.c6{background:var(--c6)}
-.spk polyline.c7,.chart .ln.c7{stroke:var(--c7)} .chart .wash.c7{fill:var(--c7)} .chart .dot.c7{fill:var(--c7)} .key.c7{background:var(--c7)}
+.spk path.c0,.chart .ln.c0{stroke:var(--c0)} .chart .wash.c0{fill:var(--c0)} .chart .dot.c0{fill:var(--c0)} .key.c0{background:var(--c0)}
+.spk path.c1,.chart .ln.c1{stroke:var(--c1)} .chart .wash.c1{fill:var(--c1)} .chart .dot.c1{fill:var(--c1)} .key.c1{background:var(--c1)}
+.spk path.c2,.chart .ln.c2{stroke:var(--c2)} .chart .wash.c2{fill:var(--c2)} .chart .dot.c2{fill:var(--c2)} .key.c2{background:var(--c2)}
+.spk path.c3,.chart .ln.c3{stroke:var(--c3)} .chart .wash.c3{fill:var(--c3)} .chart .dot.c3{fill:var(--c3)} .key.c3{background:var(--c3)}
+.spk path.c4,.chart .ln.c4{stroke:var(--c4)} .chart .wash.c4{fill:var(--c4)} .chart .dot.c4{fill:var(--c4)} .key.c4{background:var(--c4)}
+.spk path.c5,.chart .ln.c5{stroke:var(--c5)} .chart .wash.c5{fill:var(--c5)} .chart .dot.c5{fill:var(--c5)} .key.c5{background:var(--c5)}
+.spk path.c6,.chart .ln.c6{stroke:var(--c6)} .chart .wash.c6{fill:var(--c6)} .chart .dot.c6{fill:var(--c6)} .key.c6{background:var(--c6)}
+.spk path.c7,.chart .ln.c7{stroke:var(--c7)} .chart .wash.c7{fill:var(--c7)} .chart .dot.c7{fill:var(--c7)} .key.c7{background:var(--c7)}
 .flags{display:flex;gap:4px;flex-wrap:wrap;margin-top:3px;min-height:0}
 .dtabs{display:flex;gap:2px;margin:10px 0 2px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .dtab{background:none;border:0;border-bottom:2px solid transparent;color:var(--fg-dim);padding:5px 9px;
@@ -2806,9 +2806,9 @@ html[data-style=phosphor] .bar.b i{filter:drop-shadow(0 0 calc(6px * var(--gl)) 
 html[data-style=phosphor] .spk{border-radius:3px;border:1px solid color-mix(in srgb,var(--k) 16%,var(--line-soft));
  background:linear-gradient(color-mix(in srgb,var(--k) 9%,transparent) 1px,transparent 1px) 0 0/100% 6px,
   linear-gradient(90deg,color-mix(in srgb,var(--k) 9%,transparent) 1px,transparent 1px) 0 0/10px 100%,var(--bg-0)}
-html[data-style=phosphor] .spk polyline,html[data-style=phosphor] .spk polyline.a,html[data-style=phosphor] .spk polyline.dim{stroke:var(--k)}
-html[data-style=phosphor] .spk polyline{stroke-width:1.6;filter:drop-shadow(0 0 calc(2.5px * var(--gl)) var(--k))}
-html[data-style=phosphor] .spk polyline.g{stroke:var(--k-cpu)} html[data-style=phosphor] .spk polyline.c0{stroke:var(--k-net)}
+html[data-style=phosphor] .spk path,html[data-style=phosphor] .spk path.a,html[data-style=phosphor] .spk path.dim{stroke:var(--k)}
+html[data-style=phosphor] .spk path{stroke-width:1.6;filter:drop-shadow(0 0 calc(2.5px * var(--gl)) var(--k))}
+html[data-style=phosphor] .spk path.g{stroke:var(--k-cpu)} html[data-style=phosphor] .spk path.c0{stroke:var(--k-net)}
 html[data-style=phosphor] .chart svg{border:1px solid color-mix(in srgb,var(--accent) 12%,var(--line-soft));border-radius:5px;
  background:linear-gradient(color-mix(in srgb,var(--accent) 6%,transparent) 1px,transparent 1px) 0 0/100% 12px,
   linear-gradient(90deg,color-mix(in srgb,var(--accent) 6%,transparent) 1px,transparent 1px) 0 0/24px 100%,
@@ -3052,16 +3052,30 @@ function fmtBytes(b){if(b==null)return '—';const u=['B','KB','MB','GB','TB','P
    labels, 2px line, 10% wash (≤2 series), ringed end-dot, legend with line
    keys (identity on the key, text in ink), crosshair + one tooltip for every
    series on hover. Series: [{name, pts:[[t,v]…], cls}] */
+/* curve(): an SVG path through [x,y] points as a monotone cubic (Fritsch–Carlson, as d3's
+   curveMonotoneX): smooth bends, but it never overshoots a sample — a 0→100% step stays inside
+   0..100 and a flat run stays flat, so the curve can't invent a peak or a dip the data lacks. */
+function curve(P){const n=P.length;if(!n)return '';
+ const f=v=>v.toFixed(1);let d=`M${f(P[0][0])} ${f(P[0][1])}`;
+ if(n<3)return n<2?d:d+` L${f(P[1][0])} ${f(P[1][1])}`;
+ const h=[],k=[];for(let i=0;i<n-1;i++){h[i]=(P[i+1][0]-P[i][0])||1e-6;k[i]=(P[i+1][1]-P[i][1])/h[i]}
+ const m=[k[0]];
+ for(let i=1;i<n-1;i++){const p=(k[i-1]*h[i]+k[i]*h[i-1])/(h[i-1]+h[i]);
+  m[i]=k[i-1]*k[i]<=0?0:(Math.sign(k[i-1])+Math.sign(k[i]))*Math.min(Math.abs(k[i-1]),Math.abs(k[i]),.5*Math.abs(p))}
+ m[n-1]=k[n-2];
+ for(let i=0;i<n-1;i++){const t=h[i]/3,[x0,y0]=P[i],[x1,y1]=P[i+1];
+  d+=` C${f(x0+t)} ${f(y0+t*m[i])} ${f(x1-t)} ${f(y1-t*m[i+1])} ${f(x1)} ${f(y1)}`}
+ return d}
 function _lines(series,W,H,max){
  const ts=series.flatMap(s=>(s.pts||[]).map(p=>p[0]));if(!ts.length)return '';
- // end-stamp the polyline: a sliding window of the same length maps to the SAME point string
+ // end-stamp the path: a sliding window of the same length maps to the SAME point string
  // (x comes from the normalized span), so without this morph() compares identical attributes
  // and never repaints the trace — it freezes on screen (user, 2026-10-22: graphs not updating)
  const wk=`${Math.min(...ts)}-${Math.max(...ts)}`;
  const t0=Math.min(...ts),t1=Math.max(...ts)||t0+1;
  return series.map(s=>{const d=(s.pts||[]).filter(p=>p[1]!=null).map(p=>
-   `${((p[0]-t0)/((t1-t0)||1)*W).toFixed(1)},${(H-2-Math.min(p[1],max)/(max||1)*(H-4)).toFixed(1)}`).join(' ');
- return d?`<polyline class="${s.cls||''}" data-w="${wk}" points="${d}"/>`:''}).join('')}
+   [(p[0]-t0)/((t1-t0)||1)*W,H-2-Math.min(p[1],max)/(max||1)*(H-4)]);
+ return d.length?`<path class="${s.cls||''}" data-w="${wk}" d="${curve(d)}"/>`:''}).join('')}
 function spark(series,o={}){const v=series.flatMap(s=>(s.pts||[]).map(p=>p[1])).filter(x=>x!=null);
  if(v.length<2)return '<svg class=spk></svg>';
  const max=o.max??(Math.max(...v)*1.15||1);
@@ -3080,9 +3094,10 @@ function chart(title,series,fmt,o={}){
  const ticks=[0,.5,1].map(f=>({y:G.Y1-f*(G.Y1-G.Y0),v:g.max*f}));
  const tk=v=>{const f=String(fmt(v)).replace(/<[^>]+>/g,'');const m=f.match(/^[↑↓]?\s*(-?[\d.,]+\s?[kMGT]?)/);return m?m[1].replace(/\s+$/,''):f.slice(0,6)};
  const grid=ticks.map(t=>`<line class="gl" x1="${G.X0}" x2="${G.X1}" y1="${t.y}" y2="${t.y}"/>${o.compact?'':`<text class="tk" x="${G.X0-4}" y="${t.y+2.5}">${esc(tk(t.v))}</text>`}`).join('');
- const wash=series.length<=2?series.map(s=>{if(s.pts.length<2)return '';const d=s.pts.map((p,i)=>`${i?'L':'M'}${_px(p[0],g).toFixed(1)} ${_py(p[1],g).toFixed(1)}`).join(' ');
+ const xy=s=>curve(s.pts.map(p=>[_px(p[0],g),_py(p[1],g)]));
+ const wash=series.length<=2?series.map(s=>{if(s.pts.length<2)return '';const d=xy(s);
    return `<path class="wash ${s.cls||''}" d="${d} L${_px(s.pts[s.pts.length-1][0],g).toFixed(1)} ${G.Y1} L${_px(s.pts[0][0],g).toFixed(1)} ${G.Y1} Z"/>`}).join(''):'';
- const lines=series.map(s=>s.pts.length?`<path class="ln ${s.cls||''}" d="${s.pts.map((p,i)=>`${i?'L':'M'}${_px(p[0],g).toFixed(1)} ${_py(p[1],g).toFixed(1)}`).join(' ')}"/>`:'').join('');
+ const lines=series.map(s=>s.pts.length?`<path class="ln ${s.cls||''}" d="${xy(s)}"/>`:'').join('');
  const dots=o.compact?'':series.map(s=>{const p=s.pts[s.pts.length-1];return p?`<circle class="dot ${s.cls||''}" cx="${_px(p[0],g).toFixed(1)}" cy="${_py(p[1],g).toFixed(1)}" r="3.5"/>`:''}).join('');
  const lastv=s=>{const p=s.pts[s.pts.length-1];return p?esc(fmt(p[1])):'—'};
  const legend=series.length>1?series.map(s=>`<span class=lg><i class="key ${s.cls||''}"></i>${esc(s.name||'')} <b>${lastv(s)}</b></span>`).join('')
