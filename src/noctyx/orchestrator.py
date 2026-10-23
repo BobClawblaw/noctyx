@@ -3125,6 +3125,11 @@ def validate_console(s):
                             errs.append("kiosk.fit: shrink or scroll")
                         else:
                             ko[k] = v
+                    elif k == "cols":
+                        if not isinstance(v, int) or not (0 <= v <= 8):
+                            errs.append("kiosk.cols: 0 (auto) to 8")
+                        else:
+                            ko[k] = v
                     elif v not in (0, 1, 2):
                         errs.append(f"kiosk.{k}: 0, 1 or 2")
                     else:

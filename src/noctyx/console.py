@@ -2183,7 +2183,7 @@ const NXT=(()=>{
  /* Phosphor effects: all static layers or compositor-only animation (transform, opacity) */
  const FXDEF={glow:'normal',scan:'kiosk',vignette:'on',grain:'off',beam:'off',flicker:'off',fringe:'off'};
  const GLOW={off:0,soft:.5,normal:1,bright:1.6};
- const DEF={mode:'dark',theme:'noctyx',tunit:'F',fx:FXDEF,kiosk:{alerts:0,ticker:0,backups:0,rotation:false,fit:'shrink',dense:false},custom:{bg:'#0b0e1a',panel:'#121629',text:'#e2e8f6',muted:'#97a3c2',accent:'#3fe6ff',line:'#242a47',ok:'#2ecc8f',warn:'#f0b429',bad:'#ef5a5a'}};
+ const DEF={mode:'dark',theme:'noctyx',tunit:'F',fx:FXDEF,kiosk:{alerts:0,ticker:0,backups:0,rotation:false,fit:'shrink',dense:false,cols:0},custom:{bg:'#0b0e1a',panel:'#121629',text:'#e2e8f6',muted:'#97a3c2',accent:'#3fe6ff',line:'#242a47',ok:'#2ecc8f',warn:'#f0b429',bad:'#ef5a5a'}};
  function derive(b){const f={...b},dark=lum(f.bg)<.4;f.scheme=dark?'dark':'light';
   f.bg0??=mix(f.bg,dark?'#000000':'#ffffff',.25);f.bg2??=mix(f.panel,f.text,dark?.04:.03);f.bg3??=mix(f.panel,f.text,dark?.09:.07);
   f.lineSoft??=mix(f.line,f.bg,.4);f.faint??=mix(f.muted,f.bg,.3);f.accentDim??=mix(f.accent,f.bg,.35);f.accent2??=f.accent;
@@ -3265,7 +3265,7 @@ function fxGroup(s){const on=NXT.face().style=='phosphor',fx=s.fx||NXT.FXDEF,
   ${row('beam','Beam sweep',oo,'A soft band of light that rolls down the screen every few seconds.')}
   ${row('flicker','Flicker',oo,'A barely-there phosphor flicker. Both moving effects stop when the system asks for reduced motion.')}</div>`}
 function setTheme(id){NXT.save({theme:id});pushAccount();setRender()}
-function setKiosk(k,v){const val=(k=='rotation')?v=='true':(k=='fit'?v:+v);NXT.save({kiosk:{[k]:val}});pushAccount();setRender();
+function setKiosk(k,v){const val=(k=='rotation')?v=='true':(k=='fit'||k=='cols'?v:+v);NXT.save({kiosk:{[k]:val}});pushAccount();setRender();
  if(VIEW=='kiosk'){kioskPg=0;const p=PANELS.find(x=>x.id=='kiosk');if(p&&p._data!==undefined)repaint('kiosk',p._data)}}
 function kioskGroup(s){const k=s.kiosk||NXT.DEF.kiosk,
  row=(kk,lab,opts,hint)=>`<div class=setrow><label>${lab}</label><div class=seg>${opts.map(([v,l])=>`<button type=button class=\"${String(k[kk])==String(v)?'on':''}\" onclick=\"setKiosk('${kk}','${v}')\">${l}</button>`).join('')}</div><div class=hint>${hint}</div></div>`,
@@ -3276,6 +3276,7 @@ function kioskGroup(s){const k=s.kiosk||NXT.DEF.kiosk,
  ${row('ticker','Alert ticker',[['0','Off'],['1','On']],'The scrolling feed of active alerts on the nodes page.')}
  ${row('rotation','Rotation',[['false','Off'],['true','On']],'Page through nodes → alerts → backups every 20 seconds. Only takes effect in a browser whose URL asks for it (?rotation=1): the wall never changes views on its own.')}
  ${row('dense','Dense header',[['false','Off'],['true','On']],'Five fleet numbers on the header line (adds LLMs serving); off keeps four with bigger type.')}
+ ${row('cols','Grid columns',[['0','Auto'],['2','2'],['3','3'],['4','4'],['5','5']],'Force the node grid to a column count. Auto picks the most columns whose cards still fit the screen. Try 3 for taller cards on a wall with rows to spare.')}
  ${row('fit','Fit',[['shrink','Shrink'],['scroll','Scroll']],'Shrink: everything on one screen, the type gets small (the classic kiosk). Scroll: full-size type, the grid scrolls when it overflows.')}</div>`}
 function setCustom(k,v){NXT.save({theme:'custom',custom:{[k]:v}});clearTimeout(setCustom._p);setCustom._p=setTimeout(pushAccount,600);
  /* re-render only the cards/swatches when the pickers settle: keep the open picker */
@@ -3350,10 +3351,11 @@ let kioskPg=0;
    must never hide information below or beside its own edges.) */
 const kioskCfg=()=>{
  const q=new URLSearchParams(location.search),k={...NXT.eff().kiosk};
- const has=['alerts','backups','ticker','rotation','page','fit'].some(p=>q.has(p));
+ const has=['alerts','backups','ticker','rotation','page','fit','cols'].some(p=>q.has(p));
  for(const p of['alerts','ticker','backups']){const v=+q.get(p);if(q.get(p)!=null&&!isNaN(v))k[p]=v}
  if(q.get('rotation')!=null)k.rotation=q.get('rotation')!='0';
  if(q.get('dense')!=null)k.dense=q.get('dense')!='0';
+ {const v=+q.get('cols');if(q.get('cols')!=null&&!isNaN(v)&&v>=1&&v<=8)k.cols=v}   /* grid columns: ?cols=3 */
  if(q.has('page')){k.rotation=false;k.fit='shrink'}           /* a pinned view: one screen, that view */
  else if(has||k.rotation)k.fit='shrink';                     /* extra content must still fit: shrink */
  if(q.get('fit')=='scroll'||q.get('fit')=='shrink')k.fit=q.get('fit');   /* an explicit choice wins */
@@ -3857,32 +3859,28 @@ function kioskFitNow(){
   probe.appendChild(copy);
   const pn=copy.querySelector('.knodes');
   if(!pn||!pn.children.length)return null;
-  const maxCols=Math.max(1,Math.min(n,Math.floor((W+12)/262)));
+  /* an explicit column count (?cols=3 / the Kiosk setting) pins the grid: fewer, wider columns
+     trade vertical space for horizontal — what a wall with rows to spare (or tall cards to
+     read) wants. Clamped to the node count and to one card per column. */
+  const want=kioskCfg().cols;
+  const maxCols=Math.max(1,Math.min(n,(want>=1&&want<=8)?want:Math.floor((W+12)/262)));
   const kfh=s?KF[s]:1,bottom=Math.ceil(10*kfh);
+  const fitc=(cols,rows)=>{const avail=pn.offsetHeight;
+    const gw=pn.getBoundingClientRect().width;const colW=(gw-(cols-1)*12)/cols;
+    const cells=[...pn.children];
+    cells.forEach(c=>{c.style.position='absolute';c.style.width=colW+'px'});
+    let cell=0;cells.forEach(c=>{cell=Math.max(cell,c.offsetHeight||c.scrollHeight)});
+    cells.forEach(c=>{c.style.position='';c.style.width=''});
+    if(!cell)return null;
+    const nat=rows*cell+(rows-1)*12;
+    if(nat<=avail+1)return {cols,rows,rh:(avail-(rows-1)*12)/rows,s};
+    if(cols>=maxCols)return {cols,rows,rh:cell,s,scale:avail/nat};   /* the widest we may go: scale down */
+    return null};
   for(let cols=maxCols;cols>=1;cols--){
    pn.style.gridTemplateColumns=`repeat(${cols},minmax(0,1fr))`;
    pn.style.gridAutoRows='';
-   const rows=Math.ceil(n/cols);
-   const avail=pn.offsetHeight;               /* the flex box at this step (height:auto:100vh) */
-   /* the card's natural height: rows stretch to fill the grid, so offsetHeight can be the row,
-      not the content — measure with the cards out of flow. Pinning the out-of-flow width to the
-      real column is the point: auto leaves a static-position card as wide as the grid, so a long
-      model name fits one line in the probe and wraps to two in the live card, and the row comes
-      out shorter than the footer (operator, 2026-10-23: footer still running off the panel).
-      Take the widest footer: cards differ, and every row is as tall as its worst card. */
-   const gw=pn.getBoundingClientRect().width;
-   const colW=(gw-(cols-1)*12)/cols;
-   const cells=[...pn.children];
-   cells.forEach(c=>{c.style.position='absolute';c.style.width=colW+'px'});
-   let cell=0;
-   cells.forEach(c=>{cell=Math.max(cell,c.offsetHeight||c.scrollHeight)});
-   cells.forEach(c=>{c.style.position='';c.style.width=''});
-   if(!cell)continue;
-   const nat=rows*cell+(rows-1)*12;           /* rows stacked at natural size, none stretched */
-   if(nat<=avail+1)                          /* every row full-size: share the slack evenly */
-    return {cols,rows,rh:(avail-(rows-1)*12)/rows,s};
-   if(cols==maxCols)                         /* nowhere wider: scale the wrap to height */
-    return {cols,rows,rh:cell,s,scale:avail/nat}}
+   const m=fitc(cols,Math.ceil(n/cols));
+   if(m)return m}
   return null};
  let best=null,soft=null;
  for(let s=0;s<=2;s++){const m=solve(s);
