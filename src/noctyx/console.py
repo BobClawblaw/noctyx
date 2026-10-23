@@ -2313,9 +2313,13 @@ a.menu-title{text-decoration:none;display:inline-flex;align-items:center;gap:6px
 .akeys{font:12px var(--sans);color:var(--fg-dim);line-height:2} .akeys kbd{font:10.5px var(--mono);border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--fg);margin-right:2px}
 /* Kiosk: no chrome, big type */
 body.kiosk header.top{display:none} body.kiosk .panel{border:0;background:transparent;box-shadow:none} body.kiosk .panel>.grip{display:none}
-/* One screen: the wrap is exactly the viewport (body overflow:hidden) and kioskFit() sizes the
-   node grid to the height left under the header and the slots: rows = floor(leftover / card
-   height), columns adapt to the node count, and the whole wrap scales down as a last resort. */
+ /* One screen: the wrap is exactly the viewport (body overflow:hidden) and kioskFit() sizes the
+    node grid to the height left under the header and the slots: rows = floor(leftover / card
+    height), columns adapt to the node count, and the whole wrap scales down as a last resort.
+    --kf-t is the kiosk type scale: CSS px per device px at 100% zoom. On a 4K wall at 2x
+    scaling, or a browser zoomed out, the viewport's CSS px far exceed a comfortable viewing
+    size and the old 18px titles became unreadable from the couch (operator, 2026-10-23:
+    "still too small"). Every kiosk size below multiplies it in, and kioskFit() picks it. */
 body.kiosk #desk{padding:0;overflow:hidden} body.kiosk .pbody{padding:0;overflow:hidden}
 .kiosk-wrap{display:flex;flex-direction:column;gap:calc(18px*var(--kf-h,1));padding:calc(10px*var(--kf-h,1)) calc(8px*var(--kf-h,1));box-sizing:border-box;
   width:100vw;height:100vh;transform-origin:top left}
@@ -3265,7 +3269,7 @@ function fxGroup(s){const on=NXT.face().style=='phosphor',fx=s.fx||NXT.FXDEF,
   ${row('beam','Beam sweep',oo,'A soft band of light that rolls down the screen every few seconds.')}
   ${row('flicker','Flicker',oo,'A barely-there phosphor flicker. Both moving effects stop when the system asks for reduced motion.')}</div>`}
 function setTheme(id){NXT.save({theme:id});pushAccount();setRender()}
-function setKiosk(k,v){const val=(k=='rotation')?v=='true':(k=='fit'||k=='cols'?v:+v);NXT.save({kiosk:{[k]:val}});pushAccount();setRender();
+function setKiosk(k,v){const val=(k=='rotation')?v=='true':((k=='fit'||k=='cols')?v:+v);NXT.save({kiosk:{[k]:val}});pushAccount();setRender();
  if(VIEW=='kiosk'){kioskPg=0;const p=PANELS.find(x=>x.id=='kiosk');if(p&&p._data!==undefined)repaint('kiosk',p._data)}}
 function kioskGroup(s){const k=s.kiosk||NXT.DEF.kiosk,
  row=(kk,lab,opts,hint)=>`<div class=setrow><label>${lab}</label><div class=seg>${opts.map(([v,l])=>`<button type=button class=\"${String(k[kk])==String(v)?'on':''}\" onclick=\"setKiosk('${kk}','${v}')\">${l}</button>`).join('')}</div><div class=hint>${hint}</div></div>`,
@@ -3336,12 +3340,12 @@ const lastV=s=>Array.isArray(s)&&s.length?+s[s.length-1][1]||0:0;
 const kTok=v=>v>=1e9?(v/1e9).toFixed(2)+'G':v>=1e6?(v/1e6).toFixed(v>=1e7?0:1)+'M':v>=1e3?(v/1e3).toFixed(v>=1e5?0:1)+'k':String(Math.round(v));
 /* the identity of the kiosk's current screen (fit hysteresis compares it): page + the
    settings that change how much room the grid gets. */
-function pgKey(){const k=kioskCfg();return[kioskPage(),!!k.ticker,k.rotation?'r':'-',k.fit].join('/')}
+function pgKey(){const k=kioskCfg();return[kioskPage(),kioskGrid,!!k.ticker,k.rotation?'r':'-',k.fit].join('/')}
 /* the kiosk's info level: site default (console › settings › Kiosk), overridable per browser by
    localStorage and by the URL. ?alerts= ?ticker= ?backups= (0 off, 1 line, 2 detail),
    ?rotation=1 pages through views every 20 s, ?page=n pins one view (0 nodes · 1 alerts ·
    2 backups; views beyond the first only exist as their detail level allows). */
-let kioskPg=0;
+let kioskPg=0,kioskGrid=0;
 /* The plain /kiosk is the classic one-screen wall: shrink fit, no extra pages, nothing off the
    display. URL flags extend it per browser: ?page=n pins one screen, and ?alerts= ?backups=
    ?ticker= ?rotation= ?fit= opt into the extra content — every one of which forces a fit that
@@ -3360,13 +3364,23 @@ const kioskCfg=()=>{
  else if(has||k.rotation)k.fit='shrink';                     /* extra content must still fit: shrink */
  if(q.get('fit')=='scroll'||q.get('fit')=='shrink')k.fit=q.get('fit');   /* an explicit choice wins */
  return k};
-const kioskPages=()=>{const k=kioskCfg();return 1+(k.alerts>1?1:0)+(k.backups>1?1:0)};
+/* grid pages: how many screens the fleet needs when the fit solver says the columns would
+   go below the legible floor. __kfitCols is written by applyFit (the grid actually drawn);
+   nodes/__knodeN are the fleet size. Pages = ceil(fleet / grid capacity). */
+const kioskGridPages=()=>{const cap=window.__kfitCols*rowsFit();
+ return Math.max(1,Math.ceil((window.__knodeN||1)/Math.max(1,cap)))};
+let rowsFitCache=0;
+const rowsFit=()=>rowsFitCache||1;
+const kioskPages=()=>{const k=kioskCfg();return (1+(k.alerts>1?1:0)+(k.backups>1?1:0))*kioskGridPages()};
 const kioskPage=()=>{const q=new URLSearchParams(location.search);
- if(q.get('page')!=null)return Math.max(0,Math.min(kioskPages()-1,+q.get('page')||0));
- return kioskPg%kioskPages()};
+ const raw=q.get('page')!=null?Math.max(0,Math.min(kioskPages()-1,+q.get('page')||0)):kioskPg%kioskPages();
+ kioskGrid=raw%kioskGridPages();                                   /* which slice of the fleet */
+ return (raw/kioskGridPages())|0};                                 /* view: nodes/alerts/backups */
 /* the header row: brand + big numbers + clock. a=alerts, k=kiosk settings.
    dense (default) packs five KPIs; spare keeps the classic four with bigger type. */
 function kioskTop(M,H,order,I,a,k,pg,pages){
+ if(window.__kfitCols){const cap=window.__kfitCols*(rowsFitCache||1);
+  if(order.length>cap)order=order.slice(kioskGrid*cap,kioskGrid*cap+cap);}
  const tok=((M.fleet||{}).series||{}).tokens||{};
  const tokSeries=Object.values(tok).reduce((s,x)=>s.concat(x||[]),[]);
  const tps=Object.values(tok).reduce((s,x)=>s+lastV(x),0);
@@ -3501,6 +3515,12 @@ function kioskRepaint(){const p=PANELS.find(x=>x.id=='kiosk');if(p&&p._data!==un
 function kioskDraw(d,done){
  const M=d.m,H=M.hosts||{},order=M.order||Object.keys(H),I=(M.fleet||{}).infra||{};
  const k=kioskCfg(),pages=kioskPages();let pg=Math.min(kioskPage(),pages-1);
+ /* a grid slice (?grid=n): the node page shows n nodes per screen and pages through the rest;
+    the page counter carries it (kioskGrid set by kioskPage()) and the fleet count is kept for
+    the next tick's page math. */
+ window.__knodeN=order.length;
+ if(pg==0&&window.__kfitCols){const cap=window.__kfitCols*(rowsFitCache||1);
+  if(order.length>cap)order=order.slice(kioskGrid*cap,kioskGrid*cap+cap);}
  /* the recipe/slot row is gone (user, 2026-10-22): the wall is nodes only, and every node
     carries its own trace + throughput. Slot state still drives the per-node LLM readout via
     H[n].llm below, so nothing is lost — it just stops taking a third of the wall. */
@@ -3790,10 +3810,13 @@ function repaint(id,data){const p=PANELS.find(x=>x.id==id),b=$('b-'+id);if(!b||!
  for(const k in CH)if(!document.querySelector(`[data-ch="${k}"]`))delete CH[k];
  if(id=='actions')wireActions()}
 function kioskFitSnap(b){const w=b.querySelector('.kiosk-wrap'),n=b.querySelector('.knodes');
- return w||n?{wrap:w&&w.style.transform,nodes:n&&n.getAttribute('style'),cls:n&&n.className,page:w&&w.dataset.page,pages:w&&w.dataset.pages,kf:_kfSaved}:null}
+ return w||n?{wrap:w&&w.style.transform,boxW:w&&w.style.width,boxH:w&&w.style.height,nodes:n&&n.getAttribute('style'),cls:n&&n.className,page:w&&w.dataset.page,pages:w&&w.dataset.pages,kf:_kfSaved}:null}
 function kioskFitRestore(b,f){if(!f)return;
  const w=b.querySelector('.kiosk-wrap'),n=b.querySelector('.knodes');
  if(w&&f.wrap!=null)w.style.transform=f.wrap;
+ if(w&&f.boxW!=null)w.style.width=f.boxW;        /* the type-scale box: transform alone against
+                                                    a 100vw wrap would double-scale the wall */
+ if(w&&f.boxH!=null)w.style.height=f.boxH;
  if(w&&f.page!=null)w.dataset.page=f.page;
  if(w&&f.pages!=null)w.dataset.pages=f.pages;
  if(f.kf)kfStyle(f.kf);                          /* the step <html> lost with the old tree */
@@ -3811,6 +3834,25 @@ function kioskFitRestore(b,f){if(!f)return;
    too. One fit per frame; if the applied tree still overflows its rows (a late theme class, a font
    load, a repaint mid-solve), the settled check refits, guard-bounded to converge. */
 const KF={1:.78,2:.62};
+/* kiosk type scale: CSS px per device px at 100% zoom. A 4K wall at 2x OS scaling, or a
+   browser zoomed out to fit more, presents a viewport of thousands of CSS px — and the
+   fixed-px kiosk type becomes postage-stamp small on the physical screen. Grow --kf-t with
+   the viewport's SMALLER dimension against a 1080p reference (the wall's room is its height,
+   and a wide-and-short 4K panel wants width-native, not scaled, layout), so type tracks the
+   screen, not the zoom level; kioskFit() boxes the wrap to viewport/T and transform:scale(T)s
+   it, so gaps, rows, bars and the solver all scale together. ?kf= pins it per browser. */
+const kioskT=(w,h)=>{const q=new URLSearchParams(location.search);
+ if(q.get('kf'))return Math.max(.5,Math.min(3,+q.get('kf')||1));
+ /* Area alone is not enough: the kiosk's room is its HEIGHT (rows of cards under a header),
+    so scale type with the smaller dimension against a 1080p reference. A 3832-wide panel
+    with 1080 CSS of height stays at 1.0 — its vertical room is unchanged; only genuinely
+    taller viewports (4K panels at 1x, 900px windows) grow. */
+ const s=Math.min(w,h)/1080;
+ return Math.max(1,Math.min(2.2,s));};
+/* the legible column floor: ~34px node titles at the full type step — the width a card must
+   keep to stay readable from across a room. Below it the wall pages the fleet instead of
+   shrinking it (operator, 2026-10-23: "still too small"). */
+const MINCOL=560;
 let _kfSaved=0,_fitPend=0,_fitPass=0,_lastFit=null;
 function kfStyle(s){_kfSaved=s;document.documentElement.classList.toggle('kiosk-1',s==1);document.documentElement.classList.toggle('kiosk-2',s==2)}
 function kioskFit(){
@@ -3828,7 +3870,23 @@ function kioskFitNow(){
  const wrap=document.querySelector('.kiosk-wrap');if(!wrap)return;
  const H=wrap.clientHeight,W=wrap.clientWidth;
  wrap.style.transform='';
- if(kioskCfg().fit=='scroll'&&!kioskCfg().rotation){kfStyle(0);return}
+ /* the type scale: grow everything with the viewport (see kioskT), then hand the extra size
+    back to the layout by shrinking the wrap box by the same factor — transform:scale(T) on a
+    box of 100vw/T x 100vh/T paints exactly the viewport, and every px inside (fonts, gaps,
+    rows the solver measured) lands T x bigger on the screen. */
+ const T=kioskT(innerWidth,innerHeight);
+ const want=kioskCfg().cols,pinned=want>=1&&want<=8;
+ /* MINCOL is a floor on PAINTED width; the grid lays out at innerWidth/T (transform-scaled),
+    so the floor converts to innerWidth/(T*MINCOL). T starts at 1, so a plain 1080p screen
+    still gets its natural column count; the cap only bites on big/zoomed walls. */
+ const autoCols=Math.max(1,Math.floor((innerWidth/T+12)/(MINCOL/Math.max(T,1)+12)));   /* floor: painted >= MINCOL */
+ const tscale='scale('+T.toFixed(4)+')';
+ const setBox=(b)=>{b.style.width=(innerWidth/T)+'px';b.style.height=(innerHeight/T)+'px';
+                    b.style.transform=tscale;b.style.transformOrigin='top left'};
+ const paintTransform=(extra)=>tscale+(extra?` scale(${extra})`:'');
+ if(kioskCfg().fit=='scroll'&&!kioskCfg().rotation){kfStyle(0);      /* natural size: no box, no scale */
+  wrap.style.width='';wrap.style.height='';wrap.style.transform='';return}
+ setBox(wrap);
  const nodes=wrap.querySelector('.knodes');if(!nodes||!nodes.children.length){
   /* no node grid: a detail page (alerts/backups) in shrink mode — fill exactly the room the
      wrap has left (header, ticker and gaps already occupy their height in the 100vh column) */
@@ -3846,9 +3904,9 @@ function kioskFitNow(){
     fit's inline transform/position is cleared, and bar fills are stripped: they animate every
     tick and would jitter the measurement and re-trigger this fit forever. */
  const probe=document.createElement('div');
- probe.style.cssText=`position:fixed;visibility:hidden;left:-9999px;top:0;width:${W}px;height:${H}px;overflow:hidden`;
+ probe.style.cssText=`position:fixed;visibility:hidden;left:-9999px;top:0;width:${innerWidth/T}px;height:${innerHeight/T}px;overflow:hidden`;
  document.body.appendChild(probe);
- const solve=s=>{
+ const solve=(s,T,colCap)=>{
   kfStyle(s);
   probe.innerHTML='';
   const copy=wrap.cloneNode(true);
@@ -3862,8 +3920,10 @@ function kioskFitNow(){
   /* an explicit column count (?cols=3 / the Kiosk setting) pins the grid: fewer, wider columns
      trade vertical space for horizontal — what a wall with rows to spare (or tall cards to
      read) wants. Clamped to the node count and to one card per column. */
-  const want=kioskCfg().cols;
-  const maxCols=Math.max(1,Math.min(n,(want>=1&&want<=8)?want:Math.floor((W+12)/262)));
+  /* no legible-size column gets cut to fit: the auto grid caps columns at the floor width
+     and rows at the same number; nodes beyond that capacity page out (kioskGridPages). A
+     pinned ?cols=3 is the operator's call and keeps its width, capped only by the count. */
+  const maxCols=Math.max(1,Math.min(n,(want>=1&&want<=8)?want:colCap));
   const kfh=s?KF[s]:1,bottom=Math.ceil(10*kfh);
   const fitc=(cols,rows)=>{const avail=pn.offsetHeight;
     const gw=pn.getBoundingClientRect().width;const colW=(gw-(cols-1)*12)/cols;
@@ -3879,8 +3939,26 @@ function kioskFitNow(){
   for(let cols=maxCols;cols>=1;cols--){
    pn.style.gridTemplateColumns=`repeat(${cols},minmax(0,1fr))`;
    pn.style.gridAutoRows='';
-   const m=fitc(cols,Math.ceil(n/cols));
-   if(m)return m}
+   /* auto grid: columns never below the legible floor (autoCols), and the rows a grid gets
+      are its true capacity — rows at a full-height size (>= ROWMIN), and if even one row
+      can't clear that the wall simply has no room left and the row stays. Pinned ?cols
+      is the operator's call: every row the count implies, no paging, type may shrink.
+      The capacity (cols*rowsCap) is what kioskGridPages() slices the fleet against. */
+   const ROWMIN=200;
+   const availH=pn.offsetHeight;
+   /* measure the natural cell height once, at the chosen column width */
+   const _gw=pn.getBoundingClientRect().width;const _colW=(_gw-(cols-1)*12)/cols;
+   const _cells=[...pn.children];_cells.forEach(c=>{c.style.position='absolute';c.style.width=_colW+'px'});
+   let _cellH=0;_cells.forEach(c=>{_cellH=Math.max(_cellH,c.offsetHeight||c.scrollHeight)});
+   _cells.forEach(c=>{c.style.position='';c.style.width=''});
+   /* auto: the grid holds as many rows as fit at natural cell height (or ROWMIN floor,
+      whichever is smaller), and nodes beyond that capacity page out.
+      pinned: all rows the count implies — the operator's call. */
+   const maxRowsAtHeight=Math.max(1,Math.floor((availH+12)/(_cellH+12)));
+   const rowsCap=(want>=1&&want<=8)?Math.ceil(n/cols)
+    :Math.min(Math.ceil(n/cols),maxRowsAtHeight);
+   const m=fitc(cols,rowsCap);
+   if(m){m.rowsCap=rowsCap;m.grid=cols*rowsCap;return m}}
   return null};
  /* Type step: all three fit when the grid has rows to spare. Step 0 (kf=1) is the LARGEST
     type; it also demands the tallest rows, so the old first-wins scan from s=0 already
@@ -3890,27 +3968,46 @@ function kioskFitNow(){
     looked sparse and "too small" (operator, 2026-10-23). At step 0, grow the rows instead:
     spread the slack across the rows, which stretches the trace (.ktrace flex:1) and every
     proportional size with it, and the wall fills the screen at the largest type. */
+  /* Type step: step 0 (kf=1) is the largest type; it demands the tallest rows, and the
+     auto grid caps both columns and rows at the legible floor (autoCols), so a big fleet
+     pages out rather than shrinking. The step scan exists for the pinned-cols case: the
+     operator chose the width, so if the rows still don't fit at full type, drop the type
+     rather than the columns (operator, 2026-10-23: pinned 3-col must stay 3-col). */
  let best=null;
- for(const s of[0,1,2]){
-  const m=solve(s);if(!m)continue;
-  if(m.scale===undefined){best=m;break}
-  if(!best)best=m}
+ if(pinned){
+   for(const s of[0,1,2]){const m=solve(s,T,autoCols);if(!m)continue;
+     if(m.scale===undefined){best=m;break}
+     if(!best)best=m}
+ }else{
+   /* auto: step 0 only — paging beats shrinking. Take the widest grid whose rows still
+      fit the wall at full height (nodes beyond its capacity page out). */
+   for(let cols=autoCols;cols>=1;cols--){
+     const m=solve(0,T,cols);
+     if(m&&m.scale===undefined){best=m;break}
+     if(m&&!best)best=m}
+ }
  probe.remove();
  if(!best){kfStyle(0);return}
  /* a tick that re-solves the same page a pixel or two differently rewrites every card's
     height: the whole wall reflows and it reads as a flash (operator, 2026-10-22). Hysteresis:
     keep the last fit when the new one lands within 6px of it on the same step and columns. */
- if(_lastFit&&_lastFit.pg==pgKey()&&_lastFit.s==best.s&&_lastFit.cols==best.cols&&
+ if(_lastFit&&_lastFit.pg==pgKey()&&_lastFit.T===T&&_lastFit.s==best.s&&_lastFit.cols==best.cols&&
     _lastFit.scale===best.scale&&Math.abs(_lastFit.rh-best.rh)<=6)best=_lastFit;
- _lastFit=best;
+ _lastFit={...best,T};
+ /* publish the grid the solver actually drew: columns and rows set the capacity that
+    kioskGridPages() slices the fleet against. */
+ window.__kfitCols=best.cols;rowsFitCache=best.rowsCap||best.rows;
  kfStyle(best.s);                               /* settle the step before measuring the live tree */
+ setBox(wrap);                                   /* morph() may have rebuilt the wrap */
  nodes.style.gridTemplateColumns=`repeat(${best.cols},minmax(0,1fr))`;
  nodes.style.gridAutoRows=best.rh.toFixed(1)+'px';
- wrap.style.transform=best.scale?`scale(${Math.min(1,Math.max(.5,best.scale)).toFixed(4)})`:'';
+ /* best.scale (<1) is a residual overflow beyond the box fit — apply it only, tscale is already
+    baked into setBox. The settle loop may re-fit after a morph resets the box; that's fine. */
+ wrap.style.transform=best.scale?paintTransform(Math.min(1,Math.max(.5,best.scale)).toFixed(4)):tscale;
  /* settle: if the applied tree's content still overflows its rows (a late theme class, a font
     that loaded mid-solve, stretched heights lying to the probe), refit from the true state —
     guard-bounded, the fit converges in one or two extra passes */
- const sc=parseFloat(wrap.style.transform)||1,box=nodes.firstElementChild.getBoundingClientRect().height/sc;
+ const sc=(wrap.style.transform.match(/([\d.]+)/g)||['1']).reduce((a,x)=>a*+x,1),box=nodes.firstElementChild.getBoundingClientRect().height/sc;
  if(++_fitPass<5&&[...nodes.children].some(c=>c.scrollHeight>box+2))kioskFit();else _fitPass=0}
 if(VIEW=='kiosk'){addEventListener('resize',kioskFit);new MutationObserver(kioskFit).observe($('desk'),{childList:true,subtree:true})}
 
