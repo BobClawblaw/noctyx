@@ -124,15 +124,14 @@ display and stays on it — a site setting can never make it alternate views. Ev
 10 seconds; the wall never dims, flashes or reflows for a slow or failed fetch — it holds its last good frame.
 
 What the kiosk shows is a site setting (settings › **Kiosk**, saved with *save as site default*, or
-`noctyx console-set`): the **alert ticker** puts a live one-line feed of active alerts under the header, and
-**Alerts** / **Backups** at *Detail* make `?page=1` / `?page=2` worth visiting (alert summaries with their LLM
-triage; per-host backup last run / next due / window). Each node tile lists every model it serves with its own
+`noctyx console-set`). The nodes page never shows alerts; **Alerts** / **Backups** at *Detail* make
+`?page=1` / `?page=2` worth visiting (alert summaries with their LLM triage; per-host backup last run / next due / window). Each node tile lists every model it serves with its own
 tok/s, plus its 30-minute GPU and CPU traces. **Fit** chooses the layout: `scroll` (the default) keeps the type
 full-size and the node grid scrolls inside its own area; `shrink` sizes everything to exactly one screen, down to
 scaling the whole view on very small displays.
 
 Any wall browser can choose its view in the URL without touching settings: `/kiosk?page=1` (0 nodes · 1 alerts ·
-2 backups), `?ticker=0`, `?fit=shrink`. `?rotation=1` is the one way to get an alternating wall: it pages through
+2 backups), `?fit=shrink`. `?rotation=1` is the one way to get an alternating wall: it pages through
 nodes → alerts → backups every 20 seconds and always uses `shrink` — one screen per page is the point.
 
 ## About (`/about`)

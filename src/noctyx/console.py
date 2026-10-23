@@ -2183,7 +2183,7 @@ const NXT=(()=>{
  /* Phosphor effects: all static layers or compositor-only animation (transform, opacity) */
  const FXDEF={glow:'normal',scan:'kiosk',vignette:'on',grain:'off',beam:'off',flicker:'off',fringe:'off'};
  const GLOW={off:0,soft:.5,normal:1,bright:1.6};
- const DEF={mode:'dark',theme:'noctyx',tunit:'F',fx:FXDEF,kiosk:{alerts:0,ticker:0,backups:0,rotation:false,fit:'shrink',dense:false,cols:0},custom:{bg:'#0b0e1a',panel:'#121629',text:'#e2e8f6',muted:'#97a3c2',accent:'#3fe6ff',line:'#242a47',ok:'#2ecc8f',warn:'#f0b429',bad:'#ef5a5a'}};
+ const DEF={mode:'dark',theme:'noctyx',tunit:'F',fx:FXDEF,kiosk:{alerts:0,backups:0,rotation:false,fit:'shrink',dense:false,cols:0},custom:{bg:'#0b0e1a',panel:'#121629',text:'#e2e8f6',muted:'#97a3c2',accent:'#3fe6ff',line:'#242a47',ok:'#2ecc8f',warn:'#f0b429',bad:'#ef5a5a'}};
  function derive(b){const f={...b},dark=lum(f.bg)<.4;f.scheme=dark?'dark':'light';
   f.bg0??=mix(f.bg,dark?'#000000':'#ffffff',.25);f.bg2??=mix(f.panel,f.text,dark?.04:.03);f.bg3??=mix(f.panel,f.text,dark?.09:.07);
   f.lineSoft??=mix(f.line,f.bg,.4);f.faint??=mix(f.muted,f.bg,.3);f.accentDim??=mix(f.accent,f.bg,.35);f.accent2??=f.accent;
@@ -2350,7 +2350,7 @@ html.kiosk-1{--kf-h:.78} html.kiosk-2{--kf-h:.62}
 .kgrid span{color:var(--fg-dim)} .kgrid b{font:700 calc(20px*var(--kf-h,1)) var(--mono)}
 .kllm{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;margin-top:auto;padding-top:calc(8px*var(--kf-h,1));border-top:1px solid var(--line-soft);font:calc(12px*var(--kf-h,1)) var(--mono);gap:calc(8px*var(--kf-h,1))}
 .kllm .mut:first-child{flex:1 0 100%;white-space:normal;overflow-wrap:break-word;line-height:1.3} .kllm .mut:last-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0} .kllm b{font:800 calc(22px*var(--kf-h,1)) var(--mono);color:var(--accent);white-space:nowrap;flex:0 0 auto} .kllm small{font:calc(11px*var(--kf-h,1)) var(--sans);color:var(--fg-dim)}
-/* kiosk extras: the alert ticker, the detail pages (alerts / backups), and fit:'scroll' */
+/* kiosk extras: the detail pages (alerts / backups) and fit:'scroll' */
 .kpg{font:600 calc(11px*var(--kf-h,1)) var(--mono);color:var(--accent);margin-top:calc(4px*var(--kf-h,1))}
 .kbig.dim{opacity:.45}
 /* the hour's best rate rides under the live one: same colour family, half the caption's shout */
@@ -2373,19 +2373,11 @@ html.kiosk-1{--kf-h:.78} html.kiosk-2{--kf-h:.62}
 .kspark path.p{stroke:var(--warn);stroke-dasharray:5 2 1 2;opacity:.85}
 .kspark line.grid{stroke:var(--line-soft);stroke-width:1;vector-effect:non-scaling-stroke}
 .kload{margin-left:auto;font:500 calc(11px*var(--kf-h,1)) var(--sans);color:var(--fg-faint)}
-/* the ticker wraps: every alert is fully readable, nothing cut off (the wall has no pointer,
-   so ellipses and hovers hide information — it takes the height it needs, and shrink-fit keeps
-   the whole wall on one screen anyway) */
+/* the alerts page's empty state: one quiet line */
 .kticker{display:flex;flex-wrap:wrap;gap:calc(8px*var(--kf-h,1));align-items:flex-start;flex:0 1 auto;min-height:0;
  padding:calc(7px*var(--kf-h,1)) calc(10px*var(--kf-h,1));border:1px solid var(--line-soft);border-radius:var(--radius);background:var(--bg-1);
  font:calc(13px*var(--kf-h,1)) var(--sans)}
 .kticker.kempty{gap:8px}
-.kticker .kc{display:inline-flex;align-items:baseline;gap:calc(6px*var(--kf-h,1));flex:0 1 auto;min-width:0;
- padding:calc(3px*var(--kf-h,1)) calc(9px*var(--kf-h,1));border:1px solid var(--line-soft);border-radius:99px;background:var(--bg-2)}
-.kticker .kc b{font:700 calc(12px*var(--kf-h,1)) var(--mono);flex:0 0 auto}
-.kticker .kt{white-space:normal;overflow-wrap:anywhere;line-height:1.35}
-.kticker .kc.critical{border-color:color-mix(in srgb,var(--bad) 55%,var(--line));color:var(--bad)}
-.kticker .kc.warning{border-color:color-mix(in srgb,var(--warn) 55%,var(--line));color:var(--warn)}
 .dot.warn{background:var(--warn);box-shadow:0 0 8px color-mix(in srgb,var(--warn) 70%,transparent)}
 .dot.info{background:var(--info);box-shadow:0 0 8px color-mix(in srgb,var(--info) 60%,transparent)}
 .kdetail{flex:0 1 auto;min-height:0;overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,calc(340px*var(--kf-h,1))),1fr));gap:calc(12px*var(--kf-h,1));align-content:start}
@@ -3286,9 +3278,8 @@ function kioskGroup(s){const k=s.kiosk||NXT.DEF.kiosk,
  row=(kk,lab,opts,hint)=>`<div class=setrow><label>${lab}</label><div class=seg>${opts.map(([v,l])=>`<button type=button class=\"${String(k[kk])==String(v)?'on':''}\" onclick=\"setKiosk('${kk}','${v}')\">${l}</button>`).join('')}</div><div class=hint>${hint}</div></div>`,
  lv=[['0','Off'],['1','On'],['2','Detail']];
  return `<div class=setgrp><h3>Kiosk</h3><p class=gnote>How much the wall display (<code>/kiosk</code>) shows. Any browser can also override this with URL flags: <code>?page=1</code>, <code>?alerts=2</code>, <code>?rotation=1</code>, <code>?fit=scroll</code>.</p>
- ${row('alerts','Alerts',lv,'Off: the count only. On: a one-line feed under the header. Detail: a full page of summaries and triage.')}
+ ${row('alerts','Alerts',lv,'Detail: a full page of alert summaries and triage (?page=1). The nodes page never shows alerts.')}
  ${row('backups','Backups',lv,'Off: the ratio only. On: the count. Detail: a page of per-host last run, next due, window.')}
- ${row('ticker','Alert ticker',[['0','Off'],['1','On']],'The scrolling feed of active alerts on the nodes page.')}
  ${row('rotation','Rotation',[['false','Off'],['true','On']],'Page through nodes → alerts → backups every 20 seconds. Only takes effect in a browser whose URL asks for it (?rotation=1): the wall never changes views on its own.')}
  ${row('dense','Dense header',[['false','Off'],['true','On']],'Five fleet numbers on the header line (adds LLMs serving); off keeps four with bigger type.')}
  ${row('cols','Grid columns',[['0','Auto'],['2','2'],['3','3'],['4','4'],['5','5']],'Force the node grid to a column count. Auto picks the most columns whose cards still fit the screen. Try 3 for taller cards on a wall with rows to spare.')}
@@ -3351,23 +3342,23 @@ const lastV=s=>Array.isArray(s)&&s.length?+s[s.length-1][1]||0:0;
 const kTok=v=>v>=1e9?(v/1e9).toFixed(2)+'G':v>=1e6?(v/1e6).toFixed(v>=1e7?0:1)+'M':v>=1e3?(v/1e3).toFixed(v>=1e5?0:1)+'k':String(Math.round(v));
 /* the identity of the kiosk's current screen (fit hysteresis compares it): page + the
    settings that change how much room the grid gets. */
-function pgKey(){const k=kioskCfg();return[kioskPage(),!!k.ticker,k.rotation?'r':'-',k.fit].join('/')}
+function pgKey(){const k=kioskCfg();return[kioskPage(),k.rotation?'r':'-',k.fit].join('/')}
 /* the kiosk's info level: site default (console › settings › Kiosk), overridable per browser by
-   localStorage and by the URL. ?alerts= ?ticker= ?backups= (0 off, 1 line, 2 detail),
+   localStorage and by the URL. ?alerts= ?backups= (2 adds a detail page),
    ?rotation=1 pages through views every 20 s, ?page=n pins one view (0 nodes · 1 alerts ·
    2 backups; views beyond the first only exist as their detail level allows). */
 let kioskPg=0;
 /* The plain /kiosk is the classic one-screen wall: shrink fit, no extra pages, nothing off the
    display. URL flags extend it per browser: ?page=n pins one screen, and ?alerts= ?backups=
-   ?ticker= ?rotation= ?fit= opt into the extra content — every one of which forces a fit that
+   ?rotation= ?fit= opt into the extra content — every one of which forces a fit that
    keeps whatever it shows fully on screen (shrink) unless the browser explicitly asks for
    ?fit=scroll. The site's Kiosk settings hold the same switches for browsers that want them
    as the standing choice. (operator, 2026-10-22, after a scroll-default regression: a wall
    must never hide information below or beside its own edges.) */
 const kioskCfg=()=>{
  const q=new URLSearchParams(location.search),k={...NXT.eff().kiosk};
- const has=['alerts','backups','ticker','rotation','page','fit','cols'].some(p=>q.has(p));
- for(const p of['alerts','ticker','backups']){const v=+q.get(p);if(q.get(p)!=null&&!isNaN(v))k[p]=v}
+ const has=['alerts','backups','rotation','page','fit','cols'].some(p=>q.has(p));
+ for(const p of['alerts','backups']){const v=+q.get(p);if(q.get(p)!=null&&!isNaN(v))k[p]=v}
  if(q.get('rotation')!=null)k.rotation=q.get('rotation')!='0';
  if(q.get('dense')!=null)k.dense=q.get('dense')!='0';
  {const v=+q.get('cols');if(q.get('cols')!=null&&!isNaN(v)&&v>=1&&v<=8)k.cols=v}   /* grid columns: ?cols=3 */
@@ -3487,10 +3478,6 @@ function kioskNode(n,h){const srvs=((h.llm||{}).servers||[]).filter(s=>s.model||
   <div class=kmeters><span>GPU</span>${bar(h.gpu_util,true,'gpu')}<span>CPU</span>${bar(h.cpu,true,'cpu')}
    <span>MEM</span>${bar(mem,true,'mem')}<span>TEMP</span>${bar(h.gpu_temp!=null?h.gpu_temp/95*100:0,false,'temp')}</div>
   ${tpsLine}${pfLine}</div>`}
-/* the live alert feed (ticker: 1): one line per active alert, colour by severity */
-function kioskTicker(a){const L=(a.active||[]).slice().sort((x,y)=>({critical:0,warning:1,info:2})[x.severity]-({critical:0,warning:1,info:2})[y.severity]);
- if(!L.length)return '<div class="kticker kempty"><b class=ok>✓</b><span class=mut>no active alerts</span></div>';
- return `<div class=kticker>${L.map(x=>`<span class="kc ${x.severity}"><i class="dot ${x.severity=='critical'?'bad':x.severity=='warning'?'warn':'info'}"></i><b>${esc(x.host||'fleet')}</b><span class=kt>${esc(x.summary||x.name)}</span></span>`).join('')}</div>`}
 /* the alerts page (alerts: 2): name + host + since + summary + the LLM triage, newest-severity first */
 function kioskAlerts(a){const L=(a.active||[]).slice().sort((x,y)=>({critical:0,warning:1,info:2})[x.severity]-({critical:0,warning:1,info:2})[y.severity]);
  if(!L.length)return '<div class=kdetail><div class="kticker kempty"><b class=ok>✓</b><span class=mut>no active alerts</span></div></div>';
@@ -3520,14 +3507,13 @@ function kioskDraw(d,done){
     carries its own trace + throughput. Slot state still drives the per-node LLM readout via
     H[n].llm below, so nothing is lost — it just stops taking a third of the wall. */
  const top=kioskTop(M,H,order,I,d.a||{},k,pg,pages);
- const ticker=k.ticker>0?kioskTicker(d.a||{}):'';
  let main='',extra=null;
  if(pg==1&&k.alerts>1)main=kioskAlerts(d.a||{});
  else if(pg==2&&k.backups>1){extra=kioskBackupsCached().then(html=>{const el=document.getElementById('kdetail');if(el)el.innerHTML=html;kioskFit()});
   main='<div class=kdetail id=kdetail></div>'}
  else{const nodes=order.map(n=>kioskNode(n,H[n]||{})).join('');
   main=`<div class=knodes>${nodes}</div>`}
- const out=`<div class="kiosk-wrap${k.fit=='scroll'?' kfit-scroll':''}" data-page="${pg}" data-pages="${pages}">${top}${ticker}${main}</div>`;
+ const out=`<div class="kiosk-wrap${k.fit=='scroll'?' kfit-scroll':''}" data-page="${pg}" data-pages="${pages}">${top}${main}</div>`;
  if(done)done();
  if(extra)extra.catch(()=>{});
  return out}
@@ -3797,8 +3783,8 @@ function repaint(id,data){const p=PANELS.find(x=>x.id==id),b=$('b-'+id);if(!b||!
                                                    chose would evaporate on the next 10s refresh */
  const t=document.createElement('template');t.innerHTML=p.render(data)||'<div class=empty>no data</div>';
  morphKids(b,t.content);b.classList.remove('stale');
- /* morph matches children positionally: a kiosk page whose markup shifted (a new ticker line,
-    an alert cleared) is a different screen — swap wholesale, then let the fit re-solve */
+ /* morph matches children positionally: a kiosk page whose markup shifted (a page change, an
+    alert cleared) is a different screen — swap wholesale, then let the fit re-solve */
  if(id=='kiosk'){const cur=b.firstElementChild,nw=t.content.firstElementChild;
   if(cur&&nw&&(cur.className!==nw.className||(cur.dataset.page||'')!==(nw.dataset.page||'')))b.replaceChildren(nw)}
  if(id=='kiosk'){kioskFitRestore(b,fit);kioskFit()}
@@ -3863,7 +3849,7 @@ function kioskFitNow(){
  kioskBox(wrap,T);
  const nodes=wrap.querySelector('.knodes');if(!nodes||!nodes.children.length){
   /* no node grid: a detail page (alerts/backups) in shrink mode — fill exactly the room the
-     wrap has left (header, ticker and gaps already occupy their height in the 100vh column) */
+     wrap has left (header and gaps already occupy their height in the 100vh column) */
   const det=wrap.querySelector('.kdetail');
   if(det){kfStyle(0);
    det.style.maxHeight=Math.max(120,wrap.clientHeight-det.offsetTop-Math.ceil(10*(document.documentElement.classList.contains('kiosk-2')?KF[2]:1)))+'px'}
