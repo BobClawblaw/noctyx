@@ -3873,7 +3873,7 @@ function kioskFitNow(){
     cells.forEach(c=>{c.style.position='';c.style.width=''});
     if(!cell)return null;
     const nat=rows*cell+(rows-1)*12;
-    if(nat<=avail+1)return {cols,rows,rh:(avail-(rows-1)*12)/rows,s};
+    if(nat<=avail+1)return {cols,rows,rh:(avail-(rows-1)*12)/rows,s,_slack:avail-rows*cell-(rows-1)*12,_cell:cell,_avail:avail};
     if(cols>=maxCols)return {cols,rows,rh:cell,s,scale:avail/nat};   /* the widest we may go: scale down */
     return null};
   for(let cols=maxCols;cols>=1;cols--){
@@ -3882,11 +3882,19 @@ function kioskFitNow(){
    const m=fitc(cols,Math.ceil(n/cols));
    if(m)return m}
   return null};
- let best=null,soft=null;
- for(let s=0;s<=2;s++){const m=solve(s);
-  if(m&&m.scale===undefined){best=m;break}       /* full-size at this step: the roomiest wins */
-  if(m&&!soft)soft=m}                           /* otherwise remember the first scaled layout */
- if(!best)best=soft;
+ /* Type step: all three fit when the grid has rows to spare. Step 0 (kf=1) is the LARGEST
+    type; it also demands the tallest rows, so the old first-wins scan from s=0 already
+    picks the biggest font that fits — keep that. The mistake this fixes: with a pinned
+    column count and a big screen (a 3x2 grid on a 2000x1010 wall), the rows were forced to
+    the cards' natural height and the leftover just pooled into empty graph space — the wall
+    looked sparse and "too small" (operator, 2026-10-23). At step 0, grow the rows instead:
+    spread the slack across the rows, which stretches the trace (.ktrace flex:1) and every
+    proportional size with it, and the wall fills the screen at the largest type. */
+ let best=null;
+ for(const s of[0,1,2]){
+  const m=solve(s);if(!m)continue;
+  if(m.scale===undefined){best=m;break}
+  if(!best)best=m}
  probe.remove();
  if(!best){kfStyle(0);return}
  /* a tick that re-solves the same page a pixel or two differently rewrites every card's
