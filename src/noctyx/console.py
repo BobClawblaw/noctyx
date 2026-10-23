@@ -2320,26 +2320,37 @@ body.kiosk #desk{padding:0;overflow:hidden} body.kiosk .pbody{padding:0;overflow
 .kiosk-wrap{display:flex;flex-direction:column;gap:calc(18px*var(--kf-h,1));padding:calc(10px*var(--kf-h,1)) calc(8px*var(--kf-h,1));box-sizing:border-box;
   width:100vw;height:100vh;transform-origin:top left}
 html.kiosk-1{--kf-h:.78} html.kiosk-2{--kf-h:.62}
-.ktop{display:flex;align-items:center;gap:calc(18px*var(--kf-h,1));flex-wrap:nowrap;overflow:hidden;width:100%;min-width:0}
-.kpair{flex:0 1 auto;min-width:0}
-.kbrand{display:flex;align-items:center;gap:calc(10px*var(--kf-h,1));text-decoration:none} .kbrand .mark{width:calc(34px*var(--kf-h,1));height:calc(34px*var(--kf-h,1))} .kbrand .wordmark{font-size:calc(22px*var(--kf-h,1))}
+/* the header's numbers scale with the bar's own width (cqw), capped at their full size: a
+   narrow window gets smaller numbers and keeps room for the graphs (user, 2026-10-23) */
+.ktop{display:flex;align-items:baseline;gap:calc(18px*var(--kf-h,1));flex-wrap:nowrap;overflow:hidden;width:100%;min-width:0;container-type:inline-size;
+  --kbig-fs:min(calc(44px*var(--kf-h,1)),2.4cqw);--kclock-fs:min(calc(44px*var(--kf-h,1)),3.2cqw)}
+.kbrand{align-self:center;display:flex;align-items:center;gap:calc(10px*var(--kf-h,1));text-decoration:none} .kbrand .mark{width:calc(34px*var(--kf-h,1));height:calc(34px*var(--kf-h,1))} .kbrand .wordmark{font-size:min(calc(22px*var(--kf-h,1)),1.9cqw)}
 /* each header number sits centred over its label (user, 2026-10-23) */
 .kbig{display:flex;flex-direction:column;align-items:center} .kbig>span{text-align:center}
-.kbig b{font:800 calc(44px*var(--kf-h,1))/1 var(--mono)} .kbig span,.kclock span{font:calc(11px*var(--kf-h,1)) var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim)}
-.kclock{display:flex;flex-direction:column;align-items:flex-end;padding-left:calc(20px*var(--kf-h,1));border-left:1px solid var(--line);margin-left:auto;flex:0 0 auto} .kclock b{font:700 calc(44px*var(--kf-h,1))/1 var(--mono);white-space:nowrap}
-/* header graphs sit directly beside their own number (user, 2026-10-22): graph first, then the
-   number+label it belongs to, so each KPI reads as one unit. Graphs are the flexible part of
-   the row — they give up width (down to nothing) before a number is squeezed; the clock and
-   the vitals never shrink, or the clock's digits spill left over 'tok / 24h' (user, 2026-10-23). */
-.kpair{display:flex;align-items:center;gap:calc(10px*var(--kf-h,1));flex:0 1 auto;min-width:0;overflow:hidden}
+.kbig b{font:800 var(--kbig-fs)/1 var(--mono)} .kbig span,.kclock span{font:calc(11px*var(--kf-h,1)) var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim)}
+.kclock{display:flex;flex-direction:column;align-items:flex-end;padding-left:calc(20px*var(--kf-h,1));border-left:1px solid var(--line);margin-left:auto;flex:0 0 auto} .kclock b{font:700 var(--kclock-fs)/1 var(--mono);white-space:nowrap}
+/* header graphs sit directly beside their own number (user, 2026-10-22), so each KPI reads as
+   one unit: the graph with its number to the right, the label running underneath both. The
+   pairs share the row's free width and the graphs take all of it (user, 2026-10-23: the graphs
+   were slivers between big numbers and three-line labels). The clock and the vitals never
+   shrink, or the clock's digits spill left over 'tok / 24h'. Every number in the bar sits on
+   one baseline (user, 2026-10-23): the bar aligns on baselines, and the number is the only
+   baseline-aligned item in its pair's first row, so the pair's baseline is the number's. Its
+   line box is the graph's height, which keeps it centred beside the graph. */
+.kpair{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:calc(12px*var(--kf-h,1));row-gap:calc(3px*var(--kf-h,1));
+  align-items:center;flex:1 1 0;min-width:0;max-width:calc(380px*var(--kf-h,1))}
+.kpair .kbig{display:contents}
+.kpair .kbig>span{grid-area:2/1/3/3;margin:0;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* the number keeps a slot of about two and a half digits, so a graph barely moves when its number gains a digit */
+.kpair .kbig>b{grid-area:1/2;align-self:baseline;line-height:calc(40px*var(--kf-h,1));min-width:2em;text-align:center}
 .kvitals{display:flex;align-items:stretch;gap:calc(16px*var(--kf-h,1));flex:0 0 auto;padding-left:calc(16px*var(--kf-h,1));border-left:1px solid var(--line)}
 .kvital{display:flex;flex-direction:column;align-items:flex-start;min-width:0;flex:0 0 auto}
 .kvital b{font:800 calc(23px*var(--kf-h,1))/1 var(--mono);color:var(--fg)}
 .kvital span{font:calc(9.5px*var(--kf-h,1)) var(--sans);letter-spacing:.09em;text-transform:uppercase;color:var(--fg-faint);white-space:nowrap}
-.ktopg{flex:1 1 120px;min-width:0;overflow:hidden;max-width:calc(190px*var(--kf-h,1))}
+.ktopg{grid-area:1/1;min-width:0;overflow:hidden}
 .ktopg .chart{margin:0}
 .ktopg .ch-h{display:none}
-.ktopg .chart svg{height:44px;width:100%;display:block;border-radius:4px}
+.ktopg .chart svg{height:calc(40px*var(--kf-h,1));width:100%;display:block;border-radius:4px}
 .ktopg .ch-empty{display:none}
 .kslots{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:calc(12px*var(--kf-h,1))}
 .kslot,.knode{background:var(--bg-1);border:1px solid var(--line-soft);border-radius:var(--radius);padding:calc(14px*var(--kf-h,1)) calc(16px*var(--kf-h,1));min-height:0;display:flex;flex-direction:column}
@@ -2359,7 +2370,7 @@ html.kiosk-1{--kf-h:.78} html.kiosk-2{--kf-h:.62}
 /* the hour's best rate rides under the live one: same colour family, half the caption's shout */
 .kpeak{font:600 calc(10px*var(--kf-h,1)) var(--mono);color:var(--accent);margin-top:calc(2px*var(--kf-h,1));letter-spacing:.02em}
 /* dense headers: five KPIs on one line, slightly smaller so they never wrap the clock away */
-.kbig.kdense b{font-size:calc(34px*var(--kf-h,1))} .kbig.kdense span{font-size:calc(10px*var(--kf-h,1))}
+.kbig.kdense b{font-size:min(calc(34px*var(--kf-h,1)),2.4cqw)} .kbig.kdense span{font-size:calc(10px*var(--kf-h,1))}
 /* the 30-min GPU/CPU trace that fills the empty middle of a node tile (accent=gpu, ok=cpu):
    stretched to fill its box (a short SVG at height:100% would sit at the top and leave a void),
    with a hairline grid at 50/100% and the two lines labelled at their own height — no legend
@@ -2850,10 +2861,13 @@ html[data-style=phosphor] .hero .hv{font-size:clamp(34px,3vw,50px);color:var(--a
 html[data-style=phosphor] [data-ghost]::before{content:attr(data-ghost);position:absolute;left:0;top:0;z-index:-1;
  color:color-mix(in srgb,currentColor 9%,transparent);text-shadow:none;pointer-events:none;white-space:pre}
 html[data-style=phosphor] .kbig b:not(.ok):not(.warn):not(.bad){color:var(--k)}
-html[data-style=phosphor] .kbig b,html[data-style=phosphor] .kclock b{font-size:calc(44px*var(--kf-h,1));
+html[data-style=phosphor] .kbig b{font-size:var(--kbig-fs)} html[data-style=phosphor] .kclock b{font-size:var(--kclock-fs)}
+html[data-style=phosphor] .kbig b,html[data-style=phosphor] .kclock b{
  text-shadow:0 0 calc(18px * var(--gl)) color-mix(in srgb,currentColor 55%,transparent),0 0 2px color-mix(in srgb,currentColor 80%,transparent)}
 html[data-style=phosphor] .kclock b{color:var(--accent)}
 html[data-style=phosphor] .kbig span,html[data-style=phosphor] .kclock span{font-family:var(--display);font-size:calc(9px*var(--kf-h,1));letter-spacing:.18em;margin-top:calc(6px*var(--kf-h,1))}
+html[data-style=phosphor] .kpair .kbig>span{letter-spacing:.12em;margin-top:0}
+html[data-style=phosphor] .kpair [data-ghost]::before{right:0;text-align:center}
 html[data-style=phosphor] .kmeters .bar{height:calc(13px*var(--kf-h,1))}
 
 /* kiosk cards and the CRT */
