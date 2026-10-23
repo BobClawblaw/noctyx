@@ -29,6 +29,8 @@ already publishes; POST whitelisted actions, tokened unless NOCTYX_CONSOLE_AUTH=
   GET  /api/v1/growth         used-space trend on the NAS -> GB/day, days until full
   GET  /metrics               Noctyx's own Prometheus metrics (backup health, RAID, endpoint…)
   GET  /api/v1/alerts         active alerts (Alertmanager) + recent alert history (+ assistant triage)
+  POST /api/v1/alert-silence  {fingerprint,minutes} -> silence exactly one firing alert
+  POST /api/v1/alert-unsilence {id}                -> end a silence early (alert re-fires if true)
   GET  /api/v1/digest         morning brief written by the local LLM (?refresh=1 to regenerate)
   POST /api/v1/explain        {kind:"hygiene",host,id} -> the local LLM explains a finding (cached)
   POST /api/v1/alert-hook     Alertmanager webhook (loopback only) -> audit + history
@@ -1565,6 +1567,11 @@ def digest(force=False):
 # and audit.jsonl records them, then on to whatever external channel is set.
 ALERTMANAGER = os.environ.get("NOCTYX_ALERTMANAGER", "http://127.0.0.1:9093")
 ALERT_LOG = UI_STATE / "alerts.jsonl"
+# Labels stable enough to identify one alert for a silence. Volatile ones (latest/installed,
+# instance, job, monitor, severity, upgrade text) are deliberately excluded: a silence built
+# on them would stop matching the moment a version number changed.
+SILENCE_MATCH_KEYS = ("alertname", "host", "component", "profile", "cmd", "repo", "url", "tier", "array")
+SILENCE_MAX_MIN = 90 * 24 * 60
 _METRICS_CACHE = {"ts": 0, "text": ""}
 _RAID_CACHE = {"ts": 0, "data": None}
 HEALTH_CODE = {"ok": 0, "late": 1, "stale": 2, "never": 3}
@@ -1753,7 +1760,13 @@ def alerts_view():
                 active.append({"name": a["labels"].get("alertname"), "severity": a["labels"].get("severity"),
                                "host": a["labels"].get("host"), "summary": (a.get("annotations") or {}).get("summary"),
                                "since": a.get("startsAt"),
-                               "labels": {k: v for k, v in a["labels"].items() if k in ("profile", "cmd", "repo", "url")}})
+                               "fingerprint": a.get("fingerprint"),
+                               # the stable labels that identify THIS alert, and nothing else. A silence
+                               # built from these hits exactly one alert: `agent` can have two
+                               # ComponentUpgradeAvailable (node_exporter and prometheus) sharing
+                               # alertname+host, so matching on those alone would silence both.
+                               "match": {k: v for k, v in a["labels"].items() if k in SILENCE_MATCH_KEYS},
+                               "labels": {k: v for k, v in a["labels"].items() if k in ("profile", "cmd", "repo", "url", "component")}})
     except Exception as e:
         err = f"alertmanager: {str(e)[:100]}"
     recent = []
@@ -1769,7 +1782,78 @@ def alerts_view():
     recent = [r for r in recent if r.get("event") != "alert-triage"]
     sev = {"critical": 0, "warning": 1}
     active.sort(key=lambda a: (sev.get(a["severity"], 2), a["name"] or ""))
-    return {"ts": time.time(), "active": active, "recent": list(reversed(recent)), "error": err}
+    sil, serr = silences_view()
+    return {"ts": time.time(), "active": active, "silenced": sil, "recent": list(reversed(recent)),
+            "error": err or serr}
+
+
+def audit_write(rec):
+    """Append one audit record, creating the audit directory if the install never made it.
+
+    AUDIT lives under /var/lib/noctyx, which a source checkout may never create; the callers
+    wrap writes in try/except, so a missing directory silently lost the whole trail.
+    """
+    try:
+        AUDIT.parent.mkdir(parents=True, exist_ok=True)
+        with AUDIT.open("a") as f:
+            f.write(json.dumps({"ts": _utcnow(), **rec}) + "\n")
+        return True
+    except Exception:
+        return False
+
+
+def silences_view():
+    """Silences still in force, so the UI can show what was dismissed and offer to undo it."""
+    out, err = [], None
+    try:
+        with urllib.request.urlopen(f"{ALERTMANAGER}/api/v2/silences", timeout=5) as r:
+            for s in json.loads(r.read()):
+                if (s.get("status") or {}).get("state") != "active":
+                    continue
+                out.append({"id": s.get("id"), "matchers": s.get("matchers") or [],
+                            "ends": s.get("endsAt"), "by": s.get("createdBy"),
+                            "comment": s.get("comment")})
+    except Exception as e:
+        err = f"alertmanager: {str(e)[:100]}"
+    out.sort(key=lambda s: s.get("ends") or "")
+    return out, err
+
+
+def create_silence(fingerprint, minutes, who):
+    """Silence exactly ONE firing alert.
+
+    The matchers are built here from the alert's own stable labels rather than sent up from the
+    browser, so the client cannot silence something it never saw, and so two alerts that share an
+    alertname and host stay independently dismissible.
+    """
+    with urllib.request.urlopen(f"{ALERTMANAGER}/api/v2/alerts?active=true&silenced=false", timeout=5) as r:
+        alerts = json.loads(r.read())
+    hit = next((a for a in alerts if a.get("fingerprint") == fingerprint), None)
+    if not hit:
+        raise ValueError("that alert is no longer firing")
+    labels = hit.get("labels") or {}
+    matchers = [{"name": k, "value": labels[k], "isRegex": False, "isEqual": True}
+                for k in SILENCE_MATCH_KEYS if labels.get(k)]
+    if not matchers:
+        raise ValueError("alert carries no identifying labels")
+    now = datetime.datetime.now(datetime.timezone.utc)
+    body = {"matchers": matchers,
+            "startsAt": now.isoformat(timespec="seconds").replace("+00:00", "Z"),
+            "endsAt": (now + datetime.timedelta(minutes=minutes)).isoformat(timespec="seconds").replace("+00:00", "Z"),
+            "createdBy": (who or "noctyx-console")[:64],
+            "comment": "silenced from the console"}
+    req = urllib.request.Request(f"{ALERTMANAGER}/api/v2/silences", data=json.dumps(body).encode(),
+                                 headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=8) as r:
+        return json.loads(r.read()).get("silenceID"), hit
+
+
+def expire_silence(sid):
+    """End a silence early. Alertmanager keeps the record; the alert fires again if still true."""
+    req = urllib.request.Request(f"{ALERTMANAGER}/api/v2/silence/{urllib.parse.quote(str(sid), safe='')}",
+                                 method="DELETE")
+    with urllib.request.urlopen(req, timeout=8) as r:
+        r.read()
 
 
 # ── per-host facts ───────────────────────────────────────────────────────
@@ -2455,6 +2539,12 @@ tr.go:hover td{background:color-mix(in srgb,var(--accent) 9%,transparent)}
 tr.hl td{background:color-mix(in srgb,var(--warn) 13%,transparent)}
 .golnk{color:var(--info);cursor:pointer;font:11px var(--mono);white-space:nowrap}
 .golnk:hover{text-decoration:underline}
+.nowrap{white-space:nowrap}
+/* per-alert dismissal controls: small enough to sit in the table, explicit about the window */
+.silbtn{font:10px var(--mono);color:var(--fg-dim);background:none;border:1px solid var(--line);border-radius:3px;padding:2px 5px;margin-right:3px;cursor:pointer;line-height:1.2}
+.silbtn:hover:not(:disabled){color:var(--accent);border-color:var(--accent)}
+.silbtn:disabled{opacity:.45;cursor:default}
+.silbtn.bad{color:var(--bad);border-color:var(--bad)}
 .panel.flash{animation:pflash 2.4s ease-out}
 @keyframes pflash{0%,45%{box-shadow:0 0 0 2px var(--accent),0 0 22px rgba(247,147,26,.35)}100%{box-shadow:var(--shadow)}}
 .sline{font:11.5px var(--mono);color:var(--fg-dim);margin-bottom:8px}
@@ -4618,19 +4708,48 @@ async function explainItem(host,id,btn){btn.disabled=true;btn.textContent='askin
   box.textContent=d.text||('assistant: '+(d.error||'no answer'));
   if(d.model){const m=document.createElement('div');m.className='mut';m.style.cssText='font:10px var(--mono);margin-top:2px';m.textContent='— '+d.model;box.appendChild(m)}
   btn.remove()}catch(e){btn.disabled=false;btn.textContent='explain'}}
+/* dismissing one alert: an Alertmanager silence is the mechanism. The server rebuilds the
+   matchers from the alert's own stable labels, so two alerts that share an alertname and host
+   (agent carries two ComponentUpgradeAvailable, node_exporter and prometheus) stay
+   independently dismissible instead of both vanishing on one click. */
+async function silenceAlert(fp,mins,btn){
+ const was=btn.textContent;btn.disabled=true;btn.textContent='…';
+ try{
+  const r=await fetch('/api/v1/alert-silence',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fingerprint:fp,minutes:mins})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok||d.error)throw new Error(d.error||('http '+r.status));
+  const p=PANELS.find(x=>x.id=='alerts');if(p){const data=await p.api();p._data=data;repaint('alerts',data)}
+ }catch(e){btn.disabled=false;btn.textContent=was;btn.title='silence failed: '+e.message;btn.classList.add('bad')}
+}
+async function unsilenceAlert(id,btn){
+ const was=btn.textContent;btn.disabled=true;btn.textContent='…';
+ try{
+  const r=await fetch('/api/v1/alert-unsilence',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:id})});
+  const d=await r.json().catch(()=>({}));
+  if(!r.ok||d.error)throw new Error(d.error||('http '+r.status));
+  const p=PANELS.find(x=>x.id=='alerts');if(p){const data=await p.api();p._data=data;repaint('alerts',data)}
+ }catch(e){btn.disabled=false;btn.textContent=was;btn.title='unsilence failed: '+e.message;btn.classList.add('bad')}
+}
 function rAlerts(d){
  if(!d)return '<div class=empty>loading…</div>';
  const act=d.active||[],rec=d.recent||[];
  const pill=$('halert');if(pill){const c=act.filter(a=>a.severity=='critical').length;
   pill.textContent=act.length?`${act.length} alert${act.length==1?'':'s'}`:'no alerts';
   pill.className='hpill go '+(c?'bad':act.length?'warn':'ok')}
- const rows=act.map(a=>{const t=alertTarget(a);return `<tr ${goAttr({host:t.host,panel:t.panel,tab:t.tab})} title="open ${esc(t.what||'')}"><td><span class="tag ${a.severity=='critical'?'bad':'warn'}">${esc(a.severity||'')}</span></td>
-  <td>${esc(a.name||'')}</td><td>${esc(a.host||'')}</td><td>${esc(a.summary||'')}${a.triage?`<div style="font:11.5px/1.5 var(--sans);color:var(--fg);margin-top:4px;white-space:normal;border-left:2px solid var(--line);padding-left:8px">${esc(a.triage)}<span class=mut style="font:10px var(--mono)"> — ${esc(a.triage_model||'assistant')}</span></div>`:''}</td><td class=mut>${esc(agoS(a.since))}</td><td class=golnk>${t.what?esc(t.what)+' →':''}</td></tr>`}).join('');
+ const rows=act.map(a=>{const t=alertTarget(a);const fp=a.fingerprint||'';const comp=(a.labels||{}).component||'';
+  const sil=fp?`<button class=silbtn onclick="event.stopPropagation();silenceAlert('${fp}',60,this)" title="silence this one alert for 1 hour">1h</button><button class=silbtn onclick="event.stopPropagation();silenceAlert('${fp}',1440,this)" title="silence this one alert for 24 hours">24h</button><button class=silbtn onclick="event.stopPropagation();silenceAlert('${fp}',10080,this)" title="silence this one alert for 7 days">7d</button>`:'';
+  return `<tr ${goAttr({host:t.host,panel:t.panel,tab:t.tab})} title="open ${esc(t.what||'')}"><td><span class="tag ${a.severity=='critical'?'bad':'warn'}">${esc(a.severity||'')}</span></td>
+  <td>${esc(a.name||'')}${comp?`<div class=mut style="font:10px var(--mono)">${esc(comp)}</div>`:''}</td><td>${esc(a.host||'')}</td><td>${esc(a.summary||'')}${a.triage?`<div style="font:11.5px/1.5 var(--sans);color:var(--fg);margin-top:4px;white-space:normal;border-left:2px solid var(--line);padding-left:8px">${esc(a.triage)}<span class=mut style="font:10px var(--mono)"> — ${esc(a.triage_model||'assistant')}</span></div>`:''}</td><td class=mut>${esc(agoS(a.since))}</td><td class=golnk>${t.what?esc(t.what)+' →':''}</td><td class=nowrap>${sil}</td></tr>`}).join('');
+ const sl=(d.silenced||[]).map(s=>{const m=(s.matchers||[]).map(x=>esc(x.name)+'='+esc(x.value)).join(' · ');
+  const until=s.ends?fmtTs(new Date(s.ends).getTime()/1000):'—';
+  return `<tr><td class=mut style="font:10.5px var(--mono)">${m}</td><td class=mut>${esc(until)}</td><td class=mut>${esc(s.by||'')}</td>
+   <td class=nowrap><button class=silbtn onclick="unsilenceAlert('${esc(s.id)}',this)" title="end this silence now: the alert fires again if it is still true">unsilence</button></td></tr>`}).join('');
  const hist=rec.slice(0,8).map(r=>`<tr><td class="${r.status=='resolved'?'ok':'warn'}">${esc(r.status||'')}</td>
   <td>${esc(r.name||'')}</td><td>${esc(r.host||'')}</td><td class=mut>${esc(fmtTs(r.ts))}</td></tr>`).join('');
  return (d.error?`<div class="empty warn">${esc(d.error)}</div>`:'')+
-  (rows?`<table><tr><th>sev</th><th>alert</th><th>host</th><th>what</th><th>since</th><th>act in</th></tr>${rows}</table>`
+  (rows?`<table><tr><th>sev</th><th>alert</th><th>host</th><th>what</th><th>since</th><th>act in</th><th>silence</th></tr>${rows}</table>`
        :'<div class=sline><span class="tag ok">quiet</span> nothing firing</div>')+
+  (sl?`<h3>Silenced</h3><table><tr><th>matches</th><th>until</th><th>by</th><th></th></tr>${sl}</table>`:'')+
   (hist?`<h3>Recent</h3><table><tr><th>status</th><th>alert</th><th>host</th><th>when</th></tr>${hist}</table>`:'')}
 function rRuns(d){
  const rs=(d&&d.runs)||[];
@@ -5141,6 +5260,39 @@ class H(BaseHTTPRequestHandler):
             if key is not None and (not isinstance(key, str) or not 8 <= len(key.strip()) <= 512 or "\n" in key.strip()):
                 return self._json({"error": "key: 8-512 characters, one line"}, 400)
             return self._json(set_assistant_key(key))
+        if self.path in ("/api/v1/alert-silence", "/api/v1/alert-unsilence"):
+            # a silence changes what the whole cluster alerts on: operator and up
+            if not self._allowed("operate"):
+                return self._deny("operate")
+            try:
+                body = self._body()
+            except Exception:
+                return self._json({"error": "bad json"}, 400)
+            w = self._who()
+            who = (w[0] if w else "") or "noctyx-console"
+            try:
+                if self.path.endswith("-unsilence"):
+                    sid = body.get("id")
+                    if not isinstance(sid, str) or not sid.strip():
+                        return self._json({"error": "id required"}, 400)
+                    expire_silence(sid.strip())
+                    return self._json({"ok": True})
+                fp = body.get("fingerprint")
+                if not isinstance(fp, str) or not fp.strip():
+                    return self._json({"error": "fingerprint required"}, 400)
+                try:
+                    mins = int(body.get("minutes") or 24 * 60)
+                except Exception:
+                    return self._json({"error": "minutes must be a whole number"}, 400)
+                mins = max(1, min(mins, SILENCE_MAX_MIN))
+                sid, hit = create_silence(fp.strip(), mins, who)
+                labels = hit.get("labels") or {}
+                audit_write({"event": "alert-silence", "user": who,
+                             "alert": labels.get("alertname"), "host": labels.get("host"),
+                             "component": labels.get("component"), "minutes": mins, "silence": sid})
+                return self._json({"ok": True, "id": sid, "minutes": mins})
+            except Exception as e:
+                return self._json({"error": str(e)[:200]}, 502)
         if self.path != "/api/v1/action":
             return self._json({"error": "not found"}, 404)
         # NOCTYX_CONSOLE_AUTH=0 disables the token gate (dev mode, systemd unit). The gate
