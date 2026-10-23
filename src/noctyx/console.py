@@ -2330,17 +2330,18 @@ html.kiosk-1{--kf-h:.78} html.kiosk-2{--kf-h:.62}
 .kbig b{font:800 var(--kbig-fs)/1 var(--mono)} .kbig span,.kclock span{font:calc(11px*var(--kf-h,1)) var(--sans);letter-spacing:.08em;text-transform:uppercase;color:var(--fg-dim)}
 .kclock{display:flex;flex-direction:column;align-items:flex-end;padding-left:calc(20px*var(--kf-h,1));border-left:1px solid var(--line);margin-left:auto;flex:0 0 auto} .kclock b{font:700 var(--kclock-fs)/1 var(--mono);white-space:nowrap}
 /* header graphs sit directly beside their own number (user, 2026-10-22), so each KPI reads as
-   one unit: the graph with its number to the right, the label running underneath both. The
+   one unit: the graph with its number to the right and the label under the number. The
    pairs share the row's free width and the graphs take all of it (user, 2026-10-23: the graphs
    were slivers between big numbers and three-line labels). The clock and the vitals never
    shrink, or the clock's digits spill left over 'tok / 24h'. Every number in the bar sits on
    one baseline (user, 2026-10-23): the bar aligns on baselines, and the number is the only
    baseline-aligned item in its pair's first row, so the pair's baseline is the number's. Its
    line box is the graph's height, which keeps it centred beside the graph. */
-.kpair{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:calc(12px*var(--kf-h,1));row-gap:calc(3px*var(--kf-h,1));
+.kpair{display:grid;grid-template-columns:minmax(0,1fr) minmax(calc(74px*var(--kf-h,1)),auto);column-gap:calc(12px*var(--kf-h,1));row-gap:calc(3px*var(--kf-h,1));
   align-items:center;flex:1 1 0;min-width:0;max-width:calc(380px*var(--kf-h,1))}
 .kpair .kbig{display:contents}
-.kpair .kbig>span{grid-area:2/1/3/3;margin:0;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* the label sits under its number on two short lines (broken in the markup), like the vitals' captions */
+.kpair .kbig>span{grid-area:2/2;align-self:start;margin:0;text-align:center;white-space:nowrap}
 /* the number keeps a slot of about two and a half digits, so a graph barely moves when its number gains a digit */
 .kpair .kbig>b{grid-area:1/2;align-self:baseline;line-height:calc(40px*var(--kf-h,1));min-width:2em;text-align:center}
 .kvitals{display:flex;align-items:stretch;gap:calc(16px*var(--kf-h,1));flex:0 0 auto;padding-left:calc(16px*var(--kf-h,1));border-left:1px solid var(--line)}
@@ -3428,15 +3429,15 @@ function kioskTop(M,H,order,I,a,k,pg,pages){
  return `<div class=ktop><a class=kbrand href="/"><span class=mark></span><span class=wordmark>Noct<b>yx</b></span></a>
  <div class="kpair${pg==0?'':' dim'}" data-k=toks>
   <div class=ktopg>${chart('', Object.entries(tok).map(([m,pts])=>({name:m,pts,cls:'t'})), v=>v.toFixed(0)+' tok/s', {span:'1h'})}</div>
-  <div class="kbig${dn()}"><b data-ghost="${ghost(tps.toFixed(0))}">${tps.toFixed(0)}</b><span>tokens / second</span></div>
+  <div class="kbig${dn()}"><b data-ghost="${ghost(tps.toFixed(0))}">${tps.toFixed(0)}</b><span>tokens /<br>second</span></div>
  </div>
  <div class="kpair${pg==0?'':' dim'}" data-k=watts>
   <div class=ktopg>${chart('', [{name:'fleet',pts:gpw,cls:'w'}], v=>Math.round(v)+' W', {span:'1h'})}</div>
-  <div class="kbig${dn()}"><b data-ghost="${ghost(Math.round(gpuW))}">${Math.round(gpuW)}</b><span>GPU watts</span></div>
+  <div class="kbig${dn()}"><b data-ghost="${ghost(Math.round(gpuW))}">${Math.round(gpuW)}</b><span>GPU<br>watts</span></div>
  </div>
  <div class="kpair${pg==0?'':' dim'}" data-k=temp>
   <div class=ktopg>${chart('', [{name:'hottest',pts:tmaxSpk,cls:'c1'}], v=>Math.round(v)+' °C', {span:'1h'})}</div>
-  <div class="kbig${dn()}"><b class="${tmaxCls}" data-ghost="${ghost(Math.round(tmaxNow||0))}">${tmaxNow!=null?Math.round(tmaxNow):'—'}</b><span>GPU temp max</span></div>
+  <div class="kbig${dn()}"><b class="${tmaxCls}" data-ghost="${ghost(Math.round(tmaxNow||0))}">${tmaxNow!=null?Math.round(tmaxNow):'—'}</b><span>GPU temp<br>max</span></div>
  </div>
  <div class="kvitals${pg==0?'':' dim'}">
   <div class=kvital><b class="${qNow>2?'bad':qNow>0?'warn':''}" data-ghost="${ghost(Math.round(qNow))}">${Math.round(qNow)}</b><span>queued</span></div>
