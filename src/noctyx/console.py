@@ -2369,7 +2369,7 @@ html.kiosk-1{--kf-h:.78} html.kiosk-2{--kf-h:.62}
 .kspark path{fill:none;stroke-width:1.8;vector-effect:non-scaling-stroke;stroke-linejoin:round;opacity:.9}
 .kspark path.a{stroke:var(--accent)} .kspark path.g{stroke:var(--ok)}
 .kspark path.t{stroke:var(--accent-2);stroke-dasharray:3 3;opacity:.85}
-/* prefill: dash-dot so it reads as a different phase from generation, on its own scale */
+/* prompt tok/s: dash-dot so it reads as input, not generation, on its own scale */
 .kspark path.p{stroke:var(--warn);stroke-dasharray:5 2 1 2;opacity:.85}
 .kspark line.grid{stroke:var(--line-soft);stroke-width:1;vector-effect:non-scaling-stroke}
 .kload{margin-left:auto;font:500 calc(11px*var(--kf-h,1)) var(--sans);color:var(--fg-faint)}
@@ -3443,7 +3443,11 @@ function kioskNode(n,h){const srvs=((h.llm||{}).servers||[]).filter(s=>s.model||
     (user, 2026-10-22). Prefill tok/s is orders of magnitude above decode, so it is drawn on its
     own scale against the tile's max, not overlaid on the generation trace's scale. */
  const pfsrv=srvs.map(s=>({model:s.model,pts:((s.spark&&s.spark.prefill_tps)||[]).filter(p=>p[1]!=null)})).filter(x=>x.pts.length>1);
- const pfspk=pfsrv.map(x=>x.pts);
+ /* the trace's prompt line is prompt INPUT, not prefill speed: prompt tokens per second
+    across the endpoint's requests (0 when idle, a jump when big prompts land), on its own
+    zero-based scale — prompt volume runs far above generation. Prefill speed is nearly
+    constant per model, so as a line it only rode the top edge; it stays a number below. */
+ const ptspk=srvs.map(s=>((s.spark&&s.spark.prompt_tps)||[]).filter(p=>p[1]!=null)).filter(p=>p.length>1);
  const pfNow=srvs.reduce((a,s)=>a+(s.prefill_tps||0),0);
  /* a worker node serves no endpoint of its own: it runs tensor-parallel work for a head, so it
     has no tok/s of its own to report. Show what it IS doing (worker for X, tp N) rather than a
@@ -3466,9 +3470,9 @@ function kioskNode(n,h){const srvs=((h.llm||{}).servers||[]).filter(s=>s.model||
     their label so the two never collide. The data window slides one step every tick without the
     box's endpoints moving, so the <svg> carries the window stamp: without it morph() sees an
     identical subtree and never touches the points, and the trace freezes (user, 2026-10-22) */
- const tr=(sp.gpu_util&&sp.gpu_util.length>1)?`<div class=ktrace><svg class=kspark viewBox="0 0 300 100" preserveAspectRatio="none" aria-hidden="true" data-win="${sp.gpu_util[0][0]}|${sp.gpu_util.at(-1)[0]}|pf${pfspk.length}">
-   <line class="grid" x1="0" y1="48.3" x2="300" y2="48.3"/><line class="grid" x1="0" y1="2.3" x2="300" y2="2.3"/>${_lines([{pts:sp.gpu_util,cls:'a'},{pts:sp.cpu,cls:'g'},...genspk.map(p=>({pts:p,cls:'t'}))],300,96,100)}${pfspk.length?_lines(pfspk.map(p=>({pts:p,cls:'p'})),300,96,Math.max(...pfspk.flat().map(p=>p[1]).filter(v=>v!=null))||1):''}</svg>
-  <i class=a style="top:calc(2px + .3em)">GPU</i><i class=g style="bottom:2px">CPU</i>${genspk.length?'<i class=t style="bottom:calc(2px + 1.4em)">TOK</i>':''}${pfspk.length?'<i class=p style="top:calc(2px + 1.4em)">PF</i>':''}</div>`:'';
+ const tr=(sp.gpu_util&&sp.gpu_util.length>1)?`<div class=ktrace><svg class=kspark viewBox="0 0 300 100" preserveAspectRatio="none" aria-hidden="true" data-win="${sp.gpu_util[0][0]}|${sp.gpu_util.at(-1)[0]}|pt${ptspk.length}">
+   <line class="grid" x1="0" y1="48.3" x2="300" y2="48.3"/><line class="grid" x1="0" y1="2.3" x2="300" y2="2.3"/>${_lines([{pts:sp.gpu_util,cls:'a'},{pts:sp.cpu,cls:'g'},...genspk.map(p=>({pts:p,cls:'t'}))],300,96,100)}${ptspk.length?_lines(ptspk.map(p=>({pts:p,cls:'p'})),300,96,Math.max(...ptspk.flat().map(p=>p[1]))||1):''}</svg>
+  <i class=a style="top:calc(2px + .3em)">GPU</i><i class=g style="bottom:2px">CPU</i>${genspk.length?'<i class=t style="bottom:calc(2px + 1.4em)">GEN TOK/S</i>':''}${ptspk.length?'<i class=p style="top:calc(2px + 1.4em)">PROMPT TOK/S</i>':''}</div>`:'';
  return `<div class="knode ${up?'':'down'}"><div class=kh><span class="dot ${up?'ok':'bad'}"></span><b>${esc(n)}</b>
    ${h.load1!=null?`<span class=kload>load ${(+h.load1).toFixed(1)}</span>`:''}</div>
   <div class=kgrid><span>GPU</span><b>${h.gpu_util!=null?Math.round(h.gpu_util)+'%':'—'}</b><span>GPU temp</span>${t(h.gpu_temp,85)}
