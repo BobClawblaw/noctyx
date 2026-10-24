@@ -71,10 +71,11 @@ PYEOF
 NE_DROPIN=$NE_DIR/noctyx.conf
 cat > "$NE_DROPIN" <<'UNITEOF'
 # managed by Noctyx (noctyx tool install-node-metrics): Noctyx's pinned node_exporter in place of the
-# distro's binary, with the two defaults the distro build changes kept
+# distro's binary, with the two defaults the distro build changes kept. cpufreq is off: in 1.12.1 it never
+# returns on a GB10 (DGX Spark), which times out every scrape, and Noctyx reads none of its series.
 [Service]
 ExecStart=
-ExecStart=/usr/local/bin/node_exporter $ARGS --collector.systemd --collector.textfile.directory=/var/lib/prometheus/node-exporter
+ExecStart=/usr/local/bin/node_exporter $ARGS --collector.systemd --collector.textfile.directory=/var/lib/prometheus/node-exporter --no-collector.cpufreq
 UNITEOF
 pin_exporter() {   # the pinned binary and the unit's drop-in (the caller restarts the exporter)
   put 0755 "$(ne_bin "$ARCH")" /usr/local/bin/node_exporter
@@ -99,7 +100,7 @@ for row in "${HOSTS[@]}"; do
       pin_exporter
       "${E[@]}" "sudo -n systemctl daemon-reload && sudo -n systemctl restart prometheus-node-exporter"
       sleep 2
-      v=$(curl -s http://127.0.0.1:9100/metrics | sed -n 's/^node_exporter_build_info{.*version="\([^"]*\)".*/\1/p')
+      v=$(curl -s -m 30 http://127.0.0.1:9100/metrics | sed -n 's/^node_exporter_build_info{.*version="\([^"]*\)".*/\1/p')
       echo "   head node: textfile collector; node_exporter ${v:-?} (existing scrape kept)"
       [[ -n $v ]] || { echo "   !! the head's exporter does not answer on 127.0.0.1:9100" >&2; exit 1; }
     else
@@ -145,8 +146,8 @@ for row in "${HOSTS[@]}"; do
 
   # 4. prove it: authenticated TLS scrape succeeds, anonymous one is refused
   sleep 2
-  code=$(curl -s -o /dev/null -w '%{http_code}' --cacert "$CA_CRT" "https://$ADDR:9100/metrics" || true)
-  body=$(curl -s --cacert "$CA_CRT" -u "prometheus:$(cat "$PASS")" "https://$ADDR:9100/metrics" || true)
+  code=$(curl -s -m 30 -o /dev/null -w '%{http_code}' --cacert "$CA_CRT" "https://$ADDR:9100/metrics" || true)
+  body=$(curl -s -m 30 --cacert "$CA_CRT" -u "prometheus:$(cat "$PASS")" "https://$ADDR:9100/metrics" || true)
   n=$(grep -c '^node_' <<<"$body" || true)
   v=$(sed -n 's/^node_exporter_build_info{.*version="\([^"]*\)".*/\1/p' <<<"$body")
   echo "   anonymous: HTTP $code (want 401) · authenticated: $n node_* series · node_exporter ${v:-?}"

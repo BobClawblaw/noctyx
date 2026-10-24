@@ -153,7 +153,8 @@ node_exporter instead, checked against its SHA-256, in `/usr/local/bin/node_expo
 installed: the same unit, user and `ARGS`. A drop-in
 (`/etc/systemd/system/prometheus-node-exporter.service.d/noctyx.conf`) points the unit at the pinned binary and keeps
 the two defaults the distro build changes: the systemd collector on, and textfiles read from
-`/var/lib/prometheus/node-exporter`. To go back to the distro's binary, remove the drop-in and run
+`/var/lib/prometheus/node-exporter`. It turns the cpufreq collector off: in 1.12.1 it never returns on a GB10
+(DGX Spark), which times out every scrape, and Noctyx reads none of its series. To go back to the distro's binary, remove the drop-in and run
 `systemctl daemon-reload && systemctl restart prometheus-node-exporter`.
 
 ### Acting on a component alert
