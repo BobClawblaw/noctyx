@@ -100,6 +100,7 @@ Regenerate them with `python3 tools/screenshots.py`.
 | [Hygiene](docs/guide/hygiene.md) | housekeeping reports and fixes |
 | [Accounts](docs/guide/accounts.md) | sign-in, roles, sessions |
 | [Upgrade](docs/guide/upgrade.md) | upgrading, rolling back, moving from an older layout |
+| [Self-repair](docs/guide/self-repair.md) | `noctyx heal`: what it checks, repairs and leaves to a person |
 | [Troubleshooting](docs/guide/troubleshooting.md) | what an error means and what to do |
 
 Try it without a cluster: `PYTHONPATH=src python3 -m noctyx.cli demo` serves the console on

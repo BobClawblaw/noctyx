@@ -36,13 +36,21 @@ PINS = {
             "linux_amd64": "4c9c95bc079a0334e81fad379b19dc5c3353c71c2c88d652cafce2081c2b1c66",
             "linux_arm64": "cef139cbe8b27b16bda731d17f093b0aa466b8c60b136c12d78b6f2bff3daf22"}},
     "prometheus": {
-        "version": "3.15.0", "repo": "prometheus/prometheus",
+        "version": "3.15.1", "repo": "prometheus/prometheus",
         "asset": "prometheus-{v}.{os}-{arch}.tar.gz",
         "sums": {
-            "darwin_amd64": "2d79e744c2d7e505db936fbc898e05abc74fcb6e437c25befd26e9c9f00aa58b",
-            "darwin_arm64": "920df4d17e78b3b0175af144eb318b0c74d1cf7b1d1251b326966f0e81977260",
-            "linux_amd64": "2a542df32eac02ee17b9d844fb2aa1de00dafa5476579ba8a3ba862e9d572ea0",
-            "linux_arm64": "f1f90ec08e849d494ca66c611470afc50192f0355f1a61c33f2cbde02d067823"}},
+            "darwin_amd64": "c89fcb30045d8c394c9d93e96cbbee3aaf2448a48326b417e811eb4e528edf88",
+            "darwin_arm64": "0d4d3d9837d27e4fcd0bd16d115b1b8d6732a4bf3e69107f1190d9ef653ae471",
+            "linux_amd64": "6a726885328ad9efebbf36e876ce2fb6225468a71fd1e7ce3ba666d5f4d97a84",
+            "linux_arm64": "ceb6d21493c37ca0b4513b147642797c68cf39a0f50a444d50e1e80c74f21b26"}},
+    "alertmanager": {
+        "version": "0.34.1", "repo": "prometheus/alertmanager",
+        "asset": "alertmanager-{v}.{os}-{arch}.tar.gz",
+        "sums": {
+            "darwin_amd64": "9f3a3806c81a2ef3546fea9bae3dd39abcf2206edd112c9433133a9355875fce",
+            "darwin_arm64": "a3941879f340ef12a4cc1a479c82bd8520611265ea8d1ee25c88bd5f944d8293",
+            "linux_amd64": "265b9d1e55ef0d5306a436018af6d2b686c2ce051f03d968f7464ecb1372a7e8",
+            "linux_arm64": "d98d6cbaf52151c7e76e24355fec88b11cebcb9875d4cdd8b76ddce7a7e5535c"}},
     "node_exporter": {
         "version": "1.12.1", "repo": "prometheus/node_exporter",
         "asset": "node_exporter-{v}.{os}-{arch}.tar.gz",
@@ -56,6 +64,8 @@ PINS = {
 # what each machine runs. role: head = the head only; node = every Linux host Noctyx backs up; both.
 # bins: where the component may live and who put it there, first match wins: "noctyx" (installed and pinned by
 # Noctyx, upgraded by Noctyx), "distro" (apt: compared with upstream, upgraded with apt), "brew" (likewise).
+# adopted: the distro unit's drop-in that runs Noctyx's pinned binary instead (noctyx upgrade took it over):
+# that row is "adopted", pinned like Noctyx's own. optional: no row where it is not installed.
 COMPONENTS = [
     {"name": "noctyx", "role": "head", "repo": "BobClawblaw/noctyx", "upgrade": "pip install the new release (see the upgrade guide)"},
     {"name": "restic", "role": "both", "arg": "version", "pkg": "restic",
@@ -64,9 +74,15 @@ COMPONENTS = [
     {"name": "rest-server", "role": "head", "arg": "--version",
      "bins": [("/usr/local/bin/rest-server", "noctyx")], "upgrade_head": "sudo noctyx setup tools --force"},
     {"name": "prometheus", "role": "head", "arg": "--version", "pkg": "prometheus",
+     "adopted": ("/etc/systemd/system/prometheus.service.d/noctyx.conf", "/usr/local/bin/prometheus"),
      "bins": [("/usr/local/bin/prometheus", "noctyx"), ("/usr/bin/prometheus", "distro"), ("/opt/homebrew/bin/prometheus", "brew")],
      "upgrade_head": "sudo noctyx setup metrics --force"},
+    {"name": "alertmanager", "role": "head", "arg": "--version", "pkg": "prometheus-alertmanager", "optional": True,
+     "adopted": ("/etc/systemd/system/prometheus-alertmanager.service.d/noctyx.conf", "/usr/local/bin/alertmanager"),
+     "bins": [("/usr/local/bin/alertmanager", "noctyx"), ("/usr/bin/prometheus-alertmanager", "distro"),
+              ("/opt/homebrew/bin/alertmanager", "brew")]},
     {"name": "node_exporter", "role": "both", "arg": "--version", "pkg": "prometheus-node-exporter",
+     "adopted": ("/etc/systemd/system/prometheus-node-exporter.service.d/noctyx.conf", "/usr/local/bin/node_exporter"),
      "bins": [("/usr/local/bin/node_exporter", "noctyx"), ("/usr/bin/prometheus-node-exporter", "distro"),
               ("/opt/homebrew/bin/node_exporter", "brew")],
      "upgrade_head": "sudo noctyx setup metrics --force", "upgrade_node": "sudo noctyx tool install-node-metrics --host {host}"},
@@ -78,8 +94,11 @@ def probe_snippet(comp):
     """Shell printing `VERSION SOURCE` for a component (nothing when it is not installed)."""
     if comp.get("probe"):
         return comp["probe"]
-    tries = [f"[ -x {p} ] && {{ echo \"$({p} {comp['arg']} 2>&1 | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' | head -1) {src}\"; exit 0; }}"
-             for p, src in comp["bins"]]
+    ver = lambda p: f"$({p} {comp['arg']} 2>&1 | grep -oE '[0-9]+\\.[0-9]+\\.[0-9]+' | head -1)"  # noqa: E731
+    tries = [f"[ -x {p} ] && {{ echo \"{ver(p)} {src}\"; exit 0; }}" for p, src in comp["bins"]]
+    if comp.get("adopted"):
+        d, b = comp["adopted"]
+        tries.insert(0, f"[ -f {d} ] && [ -x {b} ] && {{ echo \"{ver(b)} adopted\"; exit 0; }}")
     return "( " + "; ".join(tries) + "; true )"
 
 
@@ -156,6 +175,8 @@ def upgrade_cmd(comp, host, is_head, source="noctyx"):
     if source == "distro":
         # the distro's archive may lag upstream: this takes what it carries
         return f"sudo apt-get install --only-upgrade {comp.get('pkg', comp['name'])}" + ("" if is_head else f"   (on {host['name']})")
+    if source == "adopted":
+        return f"sudo noctyx upgrade --host {host['name']} --component {comp['name']}"
     if source == "brew":
         return f"brew upgrade {comp.get('pkg', comp['name'])}" + ("" if is_head else f"   (on {host['name']})")
     key = "upgrade_head" if is_head else "upgrade_node"
@@ -199,7 +220,9 @@ def inventory(c, probe, cache, want_agent=None, version=None, only=None):
             else:
                 inst, _, source = (got.get(x["name"]) or "").partition(" ")
                 inst, source = norm(inst), source.strip() or "noctyx"
-            pin_here = pin if source == "noctyx" and x["name"] not in ("noctyx", "agent") else None
+            if x.get("optional") and not inst and not err:
+                continue
+            pin_here = pin if source in ("noctyx", "adopted") and x["name"] not in ("noctyx", "agent") else None
             if err and x["name"] != "noctyx":
                 st, why = "unknown", f"unreachable: {err}"
             else:
@@ -230,20 +253,25 @@ def fix(row, host, is_head):
     if not pin or (inst and not newer(pin, inst)):
         return {"why": f"Noctyx pins {name} {pin}: {row.get('latest')} comes with a Noctyx release that moves the pin"
                        if pin else f"Noctyx does not install {name}"}
-    if name == "node_exporter" and linux and src in ("distro", "noctyx"):
-        how = (["setup", "metrics", "--force"] if is_head and src == "noctyx"
-               else ["tool", "install-node-metrics", "--host", host["name"]])
-        return {"argv": how, "what": f"install Noctyx's node_exporter {pin} on {host['name']}"
-                                     + (" in place of the distro's (same unit, same collectors)" if src == "distro" else "")}
+    if name == "node_exporter" and linux and src in ("distro", "noctyx", "adopted"):
+        if is_head and src == "noctyx":     # `setup metrics`'s own exporter beside its own Prometheus
+            return {"argv": ["setup", "metrics", "--force"], "what": f"install Noctyx's node_exporter {pin} on the head"}
+        return {"argv": ["upgrade", "--host", host["name"], "--component", name], "change": name,
+                "what": f"install Noctyx's node_exporter {pin} on {host['name']}"
+                        + (" in place of the distro's (same unit, same collectors)" if src == "distro" else "")
+                        + ", checked and rolled back if it does not work"}
+    if name in ("prometheus", "alertmanager") and is_head and linux and src in ("distro", "adopted"):
+        trial = name == "prometheus" and inst and _vtuple(inst)[0] != _vtuple(pin)[0]
+        return {"argv": ["upgrade", "--host", host["name"], "--component", name], "change": name,
+                "what": f"run Noctyx's {name} {pin} in the head's {'distro ' if src == 'distro' else ''}unit"
+                        + (f": a {inst} → {pin} trial beside it first, then the switch" if trial else "")
+                        + ", checked and rolled back if it does not work"}
     if name == "restic" and src == "noctyx":
         return {"argv": ["setup", "tools", "--force"] if is_head else ["install-agent", "--host", host["name"]],
                 "what": f"install restic {pin} on {host['name']}"}
     if name in ("rest-server", "prometheus") and src == "noctyx" and is_head:
         return {"argv": ["setup", "tools" if name == "rest-server" else "metrics", "--force"],
                 "what": f"install {name} {pin} on the head"}
-    if name == "prometheus" and src == "distro":
-        return {"why": f"this Prometheus came from apt, not from Noctyx; {inst} → {pin} is a major upgrade (2.x → 3.x "
-                       "changes its config and storage) that Noctyx does not make for you"}
     return {"why": f"{name} here comes from {'apt' if src == 'distro' else 'Homebrew' if src == 'brew' else src}, which "
                    "Noctyx does not replace"}
 

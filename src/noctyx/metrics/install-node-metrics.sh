@@ -68,15 +68,7 @@ PYEOF
   fi
   echo "$f"
 }
-NE_DROPIN=$NE_DIR/noctyx.conf
-cat > "$NE_DROPIN" <<'UNITEOF'
-# managed by Noctyx (noctyx tool install-node-metrics): Noctyx's pinned node_exporter in place of the
-# distro's binary, with the two defaults the distro build changes kept. cpufreq is off: in 1.12.1 it never
-# returns on a GB10 (DGX Spark), which times out every scrape, and Noctyx reads none of its series.
-[Service]
-ExecStart=
-ExecStart=/usr/local/bin/node_exporter $ARGS --collector.systemd --collector.textfile.directory=/var/lib/prometheus/node-exporter --no-collector.cpufreq
-UNITEOF
+NE_DROPIN=$HERE/node-exporter.conf    # the unit's drop-in (noctyx heal puts it back when it drifts)
 pin_exporter() {   # the pinned binary and the unit's drop-in (the caller restarts the exporter)
   put 0755 "$(ne_bin "$ARCH")" /usr/local/bin/node_exporter
   put 0644 "$NE_DROPIN" /etc/systemd/system/prometheus-node-exporter.service.d/noctyx.conf

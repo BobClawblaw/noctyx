@@ -461,7 +461,7 @@ def head_units(c):
 
 
 def setup_units(c):
-    """The head's services and timers: console, directory, HF mirror; tick, nightly, hygiene, retention."""
+    """The head's services and timers: console, directory, HF mirror; tick, nightly, hygiene, retention, heal."""
     done = hostos.install_services(head_units(c), cm.UNIT, _label(), _log_dir())
     cm.audit("install-head", units=done)
     print(f"  installed and enabled: {', '.join(done)}")
@@ -968,7 +968,7 @@ def verify(c, run_canary=True):
         unit = _service(f"{n}.service")
         k.add(n, hostos.service_active(unit, _label()), "running" if hostos.service_active(unit, _label())
               else f"not running ({hostos.logs_hint(unit, _label(), _log_dir())})", "sudo noctyx setup units")
-    for t in ("tick", "nightly", "hygiene", "retention"):
+    for t in ("tick", "nightly", "hygiene", "retention", "heal"):
         k.add(f"{t} timer", hostos.service_installed(_service(f"{t}.timer" if not hostos.IS_MAC else f"{t}.service"), _label()),
               "scheduled", "sudo noctyx setup units")
     for name, url in (("console https", f"https://127.0.0.1:{port}/"),

@@ -41,7 +41,7 @@ collapse it with ▾. The layout is saved in the browser. **Reset panel layout**
 | Fleet | a card per node: CPU, GPU, temperature and power, network, memory, disk, the model it serves, uptime, its next scheduled backup |
 | Machine Report | the selected node, with tabs **overview, llm, network, storage, gpu, health, backups**, and *backup now* / *verify now* (backed-up hosts only) |
 | Storage Tiers | NAS free and used space, size per repository, growth forecast |
-| Alerts | firing alerts with LLM triage (when an assistant is configured); silence one for a while, and on a component alert *upgrade* it or *skip* that release ([upgrade](upgrade.md#acting-on-a-component-alert)) |
+| Alerts | firing alerts with LLM triage (when an assistant is configured); silence one for a while; on a component alert *upgrade* it (or *upgrade all N*, one machine first) or *skip* that release ([upgrade](upgrade.md#acting-on-a-component-alert)); on `NoctyxNeedsAttention`, *repair now* ([self-repair](self-repair.md)) |
 | Morning Brief | the assistant's summary of the fleet |
 | Hygiene | housekeeping findings per host, the space each fix frees, fixes you can run |
 | Snapshot Browser | browse and search (`*.conf`) any snapshot; operators can download files and directories. Restore to staging or the host |
@@ -211,6 +211,7 @@ when the system asks for reduced motion.
 | `/login` | sign-in (`?next=/path`) |
 | `/metrics` | Prometheus exposition, no sign-in |
 | `/api/v1/versions` | every critical component per machine: installed, pinned, latest, state, upgrade command |
+| `/api/v1/heal` | the repair loop: open problems, the last day's repairs, the changes ledger |
 | `/api/v1/…` | the JSON the panels read. `POST /api/v1/action` runs actions ([accounts](accounts.md#api-token-for-scripts)) |
 
 ## Prometheus `/metrics`
@@ -228,6 +229,9 @@ The console exports its own state for Prometheus, cached for 30 seconds:
   `noctyx_component_upgrade_available` (1: a newer upstream release), each labelled `host`, `component`,
   `installed`, `pinned`, `latest` and `upgrade` (the command); `noctyx_versions_timestamp_seconds`. The alert rules
   `ComponentBehind`, `ComponentUpgradeAvailable` and `VersionsUnknown` (not checked for 3 days) read them
+- **self-repair:** `noctyx_heal_problem` (1: broken, and `noctyx heal` cannot repair it; labelled `check`, `host`,
+  `what`), `noctyx_heal_repairs_24h`, `noctyx_heal_last_run_timestamp_seconds`; the rules `NoctyxNeedsAttention`,
+  `NoctyxRepairedItself` and `NoctyxHealNotRunning` read them ([self-repair](self-repair.md))
 - **GPU and temperatures from the node collectors:** `noctyx_gpu_*`, `noctyx_system_temperature_celsius`
 - **per-source health:** `noctyx_source_ok{source=…}`. A failing source drops its own series and never the whole
   scrape.

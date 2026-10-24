@@ -1,0 +1,10 @@
+[Unit]
+Description=Noctyx heal (timer)
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+Unit=@UNIT_PREFIX@-heal.service
+
+[Install]
+WantedBy=timers.target

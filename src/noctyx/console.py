@@ -38,13 +38,14 @@ already publishes; POST whitelisted actions, tokened unless NOCTYX_CONSOLE_AUTH=
   GET  /api/v1/metrics/<h>?tab=overview|network|storage|gpu|health   one report tab
   GET  /api/v1/job/<id>       one UI job
   GET  /api/v1/versions       every critical component per machine: installed, pinned, latest, upgrade command
+  GET  /api/v1/heal           the repair loop: open problems, the last day's repairs, the changes ledger
   POST /api/v1/action         whitelisted orchestrator argv
 
 Control model: fixed argv whitelist, host/profile validated
 against the site config, audit every trigger, one job at a time + orchestrator locks.
 """
 from __future__ import annotations
-import base64, json, os, re, secrets, ssl, subprocess, sys, threading, time
+import base64, json, os, re, secrets, signal, ssl, subprocess, sys, threading, time
 import datetime, pathlib, urllib.parse, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -143,6 +144,9 @@ ACTIONS = {
     # a component alert's buttons: Noctyx's own upgrade (the orchestrator plans it again from the last versions
     # check, refuses what Noctyx does not install, and checks the host again after), or skipping one release
     "upgradeComponent": lambda p: [ORCH, "upgrade", "--host", p["host"], "--component", p["component"]],
+    "upgradeEverywhere": lambda p: [ORCH, "upgrade", "--host", "all", "--component", p["component"]],
+    # the repair loop now, not at its next 5-minute turn (noctyx heal)
+    "healNow": lambda: [ORCH, "heal"],
     "skipRelease": lambda p: [ORCH, "versions-skip", "--host", p["host"], "--component", p["component"]]
                              + (["--undo"] if p.get("undo") else ["--release", p["release"]]),
     "dumpsNow":   lambda p: [ORCH, "dumps"] + (["--host", p["host"]] if p.get("host") else []),
@@ -157,10 +161,15 @@ VALID_PROFILES = set(CFG.get("profiles", {}).keys())
 # host-REQUIRED actions: their builders index p["host"] directly; missing would KeyError
 HOST_REQUIRED = {"backupHost", "verifyHost", "reboot", "rebootFinish"}
 RECIPE_ACTIONS = {"recipeDeploy", "recipeStop", "recipeStart", "recipeRollback", "recipeCatalog"}
-PARAM_ACTIONS = HOST_REQUIRED | RECIPE_ACTIONS | {"upgradeComponent", "skipRelease", "setAssistant", "setConsoleDefaults", "setSchedule", "restore", "hygieneFix", "setPolicy", "dumpsNow"}
+PARAM_ACTIONS = HOST_REQUIRED | RECIPE_ACTIONS | {"upgradeComponent", "upgradeEverywhere", "skipRelease", "setAssistant", "setConsoleDefaults", "setSchedule", "restore", "hygieneFix", "setPolicy", "dumpsNow"}
 # Only these wait for the one-long-job slot; everything else (status, schedule
 # edits, probes) runs at once instead of queueing silently behind a 3-hour seed.
-LONG_ACTIONS = {"backup", "verify", "copy", "prune", "backupHost", "verifyHost", "restore", "hygieneFix", "upgradeComponent"}
+LONG_ACTIONS = {"backup", "verify", "copy", "prune", "backupHost", "verifyHost", "restore", "hygieneFix", "upgradeComponent",
+                "upgradeEverywhere"}
+# how long a job may run before the console stops it (SIGTERM first: a change rolls itself back); default 3 days
+ACTION_TIMEOUT = {"upgradeComponent": 90 * 60, "upgradeEverywhere": 4 * 3600, "healNow": 30 * 60}
+# a failed one of these cancels the queued ones for the same component: they would fail the same way
+CANCEL_ON_FAIL = {"upgradeComponent", "upgradeEverywhere"}
 HYGIENE_FILE = UI_STATE / "hygiene.json"
 
 
@@ -240,6 +249,7 @@ def console_mode():
 
 # what each action needs: everything else that changes something needs "operate"
 ADMIN_ACTIONS = {"setPolicy", "setSchedule", "setAssistant", "setConsoleDefaults", "recipeCatalog", "upgradeComponent",
+                 "upgradeEverywhere",
                  "reboot", "rebootFinish", "nasRest", "policyApply"}
 NEED_RANK = {"view": 0, "operate": 1, "admin": 2}
 _LOGIN_FAILS = None          # ip -> [failures, locked_until]; kept on disk so a restart does not reset it
@@ -325,6 +335,9 @@ def valid_params(name: str, p: dict) -> bool:
             return False
     if name == "setConsoleDefaults":
         return not CM.validate_console(p.get("settings"))[1]
+    if name == "upgradeEverywhere":
+        return sum(1 for rows in (_versions().get("hosts") or {}).values() for r in rows
+                   if r["component"] == p.get("component") and (r.get("fix") or {}).get("change")) > 0
     if name in ("upgradeComponent", "skipRelease"):
         row = next((r for r in (_versions().get("hosts") or {}).get(p.get("host"), [])
                     if r["component"] == p.get("component")), None)
@@ -506,17 +519,22 @@ def run_job(name: str, params: dict, user=None):
                 job["queued_behind"] = {"id": cur["id"], "action": cur["action"],
                                         "host": (cur.get("params") or {}).get("host")}
         with (RUNNING if name in LONG_ACTIONS else _NOLOCK):  # one LONG UI job at a time
-            job["running"] = True
             job.pop("queued_behind", None)
+            if job.get("cancelled"):
+                job.update(done=True, rc=-3, output=job["cancelled"] + "\n", note=job["cancelled"])
+                with JOBS_LOCK:
+                    _persist_jobs()
+                return
+            job["running"] = True
             if name in LONG_ACTIONS:
                 RUNNING_JOB = job
             tail = []
             try:
                 p = subprocess.Popen([sys.executable, "-u"] + argv,
                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                     text=True, start_new_session=True)
-                wd = threading.Timer(3 * 86400,
-                                     lambda: p.kill() if p.poll() is None else None)
+                                     text=True, start_new_session=True,
+                                     env={**os.environ, **({"NOCTYX_BY": user} if user else {})})
+                wd = threading.Timer(ACTION_TIMEOUT.get(name, 3 * 86400), _stop_job, (p, job, ACTION_TIMEOUT.get(name)))
                 wd.daemon = True
                 wd.start()
                 for line in p.stdout or []:
@@ -534,6 +552,8 @@ def run_job(name: str, params: dict, user=None):
                 wd.cancel()
                 if name == "probe":
                     _parse_probe(job["output"])
+                if job["rc"] and name in CANCEL_ON_FAIL:
+                    _cancel_like(job)
             except Exception as e:
                 job["rc"] = -1
                 job["output"] = (job["output"] or "") + f"\n{e}"
@@ -545,6 +565,33 @@ def run_job(name: str, params: dict, user=None):
     _JOB_THREADS.append(th)
     th.start()
     return jid
+
+
+def _stop_job(p, job, limit):
+    """The job ran past its time: SIGTERM (a change rolls itself back), SIGKILL two minutes later."""
+    if p.poll() is not None:
+        return
+    job["note"] = f"stopped: ran over {limit // 60 if limit else '?'} min"
+    job["output"] = (job.get("output") or "") + f"\n{job['note']}; it is told to stop and roll back\n"
+    try:
+        os.killpg(p.pid, signal.SIGTERM)
+        p.wait(timeout=120)
+    except subprocess.TimeoutExpired:
+        os.killpg(p.pid, signal.SIGKILL)
+    except OSError:
+        pass
+
+
+def _cancel_like(failed):
+    """A failed upgrade cancels the queued ones for the same component: they would hit the same failure."""
+    comp = (failed.get("params") or {}).get("component")
+    where = (failed.get("params") or {}).get("host") or "all"
+    with JOBS_LOCK:
+        for j in JOBS.values():
+            if (not j.get("done") and not j.get("running") and j is not failed and j.get("action") in CANCEL_ON_FAIL
+                    and (j.get("params") or {}).get("component") == comp):
+                j["cancelled"] = (f"cancelled: the {comp} upgrade on {where} before it failed (job {failed['id']}); "
+                                  "see its output, then start this one again")
 
 
 def audit_tail(n=15):
@@ -1551,16 +1598,22 @@ def digest(force=False):
     llm = {h: [{k: (round(v, 1) if isinstance(v, float) else v) for k, v in s.items() if k in ("model", "running", "gen_tps", "requests_1h", "tokens_1h")}
                for s in ((d.get("llm") or {}).get("servers") or [])] for h, d in (fm.get("hosts") or {}).items()}
     hyg = {h: [f"{i['severity']}: {i['title']}" for i in d.get("items", []) if not i.get("fixed")] for h, d in (hy.get("hosts") or {}).items()}
+    from noctyx import heal
+    hl = heal.summary()
+    healed = [f"{r['host']}: {r['what']} -> {r['how']} ({'repaired' if r['ok'] else 'failed: ' + r['detail']})" for r in hl["repairs"]]
+    open_ = [f"{x['host']}: {x['what']}" for x in hl["problems"] if x.get("needs_person")]
     nodes = {h: {k: d.get(k) for k in ("up", "gpu_util", "gpu_temp", "root_pct", "failed_units", "reboot")} for h, d in (fm.get("hosts") or {}).items()}
     ctx = ("Write the operator's morning brief for the cluster as 5-8 short lines (no headings, no markdown tables). "
            "Lead with anything wrong; then backups, then the LLM servers, then housekeeping; end with one line on what deserves attention today, if anything.\n"
            "Rules: the backup 'health' field is authoritative (ok = on schedule; do not call an ok host late or behind). "
            "'reboot' on a node is an advisory package flag that may lag by 15 minutes and is NOT a reason to reboot a node serving a model; mention it at most as 'flagged'. "
-           "Housekeeping 'info' items are routine; only 'warning' items deserve attention.\n"
+           "Housekeeping 'info' items are routine; only 'warning' items deserve attention. "
+           "Self-repairs are what Noctyx fixed on its own: mention them in one line; problems it could not repair need the operator.\n"
            f"UTC now: {_utcnow()}\nBackups (health vs schedule): {json.dumps(rows)}\n"
            f"Active alerts: {json.dumps(al.get('active'))}\nNodes: {json.dumps(nodes)}\nLLM servers: {json.dumps(llm)}\n"
            f"Last 24 h: {json.dumps({k: I.get(k) for k in ('tokens_24h', 'requests_24h', 'gpu_wh_24h', 'nas_free', 'backups_ok', 'backups_total')})}\n"
-           f"NAS RAID: {json.dumps(I.get('raid'))} sync: {json.dumps(I.get('raid_sync'))}\nOpen hygiene findings: {json.dumps(hyg)}")
+           f"NAS RAID: {json.dumps(I.get('raid'))} sync: {json.dumps(I.get('raid_sync'))}\nOpen hygiene findings: {json.dumps(hyg)}\n"
+           f"Self-repairs in the last 24 h: {json.dumps(healed)}\nProblems Noctyx could not repair: {json.dumps(open_)}")
     text, model = assistant_ask(ctx, max_tokens=420)
     out = {"ts": time.time(), "text": text, "model": model if text else None, "error": None if text else model}
     if text or not cur:
@@ -1728,8 +1781,25 @@ def metrics_text():
                 out.append(f"noctyx_component_upgrade_available{l} {int(r['state'] == 'upgrade')}")
         out.append(f"noctyx_versions_timestamp_seconds {inv.get('ts', 0)}")
 
+    def repairs():
+        from noctyx import heal
+        st = heal.summary()
+        if not st.get("ts"):              # the heal timer has not run yet
+            return
+        out.append("# HELP noctyx_heal_problem 1: something Noctyx manages is broken and noctyx heal cannot repair it.")
+        out.append(f"noctyx_heal_last_run_timestamp_seconds {st['ts']}")
+        for pr in st["problems"]:
+            if pr.get("needs_person"):
+                out.append(f"noctyx_heal_problem{_lbl(check=pr['check'], host=pr['host'], what=pr['what'])} 1")
+        n = {}
+        for r in st["repairs"]:
+            if r.get("ok"):
+                n[(r["check"], r["host"])] = n.get((r["check"], r["host"]), 0) + 1
+        for (chk, host), k in n.items():
+            out.append(f"noctyx_heal_repairs_24h{_lbl(check=chk, host=host)} {k}")
+
     sources = [("schedule", schedule), ("snapshots", snapshots), ("storage", storage), ("endpoint", endpoint),
-               ("runs", jobs), ("hygiene", hygiene), ("components", components)]
+               ("runs", jobs), ("hygiene", hygiene), ("components", components), ("heal", repairs)]
     if CM.cfg()["server"].get("nas_ssh"):        # RAID state needs ssh to the NAS; a site without it has none
         sources.append(("nas_raid", raid))
     for name, fn in sources:
@@ -1804,6 +1874,10 @@ def alerts_view():
                         if r["component"] == (a.get("labels") or {}).get("component")), None)
             if row:
                 a["fix"] = {k: row.get(k) for k in ("component", "state", "installed", "latest", "fix")}
+                a["fix"]["hosts"] = sum(1 for rows in (inv.get("hosts") or {}).values() for r in rows
+                                        if r["component"] == row["component"] and (r.get("fix") or {}).get("change"))
+        if a["name"] == "NoctyxNeedsAttention":
+            a["heal"] = True
     sev = {"critical": 0, "warning": 1}
     active.sort(key=lambda a: (sev.get(a["severity"], 2), a["name"] or ""))
     sil, serr = silences_view()
@@ -4822,6 +4896,7 @@ async function unsilenceAlert(id,btn){
 /* a component's buttons (alerts and the Machine Report): Noctyx's own upgrade where it has one, or skip the release */
 function compBtns(host,f){if(!f)return '';const x=f.fix||{},h=esc(JSON.stringify(host)),c=esc(JSON.stringify(f.component));let b='';
  if(x.argv)b+=`<button class=silbtn onclick="event.stopPropagation();compUpgrade(${h},${c},${esc(JSON.stringify(x.what||''))},this)" title="${esc(x.what||'')}">upgrade</button>`;
+ if(x.change&&f.hosts>1)b+=`<button class=silbtn onclick="event.stopPropagation();compEverywhere(${c},${f.hosts},this)" title="every machine that needs it: one first, watched 5 min, then the rest one at a time; stops at the first failure">upgrade all ${f.hosts}</button>`;
  else if(x.why)b+=`<span class=mut style="font:10px var(--mono)" title="${esc(x.why)}">no upgrade here ⓘ</span>`;
  if(f.state=='upgrade'&&f.latest)b+=`<button class=silbtn onclick="event.stopPropagation();compSkip(${h},${c},${esc(JSON.stringify(f.latest))},false,this)" title="stay on ${esc(f.installed||'this version')}: no alert for ${esc(f.latest)}; a later release alerts again">skip ${esc(f.latest)}</button>`;
  if(f.state=='skipped')b+=`<button class=silbtn onclick="event.stopPropagation();compSkip(${h},${c},'',true,this)" title="alert on this release again">unskip</button>`;
@@ -4830,6 +4905,12 @@ async function compUpgrade(host,component,what,btn){
  if(!confirm(`${what}?\n\nRuns as a job (Jobs / Audit shows it), then checks ${host}'s versions again: the alert clears when it is current.`))return;
  if(btn){btn.disabled=true;btn.textContent='upgrading…'}
  const r=await act('upgradeComponent',{host,component});if(r&&r.error&&btn){btn.disabled=false;btn.textContent='upgrade';alert(r.error)}}
+async function compEverywhere(component,n,btn){
+ if(!confirm(`Upgrade ${component} on all ${n} machines that need it?\n\nOne goes first and is watched for 5 minutes, then the rest one at a time. Each is checked and rolled back if it does not work, and the rollout stops at the first failure.`))return;
+ if(btn){btn.disabled=true;btn.textContent='upgrading…'}
+ const r=await act('upgradeEverywhere',{component});if(r&&r.error&&btn){btn.disabled=false;btn.textContent='upgrade all';alert(r.error)}}
+async function healNow(btn){if(btn){btn.disabled=true;btn.textContent='repairing…'}
+ const r=await act('healNow');if(r&&r.error&&btn){btn.disabled=false;btn.textContent='repair now';alert(r.error)}}
 async function compSkip(host,component,release,undo,btn){
  if(!undo&&!confirm(`Skip ${component} ${release} on ${host}?\n\nThe alert resolves and stays quiet until a newer release than ${release} appears.`))return;
  if(btn){btn.disabled=true;btn.textContent=undo?'…':'skipping…'}
@@ -4844,7 +4925,7 @@ function rAlerts(d){
  const rows=act.map(a=>{const t=alertTarget(a);const fp=a.fingerprint||'';const comp=(a.labels||{}).component||'';
   const sil=fp?`<button class=silbtn onclick="event.stopPropagation();silenceAlert('${fp}',60,this)" title="silence this one alert for 1 hour">1h</button><button class=silbtn onclick="event.stopPropagation();silenceAlert('${fp}',1440,this)" title="silence this one alert for 24 hours">24h</button><button class=silbtn onclick="event.stopPropagation();silenceAlert('${fp}',10080,this)" title="silence this one alert for 7 days">7d</button>`:'';
   return `<tr ${goAttr({host:t.host,panel:t.panel,tab:t.tab})} title="open ${esc(t.what||'')}"><td><span class="tag ${a.severity=='critical'?'bad':'warn'}">${esc(a.severity||'')}</span></td>
-  <td>${esc(a.name||'')}${comp?`<div class=mut style="font:10px var(--mono)">${esc(comp)}</div>`:''}</td><td>${esc(a.host||'')}</td><td>${esc(a.summary||'')}${a.fix?`<div class=compbtns>${compBtns(a.host,a.fix)}</div>`:''}${a.triage?`<div style="font:11.5px/1.5 var(--sans);color:var(--fg);margin-top:4px;white-space:normal;border-left:2px solid var(--line);padding-left:8px">${esc(a.triage)}<span class=mut style="font:10px var(--mono)"> — ${esc(a.triage_model||'assistant')}</span></div>`:''}</td><td class=mut>${esc(agoS(a.since))}</td><td class=golnk>${t.what?esc(t.what)+' →':''}</td><td class=nowrap>${sil}</td></tr>`}).join('');
+  <td>${esc(a.name||'')}${comp?`<div class=mut style="font:10px var(--mono)">${esc(comp)}</div>`:''}</td><td>${esc(a.host||'')}</td><td>${esc(a.summary||'')}${a.fix?`<div class=compbtns>${compBtns(a.host,a.fix)}</div>`:''}${a.heal?`<div class=compbtns><button class=silbtn onclick="event.stopPropagation();healNow(this)" title="run noctyx heal now: it tries the safe repairs again">repair now</button></div>`:''}${a.triage?`<div style="font:11.5px/1.5 var(--sans);color:var(--fg);margin-top:4px;white-space:normal;border-left:2px solid var(--line);padding-left:8px">${esc(a.triage)}<span class=mut style="font:10px var(--mono)"> — ${esc(a.triage_model||'assistant')}</span></div>`:''}</td><td class=mut>${esc(agoS(a.since))}</td><td class=golnk>${t.what?esc(t.what)+' →':''}</td><td class=nowrap>${sil}</td></tr>`}).join('');
  const sl=(d.silenced||[]).map(s=>{const m=(s.matchers||[]).map(x=>esc(x.name)+'='+esc(x.value)).join(' · ');
   const until=s.ends?fmtTs(new Date(s.ends).getTime()/1000):'—';
   return `<tr><td class=mut style="font:10.5px var(--mono)">${m}</td><td class=mut>${esc(until)}</td><td class=mut>${esc(s.by||'')}</td>
@@ -5261,6 +5342,10 @@ class H(BaseHTTPRequestHandler):
             return self._json({"ts": time.time(), "runs": runs()})
         if p == "/api/v1/versions":
             return self._json(_versions())
+        if p == "/api/v1/heal":
+            from noctyx import change, heal
+            return self._json({**heal.summary(), "changes": [{k: v for k, v in r.items() if k != "snap"}
+                                                              for r in change.ledger(30)[::-1]]})
         if p == "/api/v1/probes":
             return self._json(probe_last())
         if p == "/api/v1/jobs":

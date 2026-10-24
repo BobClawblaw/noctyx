@@ -266,7 +266,7 @@ def test_component_status_rules():
     agent = next(x for x in comp.COMPONENTS if x["name"] == "agent")
     assert comp.status(agent, "abc", None, None, want_agent="abd")[0] == "behind"
     name, url, sha = comp.asset("prometheus", "macos", "aarch64")
-    assert name == "prometheus-3.15.0.darwin-arm64.tar.gz" and url.endswith("/v3.15.0/" + name) and len(sha) == 64
+    assert name == "prometheus-3.15.1.darwin-arm64.tar.gz" and url.endswith("/v3.15.1/" + name) and len(sha) == 64
 
 
 def test_inventory_pins_only_what_noctyx_installed():

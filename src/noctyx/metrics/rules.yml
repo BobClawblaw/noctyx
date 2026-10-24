@@ -74,6 +74,20 @@ groups:
     for: 1h
     labels: {severity: info}
     annotations: {summary: "{{ $labels.host }}: {{ $labels.component }} {{ $labels.latest }} is out (running {{ $labels.installed }}) — {{ $labels.upgrade }}"}
+  - alert: NoctyxNeedsAttention
+    expr: @METRIC_PREFIX@_heal_problem == 1
+    for: 15m
+    labels: {severity: warning}
+    annotations: {summary: "{{ $labels.host }}: {{ $labels.what }} — noctyx heal cannot repair this on its own"}
+  - alert: NoctyxRepairedItself
+    expr: @METRIC_PREFIX@_heal_repairs_24h > 0
+    labels: {severity: info}
+    annotations: {summary: "{{ $labels.host }}: Noctyx repaired its {{ $labels.check }} {{ $value }} time(s) in the last 24 h (Jobs / Audit says what)"}
+  - alert: NoctyxHealNotRunning
+    expr: time() - @METRIC_PREFIX@_heal_last_run_timestamp_seconds > 1800
+    for: 10m
+    labels: {severity: warning}
+    annotations: {summary: "noctyx heal has not run for 30 minutes: nothing repairs what breaks (systemctl status @UNIT_PREFIX@-heal.timer)"}
   - alert: VersionsUnknown
     expr: time() - @METRIC_PREFIX@_versions_timestamp_seconds > 3 * 86400
     for: 1h

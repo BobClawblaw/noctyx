@@ -1,0 +1,12 @@
+[Unit]
+Description=Noctyx heal: repair what Noctyx manages when it is not as expected
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Nice=10
+Environment=NOCTYX_CONFIG=@NX_CONFIG@ PYTHONPATH=@NX_PKG_PARENT@ NOCTYX_FOREGROUND=1
+ExecStart=@NX_PY@ -m noctyx.cli heal
+SuccessExitStatus=1
+TimeoutStartSec=30min

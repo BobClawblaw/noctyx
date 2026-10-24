@@ -13,13 +13,13 @@ def _row(component, installed, source, state="upgrade", latest=None):
 
 def test_the_distro_exporter_is_replaced_by_the_pin():
     f = comp.fix(_row("node_exporter", "1.7.0", "distro"), NODE, False)
-    assert f["argv"] == ["tool", "install-node-metrics", "--host", "gpu-01"] and "1.12.1" in f["what"]
+    assert f["change"] == "node_exporter" and f["argv"] == ["upgrade", "--host", "gpu-01", "--component", "node_exporter"]
+    assert "1.12.1" in f["what"] and "rolled back" in f["what"]
     head = comp.fix(_row("node_exporter", "1.7.0", "distro"), {"name": "head", "local": True}, True)
-    assert head["argv"] == ["tool", "install-node-metrics", "--host", "head"]
+    assert head["change"] == "node_exporter" and head["argv"][2] == "head"
 
 
 def test_what_noctyx_does_not_install_says_why():
-    assert "major upgrade" in comp.fix(_row("prometheus", "2.45.3", "distro"), {"name": "head"}, True)["why"]
     assert "Homebrew" in comp.fix(_row("node_exporter", "1.7.0", "brew"), MAC, False)["why"]
     assert "pip" in comp.fix(_row("noctyx", "0.1.0", "noctyx", latest="0.2.0"), {"name": "head"}, True)["why"]
     pinned = _row("node_exporter", comp.PINS["node_exporter"]["version"], "noctyx", latest="99.0.0")

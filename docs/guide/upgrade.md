@@ -121,13 +121,13 @@ sudo noctyx versions --json
 ```text
 head-01
   ✓ restic         0.19.1         pin 0.19.1    latest 0.19.1    current
-  ↑ prometheus     2.45.3         pin —         latest 3.15.0    3.15.0 released (apt manages it)
+  ↑ prometheus     2.45.3         pin —         latest 3.15.1    3.15.1 released (apt manages it)
 gpu-01
   ✓ restic         0.19.1         pin 0.19.1    latest 0.19.1    current
   ✗ agent          25d3e6609bb7   pin —         latest —         older than this Noctyx's agent
 
-to upgrade (apt takes what the distro carries, which can lag the upstream release):
-  head-01      prometheus     sudo apt-get install --only-upgrade prometheus
+to upgrade:
+  head-01      prometheus     sudo noctyx upgrade --host head-01 --component prometheus
   gpu-01       agent          sudo noctyx install-agent --host gpu-01
 ```
 
@@ -136,8 +136,9 @@ to upgrade (apt takes what the distro carries, which can lag the upstream releas
 | noctyx | the head | the steps above |
 | restic | the head and every Linux node | head: `setup tools --force`; node: `install-agent --host NAME` |
 | rest-server | the head (unless the endpoint is on the NAS) | `setup tools --force` |
-| prometheus | the head | `setup metrics --force` |
-| node_exporter | the head and every Linux node | `noctyx tool install-node-metrics --host NAME` (a head whose exporter came from `setup metrics`: `setup metrics --force`) |
+| prometheus | the head | `noctyx upgrade --host HEAD --component prometheus` (one that came from `setup metrics`: `setup metrics --force`) |
+| alertmanager | the head, where it is installed | `noctyx upgrade --host HEAD --component alertmanager` |
+| node_exporter | the head and every Linux node | `noctyx upgrade --host NAME --component node_exporter` (a head whose exporter came from `setup metrics`: `setup metrics --force`) |
 | agent | every Linux node (compared by hash with the agent this Noctyx renders) | `install-agent --host NAME` |
 
 A component is judged by who installed it. One in `/usr/local/bin` was installed by Noctyx and is held to Noctyx's
@@ -154,8 +155,58 @@ installed: the same unit, user and `ARGS`. A drop-in
 (`/etc/systemd/system/prometheus-node-exporter.service.d/noctyx.conf`) points the unit at the pinned binary and keeps
 the two defaults the distro build changes: the systemd collector on, and textfiles read from
 `/var/lib/prometheus/node-exporter`. It turns the cpufreq collector off: in 1.12.1 it never returns on a GB10
-(DGX Spark), which times out every scrape, and Noctyx reads none of its series. To go back to the distro's binary, remove the drop-in and run
-`systemctl daemon-reload && systemctl restart prometheus-node-exporter`.
+(DGX Spark), which times out every scrape, and Noctyx reads none of its series. The drop-in's text is
+[`metrics/node-exporter.conf`](../../src/noctyx/metrics/node-exporter.conf); `noctyx heal` writes it again on any machine
+where it drifts (see [self-repair](self-repair.md)). A machine with the drop-in reads `adopted` in the inventory and
+is held to the pin.
+
+**Prometheus and Alertmanager from apt.** `noctyx upgrade` takes them over the same way: the distro's unit, user,
+config, data and `ARGS` stay, and a drop-in (`/etc/systemd/system/prometheus.service.d/noctyx.conf`,
+`…/prometheus-alertmanager.service.d/noctyx.conf`) runs Noctyx's pinned binary from `/usr/local/bin` with the paths the
+distro build had compiled in. apt may go on upgrading the package; the drop-in stays. The first move of a 2.x
+Prometheus to 3.x runs a **trial** first: the new release on `127.0.0.1:20991`, on a copy of the data, scraping the same
+targets with the same rules and sending alerts nowhere, for 30 minutes (`--shadow-minutes`). Only when every target
+production scrapes is up there too, every rule evaluates, the history from before reads the same and each job has
+the same series does it switch. The switch stops the old Prometheus, copies its data to `<data>.noctyx-prev` (3.x
+writes data 2.x cannot read, so this copy is the way back), and starts the new one on the same data. Prometheus is
+down for the copy and its start, about a minute for 2 GB. Before anything is changed it checks that the new release
+accepts the config and rules (`promtool check config`), knows every `ARGS` flag, and that the disk has room for both
+copies.
+
+### Every upgrade checks itself and rolls back
+
+`noctyx upgrade` runs each of these as a change with five steps:
+
+1. **Check first.** Nothing is changed when this fails: the machine answers, the download matches its pinned
+   SHA-256, the new release accepts the config, there is room for the copy.
+2. **Keep what it replaces**: the binary and drop-in on the machine (`<node_lib>/prev/node_exporter`), Prometheus's
+   or Alertmanager's data beside it (`<data>.noctyx-prev`, with the binaries in `<data>.noctyx-prev-bin`).
+3. **Change.**
+4. **Check the result the way it is used.** An exporter is scraped the way Prometheus scrapes it (authenticated,
+   twice, each within 5 s, half Prometheus's timeout), it must run the pin, every collector that answered before
+   must still answer, and Prometheus's own next scrape of it must be up. Prometheus must be ready on the pin, every
+   target that was up must be up and scraped since the switch, every rule that evaluated must still evaluate, the
+   Alertmanager must still be found, and the value an hour back must read the same. Alertmanager must be ready on
+   the pin, keep its active silences and still be found by Prometheus.
+5. **Roll back** when any check fails, an error stops it, or it runs out of time (the console stops an upgrade
+   after 90 minutes with SIGTERM, which rolls it back). Then check that what ran before runs again.
+
+Each outcome (`ok`, `refused`, `rolled_back`, `rollback_failed`) goes to the changes ledger
+(`<state>/changes.jsonl`, `GET /api/v1/heal`) and the audit trail. Prometheus data written during a failed switch
+is kept at `<data>.noctyx-failed` for a look. The copy kept for the way back stays until the next upgrade replaces
+it; delete it by hand to free the space sooner. Only one change runs at a time on a head.
+
+**Every machine at once.** `--host all` upgrades every machine whose row offers it. One goes first and is watched
+for five minutes (`--soak`), its checks run again, then the rest go one at a time, the head last. The rollout stops
+at the first failure, and the machines after it stay as they were:
+
+```bash
+sudo noctyx upgrade --host all --component node_exporter
+```
+
+In the console, a component alert that more than one machine has carries an **upgrade all N** button that does
+this. When an upgrade fails, the console cancels the queued upgrades of the same component, which would fail the
+same way, and says so in each.
 
 ### Acting on a component alert
 
@@ -168,11 +219,11 @@ sudo noctyx versions-skip --host all --component prometheus --release 3.15.1    
 sudo noctyx versions-skip --host gpu-01 --component node_exporter --undo             # alert on it again
 ```
 
-- **upgrade** runs the row's Noctyx upgrade (the table above) as a job, then runs `noctyx versions --host` for
-  that machine, so the alert clears when the component is current. It needs an admin. Noctyx only ever
-  installs its own pin, so a row it cannot fix says why in place of the button: Noctyx itself (pip), anything
-  Homebrew manages, a head's Prometheus from apt (2.x to 3.x changes its config and storage), and a release newer
-  than Noctyx's pin, which arrives with the Noctyx release that moves the pin.
+- **upgrade** runs the row's Noctyx upgrade (the table above) as a job, checked and rolled back as below, then
+  runs `noctyx versions --host` for that machine, so the alert clears when the component is current. It needs an
+  admin. Noctyx only ever installs its own pin, so a row it cannot fix says why in place of the button: Noctyx
+  itself (pip), anything Homebrew manages, and a release newer than Noctyx's pin, which arrives with the Noctyx
+  release that moves the pin.
 - **skip** marks that release as skipped (`<state>/version-skips.json`) for that host, or for every host with
   `--host all`. The row reads `skipped`, its alert resolves, and a later release alerts again. It needs an
   operator, like a silence. Unlike a silence it has no end time, and it is tied to the release, not the alert.

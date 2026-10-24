@@ -752,7 +752,7 @@ def boot_id(c, h, timeout=15):
 
 
 # timer-driven jobs run inside these services, not as per-job units (tick runs the scheduled backups)
-_TIMER_JOBS = tuple(f"{UNIT}-{j}.service" for j in ("tick", "nightly", "retention", "hygiene"))
+_TIMER_JOBS = tuple(f"{UNIT}-{j}.service" for j in ("tick", "nightly", "retention", "hygiene", "heal"))
 
 
 def _active_job_units(timer_jobs=False):
@@ -3318,11 +3318,39 @@ def _version_row(c, host, component):
     return row
 
 
+def _view_host(c, name):
+    return next((x for x in hosts(c) if x["name"] == name), None) or {"name": name, "local": True}
+
+
 def cmd_upgrade(a):
-    """noctyx upgrade --host H --component C: bring one component up to Noctyx's pin the way Noctyx installs it
-    (components.fix), then check that host again so its alert clears. What Noctyx does not install is refused
-    with the reason."""
+    """noctyx upgrade --host H|all --component C: bring a component up to Noctyx's pin the way Noctyx installs
+    it (components.fix), as a change that checks itself and rolls back when it does not work (noctyx.change),
+    then check the host again so its alert clears. --host all: every machine that needs it, one first (watched
+    --soak seconds), then the rest one at a time, stopping at the first failure. What Noctyx does not install
+    is refused with the reason."""
+    from noctyx import change, upgrades
     c = cfg()
+    by = os.environ.get("NOCTYX_BY") or os.environ.get("SUDO_USER")
+    if a.host == "all":
+        todo = []
+        for name, rows in (versions_view().get("hosts") or {}).items():
+            row = next((r for r in rows if r["component"] == a.component), None)
+            if row and (row.get("fix") or {}).get("change"):
+                h = _view_host(c, name)
+                todo.append((is_head(c, h) or bool(h.get("local")), name, upgrades.change_for(c, h, row, a.shadow_minutes)))
+        if not todo:
+            print(f"{a.component}: no machine needs Noctyx's upgrade")
+            return
+        todo.sort(key=lambda t: (t[0], t[1]))            # the head last: everything else reports through it
+        print(f"{a.component} on {', '.join(n for _, n, _ in todo)}: one first, then the rest", flush=True)
+        res = change.rollout([ch for _, _, ch in todo], soak=a.soak, by=by)
+        for r in res["results"]:
+            versions(c, r["host"])
+        ok = sum(r["outcome"] == "ok" for r in res["results"])
+        print(f"\n{ok} of {len(todo)} upgraded" + (f"; stopped at {res['stopped']}" if res["stopped"] else ""), flush=True)
+        if res["stopped"]:
+            sys.exit(1)
+        return
     row = _version_row(c, a.host, a.component)
     f = row.get("fix")
     if not f:
@@ -3330,15 +3358,28 @@ def cmd_upgrade(a):
         return
     if "why" in f:
         sys.exit(f"{a.component} on {a.host}: {f['why']}")
-    print(f"{f['what']}: noctyx {' '.join(f['argv'])}", flush=True)
-    env = {**os.environ, "PYTHONPATH": str(NX_HOME.parent), "NOCTYX_NO_ASSIST": "1"}
-    rc = subprocess.run([sys.executable, "-m", "noctyx.cli", *f["argv"]], env=env).returncode
-    audit("upgrade", host=a.host, component=a.component, installed=row.get("installed"), rc=rc)
+    ch = upgrades.change_for(c, _view_host(c, a.host), row, a.shadow_minutes)
+    if ch:
+        rc = 0 if change.run(ch, by=by)["outcome"] == "ok" else 1
+    else:
+        print(f"{f['what']}: noctyx {' '.join(f['argv'])}", flush=True)
+        env = {**os.environ, "PYTHONPATH": str(NX_HOME.parent), "NOCTYX_NO_ASSIST": "1"}
+        rc = subprocess.run([sys.executable, "-m", "noctyx.cli", *f["argv"]], env=env).returncode
+        audit("upgrade", host=a.host, component=a.component, installed=row.get("installed"), rc=rc)
     inv = versions(c, a.host)
     new = next((r for r in inv["hosts"].get(a.host, []) if r["component"] == a.component), {})
     print(f"{a.component} on {a.host} now: {new.get('installed') or '—'} ({new.get('state')}: {new.get('detail')})", flush=True)
     if rc:
         sys.exit(rc)
+
+
+def cmd_heal(a):
+    """noctyx heal [--dry-run]: compare what Noctyx manages with what it expects and repair what it safely can
+    (noctyx.heal). The heal timer runs it every 5 minutes."""
+    from noctyx import heal
+    st = heal.run(cfg(), dry=a.dry_run)
+    if any(p.get("needs_person") for p in st.get("problems") or []):
+        sys.exit(1)
 
 
 def cmd_versions_skip(a):
@@ -3422,7 +3463,7 @@ def cmd_nightly(a):
 
 HEAD_UNITS = ("console.service", "directory.service", "hf-mirror.service", "tick.service", "tick.timer",
               "nightly.service", "nightly.timer", "retention.service", "retention.timer",
-              "hygiene.service", "hygiene.timer")
+              "hygiene.service", "hygiene.timer", "heal.service", "heal.timer")
 
 
 HEAD_EXPORTER_PORT = 20994        # the head's own node_exporter, loopback only (noctyx setup metrics)
@@ -3666,7 +3707,13 @@ def main():
     ver.add_argument("--host"); ver.add_argument("--refresh", action="store_true", help="ask GitHub again now")
     ver.add_argument("--json", action="store_true")
     upg = sub.add_parser("upgrade", help="bring one component on one host up to Noctyx's pin, the way Noctyx installs it")
-    upg.add_argument("--host", required=True); upg.add_argument("--component", required=True)
+    upg.add_argument("--host", required=True, help="a host, or all (one first, then the rest)")
+    upg.add_argument("--component", required=True)
+    upg.add_argument("--soak", type=int, default=300, help="--host all: seconds to watch the first machine (default 300)")
+    upg.add_argument("--shadow-minutes", type=int, default=30,
+                     help="Prometheus 2.x -> 3.x: how long the trial runs beside the old one (default 30)")
+    hl = sub.add_parser("heal", help="repair what Noctyx manages when it is not as expected (the heal timer); --dry-run reports only")
+    hl.add_argument("--dry-run", action="store_true")
     vsk = sub.add_parser("versions-skip", help="stop alerting on a newer release you choose not to take (--undo: alert again)")
     vsk.add_argument("--host", required=True, help="a host, or all"); vsk.add_argument("--component", required=True)
     vsk.add_argument("--release"); vsk.add_argument("--undo", action="store_true")
@@ -3698,7 +3745,7 @@ def main():
                "recipe-deploy": cmd_recipe_deploy, "recipe-stop": cmd_recipe_stop, "recipe-start": cmd_recipe_start,
                "recipe-rollback": cmd_recipe_rollback, "recipe-status": cmd_recipe_status,
                "recipe-catalog": cmd_recipe_catalog, "recipe-discover": cmd_recipe_discover, "nightly": cmd_nightly, "install-head": cmd_install_head, "console-set": cmd_console_set, "user": cmd_user, "setup": cmd_setup, "assistant-set": cmd_assistant_set, "versions": cmd_versions,
-               "upgrade": cmd_upgrade, "versions-skip": cmd_versions_skip}[a.cmd]
+               "upgrade": cmd_upgrade, "versions-skip": cmd_versions_skip, "heal": cmd_heal}[a.cmd]
     rc = 0
     try:
         handler(a)
