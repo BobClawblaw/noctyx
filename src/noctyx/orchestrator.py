@@ -3203,7 +3203,7 @@ def cmd_console_set(a):
 
 
 # ── the UI's assistant LLM (the site config `assistant`) ───────────────────────
-ASSISTANT_KEYS = ("enabled", "url", "model", "timeout_seconds", "fallback", "key_host")
+ASSISTANT_KEYS = ("enabled", "url", "model", "timeout_seconds", "fallback", "key_host", "ask_prompt", "ask_notes")
 _URL = re.compile(r"^https?://[A-Za-z0-9.:\[\]_-]+(/[A-Za-z0-9._~/-]*)?$")
 _MODEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$")
 
@@ -3240,6 +3240,18 @@ def validate_assistant(a):
         if kh and not re.match(r"^[A-Za-z0-9._-]{1,64}$", str(kh)):
             errs.append("key_host: a key file name")
         out["key_host"] = kh
+    if "ask_prompt" in a:    # Ask Noctyx's own system prompt; "" = the built-in one
+        from noctyx import copilot
+        pr = a["ask_prompt"] or ""
+        why = copilot.check_prompt(pr) if not isinstance(pr, str) or pr.strip() else None
+        if why:
+            errs.append(why)
+        out["ask_prompt"] = pr if isinstance(pr, str) and pr.strip() else ""
+    if "ask_notes" in a:     # what the site's admins add to the prompt; "" = none
+        nt = a["ask_notes"] or ""
+        if not isinstance(nt, str) or len(nt) > 4000 or "\0" in nt:
+            errs.append("ask_notes: text, at most 4000 characters")
+        out["ask_notes"] = nt.strip() if isinstance(nt, str) else ""
     if out.get("enabled") and "url" in a and not url and out.get("fallback") is False:
         errs.append("enabled with no url and no fallback: nothing to ask")
     return out, errs
@@ -3256,7 +3268,8 @@ def cmd_assistant_set(a):
     if blk.get("enabled") and not blk.get("url") and blk.get("fallback") is False:
         sys.exit("invalid: enabled with no url and no fallback: nothing to ask")
     _write_block("assistant", blk, lines=True)
-    audit("assistant-set", **{k: blk.get(k) for k in ("enabled", "url", "model", "timeout_seconds", "fallback")})
+    audit("assistant-set", **{k: blk.get(k) for k in ("enabled", "url", "model", "timeout_seconds", "fallback")},
+          ask_prompt="own" if blk.get("ask_prompt") else "built-in", ask_notes=len(blk.get("ask_notes") or ""))
     print(f"assistant: {'on' if blk.get('enabled') else 'off'} · {blk.get('url') or '(discovered endpoints only)'}"
           f" · model {blk.get('model') or '(as served)'} · fallback {'on' if blk.get('fallback', True) else 'off'}")
 

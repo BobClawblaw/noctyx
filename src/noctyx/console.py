@@ -1427,7 +1427,7 @@ def assistant_summary():
                 eps.append({"url": u, "model": None, "host": s["head"], "engine": f"recipe slot {n}"})
     except Exception:
         pass
-    return {**a, "endpoints": eps}
+    return {**a, "endpoints": eps, "ask_builtin": COP.SYSTEM, "ask_fields": list(COP.FIELDS)}
 
 
 def assistant_test(url, model, timeout=60):
@@ -2415,6 +2415,8 @@ a.menu-title{text-decoration:none;display:inline-flex;align-items:center;gap:6px
 .askform{display:flex;gap:8px;padding:10px 14px 14px;border-top:1px solid var(--line-soft)}
 .askform textarea{flex:1;resize:none;min-height:38px;max-height:140px;background:var(--bg-0);color:var(--fg);border:1px solid var(--line);border-radius:var(--radius-sm);padding:8px 10px;font:13px var(--sans)}
 .askform textarea:focus{outline:none;border-color:var(--accent)}
+.asbuiltin{max-height:320px;overflow:auto;white-space:pre-wrap;font:11px/1.45 var(--mono);color:var(--fg-dim)}
+.askprompt pre{white-space:pre-wrap;word-break:normal;overflow-wrap:anywhere;max-height:50vh} .askprompt summary{white-space:normal}
 .asknote{padding:0 14px 10px;font:11px var(--sans);color:var(--fg-faint)}
 .setnote{margin:0 0 14px;font:12px var(--sans);color:var(--fg-dim)}
 .setstore{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font:12px var(--sans);padding:9px 11px;background:var(--bg-0);border:1px solid var(--line-soft);border-radius:var(--radius-sm);margin-bottom:6px}
@@ -2704,7 +2706,7 @@ tr.ed td{background:var(--bg-2);padding:8px}
 .cfg textarea{width:100%;box-sizing:border-box;resize:vertical;min-height:34px}
 .cfg input[type=number]{width:64px;margin:0 14px 0 4px}
 .cfg .ret{font:12px var(--sans)}
-.cfg input.asin,.cfg input[type=password],.cfg #as-pick{background:var(--bg-0);border:1px solid var(--line);color:var(--fg);border-radius:var(--radius-sm);font:12px var(--mono);padding:4px 6px;width:100%;box-sizing:border-box;max-width:520px}
+.cfg input.asin,.cfg textarea.asin,.cfg input[type=password],.cfg #as-pick{background:var(--bg-0);border:1px solid var(--line);color:var(--fg);border-radius:var(--radius-sm);font:12px var(--mono);padding:4px 6px;width:100%;box-sizing:border-box;max-width:520px}
 .cfg input[type=password]{width:240px}
 input.sw{appearance:none;-webkit-appearance:none;width:36px;height:20px;border-radius:10px;background:var(--bg-3);border:1px solid var(--line);position:relative;cursor:pointer;vertical-align:middle;margin:4px 0;transition:background .15s}
 input.sw::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--fg-dim);transition:left .15s,background .15s}
@@ -3086,7 +3088,7 @@ html[data-style=phosphor] button.act:hover{box-shadow:0 0 calc(14px * var(--gl))
   <button type=button class="hbtn gear" id=hgear title="Display settings: theme, units, layout" aria-label="Display settings" onclick="setOpen()"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="currentColor"><path fill-rule="evenodd" d="M13.9 2c.5 0 .9.4 1 .9l.3 1.8c.5.2 1 .4 1.4.7l1.7-.7c.5-.2 1 0 1.3.4l1.4 2.5c.3.5.2 1-.2 1.3l-1.5 1.2v1.6l1.5 1.2c.4.3.5.8.2 1.3l-1.4 2.5c-.3.4-.8.6-1.3.4l-1.7-.7c-.4.3-.9.5-1.4.7l-.3 1.8c-.1.5-.5.9-1 .9h-2.9c-.5 0-.9-.4-1-.9l-.3-1.8c-.5-.2-1-.4-1.4-.7l-1.7.7c-.5.2-1 0-1.3-.4l-1.4-2.5c-.3-.5-.2-1 .2-1.3l1.5-1.2v-1.6L3.6 9c-.4-.3-.5-.8-.2-1.3l1.4-2.5c.3-.4.8-.6 1.3-.4l1.7.7c.4-.3.9-.5 1.4-.7l.3-1.8c.1-.5.5-.9 1-.9zM12 8.4a3.6 3.6 0 1 0 0 7.2 3.6 3.6 0 0 0 0-7.2z"/></svg></button>
 </header>
 <aside class="askwrap hide" id=askwrap aria-label="Ask Noctyx">
- <div class=askhead><h2>Ask Noctyx</h2><span class=model id=askmodel></span><button type=button class=hbtn onclick="askNew()" title="Start a new conversation">New</button><button type=button class=hbtn onclick="askClose()" aria-label="Close">✕</button></div>
+ <div class=askhead><h2>Ask Noctyx</h2><span class=model id=askmodel></span><button type=button class=hbtn onclick="askPrompt()" title="What Ask is told before your question: its system prompt">Prompt</button><button type=button class=hbtn onclick="askNew()" title="Start a new conversation">New</button><button type=button class=hbtn onclick="askClose()" aria-label="Close">✕</button></div>
  <div class=asklog id=asklog aria-live=polite></div>
  <form class=askform id=askform><textarea id=askq rows=1 placeholder="Ask about the cluster…" maxlength=4000></textarea><button class=hbtn type=submit>Send</button></form>
  <div class=asknote id=asknote>It looks things up but changes nothing: what it suggests, you do.</div>
@@ -3429,6 +3431,13 @@ async function askPoll(){clearTimeout(ASK.timer);if(!ASK.sid)return;
    $('asklog').append(askEl('div','askmsg err',v.ended?'This conversation has ended (the console restarted, or it sat unused for hours): your next question starts a new one.':v.error||('HTTP '+r.status)));return}}
  catch(e){ASK.timer=setTimeout(askPoll,2000);return}
  askRender(v);if(ASK.busy)ASK.timer=setTimeout(askPoll,800)}
+async function askPrompt(){const L=$('asklog'),tok=localStorage.getItem(LS_TOK)||'';
+ let d;try{const r=await fetch('/api/v1/ask-prompt?'+new URLSearchParams({sid:ASK.sid||'',tunit:TU,tz:askZone()}),{headers:{'Authorization':'Bearer '+tok}});d=await r.json()}catch(e){d={error:String(e)}}
+ if(d.error){L.append(askEl('div','askmsg err',d.error));return}
+ L.querySelectorAll('.askprompt').forEach(e=>e.remove());
+ const x=askEl('details','asktool askprompt');x.open=true;
+ x.append(askEl('summary',null,'What Ask is told'+(ASK.sid?' in this conversation':' in a new conversation')+': '+(d.custom?"this site's own prompt":'the built-in prompt')+(d.notes?", plus the site's notes":'')+' (Configure › Assistant LLM)'),askEl('pre',null,d.system));
+ L.append(x);x.scrollIntoView({block:'start'})}
 function askZone(){try{return Intl.DateTimeFormat().resolvedOptions().timeZone||''}catch(e){return ''}}
 async function askSend(text){text=(text||'').trim();if(!text||ASK.busy)return;
  const L=$('asklog');if(!ASK.sid)L.textContent='';
@@ -4693,12 +4702,19 @@ function asSection(A){
   <div class=setrow><label>API key</label><div class=hfline><b class="${A.has_key?'ok':'mut'}">${A.has_key?'set':'none'}</b>
    <input id=as-key type=password autocomplete=off placeholder="new key">
    <button class=act onclick="asKey(false)">set key</button>${A.has_key?'<button class=lnk onclick="asKey(true)">clear key</button>':''}</div><div class=hint>Stored root-only on the head node; never shown or logged.</div></div>
+  <div class=setrow><label>Ask: site notes</label><div><textarea id=as-notes class=asin rows=4 maxlength=4000 placeholder="e.g. gpu-03 is a test box: its alerts can wait. Backups to the NAS pause on Sundays." oninput="cfgDirty()">${esc(A.ask_notes||'')}</textarea></div>
+   <div class=hint>Added to the end of Ask Noctyx's system prompt, under “Notes from this site's admins”. At most 4,000 characters.</div></div>
+  <div class=setrow><label>Ask: system prompt</label><div><textarea id=as-prompt class=asin rows=8 maxlength=16000 placeholder="(empty: the built-in prompt, below)" oninput="cfgDirty()" >${esc(A.ask_prompt||'')}</textarea>
+    <div class=hfline style="margin-top:6px"><button class=lnk onclick="asBuiltin()" title="put the built-in prompt above, to edit">start from the built-in</button><button class=lnk onclick="$('as-prompt').value='';cfgDirty()">use the built-in</button></div>
+    <details style="margin-top:6px"><summary class=mut>the built-in prompt</summary><pre class=asbuiltin>${esc(A.ask_builtin||'')}</pre></details></div>
+   <div class=hint>Your own replaces the built-in one. Noctyx fills in ${(A.ask_fields||[]).map(f=>'<code>{'+esc(f)+'}</code>').join(' ')}; write a literal brace as <code>{{</code> or <code>}}</code>. It changes only what Ask is told: its tools stay read-only and your role's. A new conversation uses it.</div></div>
   <div class=setrow><label></label><div class=hfline><button class=act onclick="asTest()" title="one short request with the values above, before saving">test</button>
    <button class=act onclick="asSave()">save assistant</button> <span id=as-res class=mut></span></div></div></div>`}
 function asPick(i){const A=(PANELS.find(x=>x.id=='config')._data||{}).assistant||{},e=(A.endpoints||[])[i];if(!e)return;
  $('as-url').value=e.url;$('as-model').value=e.model||'';cfgDirty()}
 function asVals(){return {enabled:$('as-on').checked,url:$('as-url').value.trim(),model:$('as-model').value.trim(),
- timeout_seconds:Number($('as-to').value)||60,fallback:$('as-fb').checked}}
+ timeout_seconds:Number($('as-to').value)||60,fallback:$('as-fb').checked,ask_notes:$('as-notes').value,ask_prompt:$('as-prompt').value}}
+function asBuiltin(){const A=(PANELS.find(x=>x.id=='config')._data||{}).assistant||{};$('as-prompt').value=A.ask_builtin||'';cfgDirty()}
 /* downloads need an operator. Signed in (or open access): the link just works. Token mode: a browser
    link cannot carry the bearer token, so ask for a 60 s signed ticket and follow the link with it. */
 function dlGo(ev,a){
@@ -5474,6 +5490,18 @@ class H(BaseHTTPRequestHandler):
                                                               for r in change.ledger(30)[::-1]]})
         if p == "/api/v1/probes":
             return self._json(probe_last())
+        if p == "/api/v1/ask-prompt":
+            # what Ask is told: the caller's conversation (sid), or one they would open now
+            who = self._ask_who()
+            if not who:
+                return self._deny("view")
+            try:
+                if q.get("sid"):
+                    s = COP.get(q["sid"], who[0])
+                    return self._json({"system": s.system(), "custom": s.custom, "notes": bool(s.site_notes)})
+                return self._json(COP.preview(*who, q.get("tunit") or "F", q.get("tz")))
+            except COP.Bad as e:
+                return self._json({"error": str(e)}, 404)
         if p.startswith("/api/v1/ask/"):
             who = self._ask_who()
             if not who:

@@ -240,6 +240,8 @@ morning brief. It only produces text and never runs anything.
 | `timeout_seconds` | 5..600 | `60` (`init` writes `120`) |
 | `fallback` | when `url` does not answer, ask any LLM server `llm-discover` found | `true` |
 | `key_host` | name of a key file in `llm_keys`. Set the key on the console or in `init`, never here | none |
+| `ask_prompt` | Ask Noctyx's system prompt, replacing the built-in one ([what it may use](assistant.md#what-ask-is-told)) | `""` (the built-in) |
+| `ask_notes` | text added after Ask's system prompt, under "Notes from this site's admins" (at most 4,000 characters) | `""` |
 
 `noctyx init` writes this block first, before anything else: it finds and tests an endpoint, and a key you type
 goes to `<llm_keys>/assistant` (0600) with `"key_host": "assistant"`. See [the assistant](assistant.md).

@@ -3,7 +3,7 @@
 help rather than only to differ.
 
     NOCTYX_CONFIG=/etc/noctyx/site.json PYTHONPATH=src python3 tools/ask_eval.py [--only a,b] [--tz Europe/Paris]
-        [--jobs 2] [--out report.json]
+        [--jobs 2] [--prompt my-prompt.txt] [--notes my-notes.txt] [--out report.json]
 
 Each question runs in a new conversation with the console's own read-only tools, on the site's live data and the
 assistant set up in Configure › Assistant LLM, so run it on the head as the user the console runs as (the log
@@ -223,9 +223,23 @@ def main():
     ap.add_argument("--tz", help="the asker's IANA time zone, as a browser would send it")
     ap.add_argument("--jobs", type=int, default=2, help="questions at once (the assistant serves others too)")
     ap.add_argument("--timeout", type=int, default=300)
+    ap.add_argument("--prompt", help="a system prompt of your own to measure instead of the site's (see the guide)")
+    ap.add_argument("--notes", help="site notes to measure with it")
     ap.add_argument("--out")
     a = ap.parse_args()
-    from noctyx import console, orchestrator          # importing the console binds the copilot to it
+    from noctyx import console, copilot, orchestrator          # importing the console binds the copilot to it
+    if a.prompt or a.notes:
+        if not hasattr(copilot, "site_prompt"):
+            sys.exit("--prompt and --notes need a checkout whose Ask takes a site's own prompt")
+        template, notes, custom = copilot.site_prompt()
+        if a.prompt:
+            template, custom = pathlib.Path(a.prompt).read_text(), True
+            why = copilot.check_prompt(template)
+            if why:
+                sys.exit(why)
+        if a.notes:
+            notes = pathlib.Path(a.notes).read_text().strip()
+        copilot.site_prompt = lambda: (template, notes, custom)
     r = roles(console.CFG, orchestrator)
     check = cli_check()
     cases = [c for c in CASES if not a.only or c[0] in a.only.split(",")]

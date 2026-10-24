@@ -183,6 +183,11 @@ def test_the_console_serves_it(console, monkeypatch):
         code, v = req(f"/ask/{d['sid']}?since=0")
         assert code == 200 and [i["kind"] for i in v["items"]] == ["user", "assistant"] and v["items"][1]["text"] == "Hello."
         assert "°C" in copilot.SESSIONS[d["sid"]].system()
+        code, pr = req(f"/ask-prompt?sid={d['sid']}")
+        assert code == 200 and pr["system"] == copilot.SESSIONS[d["sid"]].system() and not pr["custom"]
+        code, pr = req("/ask-prompt?tunit=C&tz=Europe/Paris")
+        assert code == 200 and "Europe/Paris" in pr["system"] and "°C" in pr["system"]
+        assert req("/ask-prompt?sid=unknown")[0] == 404
         assert req("/ask/unknown")[0] == 404
     finally:
         srv.shutdown()
@@ -237,3 +242,32 @@ def test_the_prompt_stays_put_and_each_question_carries_its_time(console, monkey
     for bad in ("Mars/Olympus", "../../etc/passwd", "x" * 80, ""):
         assert copilot._zone(bad) is None
     assert "give times in UTC" in copilot.start("ana", "view", "F", "Mars/Olympus").system()
+
+
+def test_the_guide_shows_the_built_in_prompt():
+    import pathlib
+    import re
+    text = (pathlib.Path(__file__).resolve().parents[1] / "docs" / "guide" / "assistant.md").read_text()
+    block = re.search(r"checks this block against copilot.SYSTEM -->\n```text\n(.*?)\n```", text, re.S).group(1)
+    assert " ".join(block.split()) == " ".join(copilot.SYSTEM.split())
+
+
+def test_a_site_may_write_its_own_prompt_and_notes(console, monkeypatch):
+    assert copilot.check_prompt(copilot.SYSTEM) is None and copilot.check_prompt("Hosts: {hosts}. A brace: {{x}}") is None
+    for bad in ("{secret}", "{hosts.__class__}", "{hosts:>9}", "{hosts!r}", "an open { brace", "x" * 16001, None):
+        assert copilot.check_prompt(bad), bad
+    from noctyx import orchestrator
+    assert orchestrator.validate_assistant({"ask_prompt": "{nope}"})[1]
+    assert orchestrator.validate_assistant({"ask_notes": "x" * 4001})[1] and orchestrator.validate_assistant({"ask_prompt": 5})[1]
+    assert orchestrator.validate_assistant({"ask_prompt": "", "ask_notes": ""}) == ({"ask_prompt": "", "ask_notes": ""}, [])
+    assert orchestrator.validate_assistant({"ask_prompt": "You serve {who} on {hosts}.", "ask_notes": " gpu-01 is a test box "})[0] \
+        == {"ask_prompt": "You serve {who} on {hosts}.", "ask_notes": "gpu-01 is a test box"}
+    a = {"ask_prompt": "You serve {who} ({role}) on {hosts}.", "ask_notes": "gpu-01 is a test box: its alerts can wait."}
+    console.CM = types.SimpleNamespace(cfg=lambda: {"assistant": a})
+    s = copilot.start("ana", "view")
+    assert s.custom and s.system().startswith("You serve ana (view) on gpu-01 (linux x86_64, backed up)")
+    assert s.system().endswith("Notes from this site's admins (they know this site better than the tools say):\n"
+                               "gpu-01 is a test box: its alerts can wait.")
+    a["ask_prompt"] = "{broken"                      # a stored prompt that no longer checks out: the built-in one
+    p = copilot.preview("ana", "view")
+    assert not p["custom"] and p["notes"] and p["system"].startswith("You are Ask Noctyx")

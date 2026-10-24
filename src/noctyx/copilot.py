@@ -15,6 +15,7 @@ import json
 import re
 import secrets
 import shlex
+import string
 import threading
 import time
 import urllib.error
@@ -430,30 +431,67 @@ def _site():
                      for h in C.CFG["hosts"] if h.get("enabled", True) is not False)
 
 
+FIELDS = ("who", "role", "missing", "zone", "tunit", "hosts", "started")
+NOTES = "\n\nNotes from this site's admins (they know this site better than the tools say):\n{}"
+PROMPT_MAX, NOTES_MAX = 16000, 4000
+
+
+def check_prompt(text):
+    """Why a site's own prompt (assistant.ask_prompt) cannot be used, or None. It may use only the {fields}
+    Noctyx fills in, each plain ({hosts}, not {hosts.x} or {hosts:>9}); a literal brace is written {{ or }}."""
+    if not isinstance(text, str) or len(text) > PROMPT_MAX:
+        return f"ask_prompt: text, at most {PROMPT_MAX} characters"
+    try:
+        for _, field, spec, conv in string.Formatter().parse(text):
+            if field is not None and (field not in FIELDS or spec or conv):
+                return (f"ask_prompt: {{{field}}} is not one of " + ", ".join("{" + f + "}" for f in FIELDS)
+                        + " (a literal brace is {{ or }})")
+    except ValueError as e:
+        return f"ask_prompt: {e} (a literal brace is {{{{ or }}}})"
+    return None
+
+
+def site_prompt():
+    """(template, notes, custom): the site's own prompt and notes (Configure › Assistant LLM), or the built-in.
+    A stored prompt that no longer checks out is not used."""
+    a = C.CM.cfg().get("assistant") or {}
+    mine = a.get("ask_prompt") or ""
+    custom = bool(mine.strip()) and check_prompt(mine) is None
+    notes = str(a.get("ask_notes") or "").strip()[:NOTES_MAX]
+    return (mine if custom else SYSTEM), notes, custom
+
+
+def render(template, notes, owner, role, tunit, tz, site, started):
+    """The system prompt for one person: the template's {fields} filled, then the site's notes."""
+    rank = agent.RANK.get(role, -1)
+    missing = {}
+    for n, t in TOOLS.items():
+        if rank < agent.RANK[t["need"]]:
+            missing.setdefault(t["need"], []).append(n)
+    note = (" ".join(f"Not among your tools: {', '.join(ns)} ({'an operator' if need == 'operate' else 'an admin'} "
+                     f"has them); when a question needs one, say an {'operator' if need == 'operate' else 'admin'} "
+                     "can ask it." for need, ns in missing.items()) or "You have every tool.")
+    zone = f"give times in {tz} (the person's zone)." if tz else "give times in UTC and say so."
+    return template.format(who=owner or "someone at the console (not signed in)", role=role, missing=note, zone=zone,
+                           tunit="°" + tunit, hosts=site, started=time.strftime("%Y-%m-%d %H:%M", time.gmtime(started))
+                           ) + (NOTES.format(notes) if notes else "")
+
+
 class Copilot(agent.Session):
     """The system prompt stays the same for the whole conversation (for the role it has), so the server's prompt
-    cache keeps it and the tools after it; the time goes with each question instead."""
+    cache keeps it and the tools after it; the time goes with each question instead. The template and the site's
+    notes are read as the conversation begins: a change to them applies to the next one."""
     TOOLS = TOOLS
     MAX_TOKENS = 1200
 
     def __init__(self, sid, owner, role, tunit="F", tz=None):
         self.sid, self.owner, self.tunit, self.tz = sid, owner, "C" if tunit == "C" else "F", _zone(tz)
         self.started, self.site = time.time(), _site()
+        self.template, self.site_notes, self.custom = site_prompt()
         super().__init__(role=role)
 
     def system(self):
-        mine = self.tools()
-        missing = {}
-        for n, t in self.TOOLS.items():
-            if n not in mine:
-                missing.setdefault(t["need"], []).append(n)
-        note = (" ".join(f"Not among your tools: {', '.join(ns)} ({'an operator' if need == 'operate' else 'an admin'} "
-                         f"has them); when a question needs one, say an {'operator' if need == 'operate' else 'admin'} "
-                         "can ask it." for need, ns in missing.items()) or "You have every tool.")
-        zone = f"give times in {self.tz} (the person's zone)." if self.tz else "give times in UTC and say so."
-        return SYSTEM.format(who=self.owner or "someone at the console (not signed in)", role=self.role, missing=note,
-                             zone=zone, tunit="°" + self.tunit, hosts=self.site,
-                             started=time.strftime("%Y-%m-%d %H:%M", time.gmtime(self.started)))
+        return render(self.template, self.site_notes, self.owner, self.role, self.tunit, self.tz, self.site, self.started)
 
     def stamp(self):
         now = time.time()
@@ -494,6 +532,13 @@ def start(owner, role, tunit="F", tz=None):
         _sweep()
         SESSIONS[s.sid] = s
         return s
+
+
+def preview(owner, role, tunit="F", tz=None):
+    """What a conversation opened now would be told: {system, custom, notes}."""
+    template, notes, custom = site_prompt()
+    return {"system": render(template, notes, owner, role, "C" if tunit == "C" else "F", _zone(tz), _site(), time.time()),
+            "custom": custom, "notes": bool(notes)}
 
 
 def get(sid, owner, role=None, tunit=None, tz=None):
