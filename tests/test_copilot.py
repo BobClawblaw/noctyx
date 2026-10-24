@@ -186,3 +186,20 @@ def test_the_console_serves_it(console, monkeypatch):
         assert req("/ask/unknown")[0] == 404
     finally:
         srv.shutdown()
+
+
+def test_it_sees_what_noctyx_repaired_and_which_machine_is_the_head(console, monkeypatch, tmp_path):
+    from noctyx import change, heal
+    monkeypatch.setattr(heal, "HEAL_FILE", tmp_path / "heal.json")
+    monkeypatch.setattr(change, "LEDGER", tmp_path / "changes.jsonl")
+    now = time.time()
+    heal.HEAL_FILE.write_text(json.dumps({"ts": now, "problems": [], "repairs": [
+        {"ts": "2026-10-24T05:49:59+00:00", "ts_epoch": now - 60, "host": "gpu-01", "check": "dropin",
+         "what": "the node_exporter drop-in differs from Noctyx's", "how": "write it again", "ok": True, "detail": "ok"}]}))
+    change.record({"ts": "2026-10-24T05:00:00+00:00", "ts_epoch": now - 3600, "host": "gpu-01", "component": "node_exporter",
+                   "what": "node_exporter 1.12.1 on gpu-01", "outcome": "rolled_back", "problems": ["a scrape took 10s"],
+                   "snap": {"big": "x" * 100}})
+    out = json.dumps(copilot.start(None, "view")._run("repairs", {}, None))
+    assert "write it again" in out and "rolled_back" in out and "a scrape took 10s" in out and "xxxx" not in out
+    console.CFG["server"] = {"address": "192.0.2.21"}
+    assert "gpu-01 (linux x86_64, backed up, the head)" in copilot.start(None, "view").system()

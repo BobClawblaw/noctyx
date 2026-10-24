@@ -25,7 +25,8 @@ from . import llm
 NAME = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
 HOSTNAME = re.compile(r"^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]{0,62})(\.[A-Za-z0-9]([A-Za-z0-9-]{0,62}))*$")
 USER = re.compile(r"^[a-z_][a-z0-9_-]{0,31}$")
-GUIDES = ("install", "troubleshooting", "site-config", "accounts", "assistant", "backups", "console", "upgrade")
+GUIDES = ("install", "troubleshooting", "site-config", "accounts", "assistant", "backups", "console", "upgrade",
+          "self-repair")
 RANK = {"view": 0, "operate": 1, "admin": 2}
 TOOL_MARKUP = re.compile(r"<tool_call>.*?(</tool_call>|\Z)", re.S)
 

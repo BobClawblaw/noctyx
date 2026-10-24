@@ -133,6 +133,7 @@ It works through read-only tools that read what the panels read:
 | `prometheus`, `metric_names` | any PromQL query, now or over up to 7 days: at most 20 series, each with its min and max (and when) from up to 1,500 samples, its last value and 40 points | viewer |
 | `host_details` | a host's site config and facts | viewer |
 | `alerts`, `backups`, `storage`, `hygiene`, `versions`, `recipes`, `audit` | the panels of the same names | viewer |
+| `repairs` | what `noctyx heal` found, repaired on its own or left to a person, and the changes ledger (each upgrade: ok or rolled back, and why) ([self-repair](self-repair.md)) | viewer |
 | `snapshots`, `find_in_backups` | a host's snapshots, and files in them by name or glob | viewer |
 | `run_log` | the end of a backup, verify, prune or deploy run's log | operator |
 | `containers`, `service_log`, `container_log` | a Linux node's containers, a unit's journal, a container's log (over SSH) | operator |
