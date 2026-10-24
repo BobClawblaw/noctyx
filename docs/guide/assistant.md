@@ -152,11 +152,35 @@ How it behaves:
 - **Without tool calls.** A model whose server refuses the tools API (HTTP 400) still answers, from its system
   prompt only, and the drawer says so.
 - **Twelve rounds per question.** On the last round the model is told to answer from what it has found.
+- **What it is told.** The system prompt names each machine, what it is and what it serves (each recipe slot's
+  port is asked once as the conversation begins, so a model swapped in by hand shows as itself, and its
+  tensor-parallel pair), the console's pages and buttons it may
+  point at, and the tools your role does not give it, so it can say who could ask instead. It may name a `noctyx`
+  command only when a tool showed it or the guide documents it, and it answers questions about this site only.
+- **Times.** Each question goes to the model with the time it was asked, in UTC and in your browser's time zone,
+  and answers give times in your zone. The system prompt itself stays the same for the whole conversation, so a
+  server with a prompt cache does not read it and the tools again on every round.
 
 A conversation belongs to whoever opened it: another user's conversation id is refused. Each message uses your
 role as it is at that moment. Conversations live in the console's memory: a restart ends them, as does six hours
 without use. The API is `POST /api/v1/ask` with `{"text": "...", "sid": "..."}` (no `sid` starts a new
-conversation and returns one) and `GET /api/v1/ask/<sid>?since=<rev>`.
+conversation and returns one; `tunit` is `C` or `F`, `tz` an IANA time zone such as `Europe/Paris`) and
+`GET /api/v1/ask/<sid>?since=<rev>`.
+
+### Measuring a change to it
+
+`tools/ask_eval.py` asks the site's real assistant 21 fixed questions, each in a new conversation with the
+console's tools on the live data, and scores every answer: the first lookup is one the question calls for, each
+`noctyx` command it writes parses with Noctyx's own command line, it has the words it must (and none it must
+not), and each number it gives is found in what the tools returned (in °F, GB or % as well). Run it on the head as
+the user the console runs as, before and after a prompt change; `PYTHONPATH` picks the checkout it measures:
+
+```
+NOCTYX_CONFIG=/etc/noctyx/site.json PYTHONPATH=src python3 tools/ask_eval.py --tz Europe/Paris --out /tmp/ask.json
+```
+
+The questions name machines by role (the head, a tensor-parallel pair, a Mac), so they fit any site; one whose
+machine the site lacks is skipped. The report holds the site's data: keep it out of the repository.
 
 ## Who may use it
 

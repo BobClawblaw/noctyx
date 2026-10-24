@@ -40,7 +40,7 @@ already publishes; POST whitelisted actions, tokened unless NOCTYX_CONSOLE_AUTH=
   GET  /api/v1/versions       every critical component per machine: installed, pinned, latest, upgrade command
   GET  /api/v1/heal           the repair loop: open problems, the last day's repairs, the changes ledger
   POST /api/v1/action         whitelisted orchestrator argv
-  POST /api/v1/ask            {text, sid?} -> Ask Noctyx: a question to the assistant, which looks things up (copilot.py)
+  POST /api/v1/ask            {text, sid?, tunit?, tz?} -> Ask Noctyx: a question to the assistant, which looks things up (copilot.py)
   GET  /api/v1/ask/<sid>?since=<rev>      that conversation since a revision
 
 Control model: fixed argv whitelist, host/profile validated
@@ -3429,11 +3429,12 @@ async function askPoll(){clearTimeout(ASK.timer);if(!ASK.sid)return;
    $('asklog').append(askEl('div','askmsg err',v.ended?'This conversation has ended (the console restarted, or it sat unused for hours): your next question starts a new one.':v.error||('HTTP '+r.status)));return}}
  catch(e){ASK.timer=setTimeout(askPoll,2000);return}
  askRender(v);if(ASK.busy)ASK.timer=setTimeout(askPoll,800)}
+function askZone(){try{return Intl.DateTimeFormat().resolvedOptions().timeZone||''}catch(e){return ''}}
 async function askSend(text){text=(text||'').trim();if(!text||ASK.busy)return;
  const L=$('asklog');if(!ASK.sid)L.textContent='';
  const tok=localStorage.getItem(LS_TOK)||'';
  let r,d;try{r=await fetch('/api/v1/ask',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok},
-  body:JSON.stringify({sid:ASK.sid,text,tunit:TU})});d=await r.json()}catch(e){d={error:String(e)}}
+  body:JSON.stringify({sid:ASK.sid,text,tunit:TU,tz:askZone()})});d=await r.json()}catch(e){d={error:String(e)}}
  if(!r||!r.ok){if(r&&r.status==409&&/ended/.test(d.error||'')){askNew();return askSend(text)}
   L.append(askEl('div','askmsg err',d.error||'the console did not answer'));return}
  if(d.sid!==ASK.sid){ASK.sid=d.sid;ASK.rev=0;try{sessionStorage.setItem('nx_ask_sid',d.sid)}catch(e){}}
@@ -5592,11 +5593,11 @@ class H(BaseHTTPRequestHandler):
                 body = self._body()
             except Exception:
                 return self._json({"error": "bad json"}, 400)
-            text, tunit = str(body.get("text") or "").strip(), body.get("tunit")
+            text, tunit, tz = str(body.get("text") or "").strip(), body.get("tunit"), body.get("tz")
             if not text:
                 return self._json({"error": "ask something"}, 400)
             try:
-                sess = COP.get(body["sid"], *who, tunit) if body.get("sid") else COP.start(*who, tunit)
+                sess = COP.get(body["sid"], *who, tunit, tz) if body.get("sid") else COP.start(*who, tunit, tz)
                 sess.say(text[:4000])
             except COP.Bad as e:
                 return self._json({"error": str(e)}, 409)

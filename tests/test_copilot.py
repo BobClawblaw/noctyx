@@ -203,3 +203,37 @@ def test_it_sees_what_noctyx_repaired_and_which_machine_is_the_head(console, mon
     assert "write it again" in out and "rolled_back" in out and "a scrape took 10s" in out and "xxxx" not in out
     console.CFG["server"] = {"address": "192.0.2.21"}
     assert "gpu-01 (linux x86_64, backed up, the head)" in copilot.start(None, "view").system()
+
+
+def test_the_prompt_stays_put_and_each_question_carries_its_time(console, monkeypatch):
+    """The system prompt is the same on every round of a conversation (the server's prompt cache keeps it and the
+    tools after it); the time goes with each question, in the asker's zone when the browser gave a real one."""
+    console.CM = types.SimpleNamespace(cfg=lambda: {}, rec_label=lambda r: r["name"], recipe_summary=lambda c: {"slots": {
+        "pair": {"head": "gpu-01", "worker": "gpu-02", "port": 8000, "current": {"name": "big-model"},
+                 "live": {"ok": True, "models": ["swapped-in-by-hand"]}},
+        "solo": {"head": "mac-01", "port": 9000, "current": {"name": "small-model"}, "live": {"ok": False}}}})
+    console.CFG["hosts"].append({"name": "gpu-02", "address": "192.0.2.22", "arch": "aarch64"})
+    clock = [1792817000.0]
+    monkeypatch.setattr(copilot.time, "time", lambda: clock[0])
+    _LLM.replies = [_call("alerts", "c1"), {"content": "All quiet."}, {"content": "Still quiet."}]
+    s = copilot.start("ana", "view", "F", "Europe/Paris")
+    s.say("anything wrong?")
+    _settle(s)
+    clock[0] += 3600
+    s.say("and now?")
+    _settle(s)
+    systems = {m["messages"][0]["content"] for m in _LLM.seen}
+    assert len(systems) == 1
+    system = systems.pop()
+    assert "slot pair: serves swapped-in-by-hand on :8000, a tensor-parallel pair with gpu-02" in system
+    assert "slot solo: Noctyx last started small-model on :9000, which did not answer" in system
+    assert "gpu-02 (linux aarch64, backed up; slot pair: the tensor-parallel worker of gpu-01)" in system
+    assert "Not among your tools: run_log, containers, service_log, container_log" in system and "Europe/Paris" in system
+    asked = [m["content"] for m in _LLM.seen[-1]["messages"] if m["role"] == "user"]
+    assert asked[0].startswith("(asked 2026-10-24 04:43 UTC = 06:43 Europe/Paris)\n") and asked[0].endswith("anything wrong?")
+    assert asked[1].startswith("(asked 2026-10-24 05:43 UTC")
+    assert [i["text"] for i in s.items if i["kind"] == "user"] == ["anything wrong?", "and now?"]   # the page shows no stamp
+    assert "You have every tool" in copilot.start("oli", "admin").system()
+    for bad in ("Mars/Olympus", "../../etc/passwd", "x" * 80, ""):
+        assert copilot._zone(bad) is None
+    assert "give times in UTC" in copilot.start("ana", "view", "F", "Mars/Olympus").system()

@@ -184,6 +184,10 @@ class Session:
         """What the page shows beside the conversation (view()['state'])."""
         return None
 
+    def stamp(self):
+        """What goes before each of the person's messages to the LLM (the copilot: when it was asked)."""
+        return ""
+
     def tools(self):
         """The tools this person may use (their role ranks at least each tool's need)."""
         return {n: t for n, t in self.TOOLS.items() if RANK.get(self.role, -1) >= RANK[t["need"]]}
@@ -222,7 +226,7 @@ class Session:
             self._item(kind="user", text=text)
             notes = "".join(f"(meanwhile the operator, through the page: {n})\n" for n in self.notes)
             self.notes.clear()
-            self.msgs.append({"role": "user", "content": notes + text})
+            self.msgs.append({"role": "user", "content": self.stamp() + notes + text})
             self._kick()
 
     def decide(self, pid, approve, args=None):
