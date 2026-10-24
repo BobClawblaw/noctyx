@@ -19,7 +19,7 @@ FAMILY = ["phosphor", "aurora", "outrun", "lcd", "p1green", "p3amber", "nixie", 
 # name: (path, [js steps run after load; "sleep:N" waits], full-page height or None); "_" names are
 # intermediate (the Phosphor family's kiosks, tiled into phosphor-family.png and then removed)
 SHOTS = {
-    "dashboard": ("/", ["sleep:3"], None),
+    "dashboard": ("/", ["NXT.save({theme:'noctyx',mode:'dark'})", "location.reload()", "sleep:4"], None),
     "cluster": ("/cluster", ["sleep:3"], None),
     "node": ("/", ["sleep:2", "selectHost('spark-1')", "sleep:4"], None),
     "recipes": ("/recipes", ["sleep:3"], None),
@@ -38,6 +38,13 @@ SHOTS = {
     "about": ("/about", ["sleep:3"], None),
     "login": ("/login", ["sleep:1"], None),
 }
+
+
+# a shot that sets no theme is taken in Phosphor, the look the console is run in; dashboard and theme-ember-light
+# show the classic themes
+DEFAULT_LOOK = ["NXT.save({theme:'phosphor',mode:'dark'})", "location.reload()", "sleep:3"]
+SHOTS = {n: (path, steps if any("NXT.save" in x for x in steps) or path == "/login" else DEFAULT_LOOK + steps, h)
+         for n, (path, steps, h) in SHOTS.items()}
 
 
 def free_port():
