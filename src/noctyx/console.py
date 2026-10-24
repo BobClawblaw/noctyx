@@ -1290,6 +1290,31 @@ def host_metrics(host, tab):
         out["exporter_up"] = one(f"max(up{{{H}}})")
         out["containers"] = sorted(({"name": r["metric"].get("name"), "image": r["metric"].get("image")}
                                     for r in _pq(f"noctyx_container_running{{{H}}}")), key=lambda x: x["name"] or "")
+        # the early warnings' sources (metrics/rules.yml "signals"): sshd, the RoCE fabric, NFS mounts
+        out["ssh"] = {"failed_24h": one(f"increase(noctyx_ssh_failed_logins_total{{{H}}}[1d])"),
+                      "invalid_24h": one(f"increase(noctyx_ssh_invalid_user_attempts_total{{{H}}}[1d])"),
+                      "accepted_24h": one(f"sum(increase(noctyx_ssh_accepted_logins_total{{{H}}}[1d]))"),
+                      "known": one(f"noctyx_ssh_known_sources{{{H}}}"),
+                      "new": [{"addr": r["metric"].get("addr"), "user": r["metric"].get("user"), "ts": _num(r["value"][1])}
+                              for r in _pq(f"noctyx_ssh_new_source_login_timestamp_seconds{{{H}}}")]}
+        fab = {}
+        for key, q in (("state", f"node_infiniband_state_id{{{H}}}"), ("rate", f"node_infiniband_rate_bytes_per_second{{{H}}}"),
+                       ("errors_1h", f"increase(node_infiniband_link_downed_total{{{H}}}[1h]) + increase(node_infiniband_symbol_error_total{{{H}}}[1h]) + increase(node_infiniband_port_errors_received_total{{{H}}}[1h]) + increase(node_infiniband_link_error_recovery_total{{{H}}}[1h])"),
+                       ("retrans_s", f"rate(node_infiniband_roce_adp_retransmits_total{{{H}}}[10m]) + rate(node_infiniband_local_ack_timeout_errors_total{{{H}}}[10m]) + rate(node_infiniband_out_of_sequence_packets_received_total{{{H}}}[10m])"),
+                       ("rx_bps", f"rate(node_infiniband_port_data_received_bytes_total{{{H}}}[5m])"),
+                       ("tx_bps", f"rate(node_infiniband_port_data_transmitted_bytes_total{{{H}}}[5m])")):
+            for r in _pq(q):
+                fab.setdefault(r["metric"].get("device"), {"device": r["metric"].get("device")})[key] = _num(r["value"][1])
+        out["fabric"] = sorted(fab.values(), key=lambda x: (x.get("state") != 4, x["device"] or ""))
+        nfs = {}
+        for key, q in (("ok", "noctyx_nfs_probe_ok"), ("write", "noctyx_nfs_probe_write_bytes_per_second"),
+                       ("read", "noctyx_nfs_probe_read_bytes_per_second"), ("small", "noctyx_nfs_probe_small_op_seconds")):
+            for r in _pq(f"{q}{{{H}}}"):
+                nfs.setdefault(r["metric"].get("mountpoint"), {"mountpoint": r["metric"].get("mountpoint"),
+                                                               "source": r["metric"].get("source")})[key] = _num(r["value"][1])
+        out["nfs"] = list(nfs.values())
+        out["nfs_probe_ts"] = one(f"noctyx_nfs_probe_last_run_timestamp_seconds{{{H}}}")
+        out["nfs_running_s"] = one(f"noctyx_nfs_probe_running_seconds{{{H}}}")
     else:
         raise ValueError("unknown tab")
     return out
@@ -1805,7 +1830,12 @@ def metrics_text():
                 out.append(f"noctyx_repo_bytes{_lbl(repo=repo)} {gb * 1e9:.0f}")
 
     def endpoint():
-        out.append(f"noctyx_rest_endpoint_up{_lbl(url=CM.rest_url(CM.cfg()))} {int(CM.rest_up(CM.cfg()))}")
+        c = CM.cfg()
+        t0 = time.time()
+        up = CM.rest_up(c)
+        out.append(f"noctyx_rest_endpoint_up{_lbl(url=CM.rest_url(c))} {int(up)}")
+        if up:                            # how long it took to answer (TLS and the first byte): the NAS's own latency
+            out.append(f"noctyx_rest_endpoint_seconds{_lbl(url=CM.rest_url(c))} {time.time() - t0:.3f}")
 
     def raid():
         d = nas_raid()
@@ -4718,7 +4748,17 @@ function tabHealth(m){const g=mGuard(m);if(g)return g;
   <span class=k>clock</span><span class="${m.time_synced?'ok':'warn'}">${m.time_synced?'synchronised':'NOT synchronised'}${off!=null?` · offset ${off.toFixed(off<1?2:0)} ms`:''}</span>
   <span class=k>booted</span><span>${m.boot_ts?esc(fmtTs(m.boot_ts))+' ('+esc(agoS(m.boot_ts))+')':'—'}</span></div>
  <h3>Containers (${(m.containers||[]).length})</h3>
- <table><tr><th>name</th><th>image</th></tr>${cs||'<tr><td class=mut>none running</td></tr>'}</table>`}
+ <table><tr><th>name</th><th>image</th></tr>${cs||'<tr><td class=mut>none running</td></tr>'}</table>${sigHealth(m)}`}
+/* the early warnings' sources for this machine: sshd logins, its RoCE ports, its NFS mounts (rules.yml "signals") */
+function sigHealth(m){
+ const S=m.ssh||{},n=v=>v==null?'—':Math.round(v),FS={1:'down',2:'init',3:'armed',4:'active',5:'active defer'};
+ const bps=v=>v==null?'—':fmtBytes(v)+'/s';
+ const ssh=S.known==null?'':`<h3>SSH</h3><div class=kv>
+  <span class=k>last 24 h</span><span class="${(S.failed_24h||0)+(S.invalid_24h||0)>50?'warn':''}">${n(S.accepted_24h)} logins · ${n(S.failed_24h)} failed · ${n(S.invalid_24h)} for unknown users</span>
+  <span class=k>addresses</span><span>${n(S.known)} a login came from${(S.new||[]).length?` · <span class=warn>new this week: ${S.new.map(x=>esc(x.user+' from '+x.addr+' '+agoS(x.ts))).join('; ')}</span>`:''}</span></div>`;
+ const fab=(m.fabric||[]).length?`<h3>RoCE fabric</h3><table><tr><th>port</th><th>state</th><th>rate</th><th>in / out</th><th>errors 1 h</th><th>retransmits</th></tr>${m.fabric.map(f=>`<tr><td>${esc(f.device)}</td><td class="${f.state==4?'ok':'mut'}">${esc(FS[f.state]||f.state)}</td><td>${f.state==4?esc(fmtBytes(f.rate*8).replace('B','b'))+'/s':'—'}</td><td>${f.state==4?esc(bps(f.rx_bps))+' / '+esc(bps(f.tx_bps)):'—'}</td><td class="${f.errors_1h>0?'warn':''}">${n(f.errors_1h)}</td><td class="${f.retrans_s>1?'warn':''}">${f.retrans_s==null?'—':esc(f.retrans_s.toFixed(2))+'/s'}</td></tr>`).join('')}</table>`:'';
+ const nfs=(m.nfs||[]).length||m.nfs_running_s?`<h3>NFS mounts</h3>${m.nfs_running_s?`<div class=bad>the probe has been waiting ${esc(fmtDur(m.nfs_running_s))} for a mount (hung?)</div>`:''}<table><tr><th>mount</th><th>write</th><th>read</th><th>4 KiB round trip</th></tr>${(m.nfs||[]).map(x=>`<tr><td title="${esc(x.source||'')}">${esc(x.mountpoint)}</td>${x.ok?`<td>${esc(bps(x.write))}</td><td>${esc(bps(x.read))}</td><td>${esc(((x.small||0)*1000).toFixed(1))} ms</td>`:'<td colspan=3 class=bad>the probe failed</td>'}</tr>`).join('')}</table>${m.nfs_probe_ts?`<div class=mut>probed ${esc(agoS(m.nfs_probe_ts))}, every 5 min</div>`:''}`:'';
+ return ssh+fab+nfs}
 /* ── schedule: what runs when, and why; inline editing via schedule-set ── */
 let EDIT=null;
 function rSched(d){

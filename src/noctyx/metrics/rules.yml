@@ -206,3 +206,85 @@ groups:
     for: 5m
     labels: {severity: warning}
     annotations: {summary: "{{ $labels.host }}: MTPLX server unreachable from the exporter — LLM stats frozen (address change, server down, or key)"}
+# Early warnings across the fleet: NAS and NFS performance, the GPU pairs' RoCE fabric, sshd logins, storage
+# growth. Thresholds: the site config's "signals" block (noctyx signals-set; src/noctyx/signals.py).
+- name: signals
+  rules:
+  - alert: NfsMountHung
+    expr: @METRIC_PREFIX@_nfs_probe_running_seconds > 180
+    labels: {severity: critical}
+    annotations: {summary: "{{ $labels.host }}: an NFS mount has not answered the probe for {{ $value | humanizeDuration }} (a hung mount: anything that touches it waits)"}
+  - alert: NfsProbeFailing
+    expr: @METRIC_PREFIX@_nfs_probe_ok == 0
+    for: 10m
+    labels: {severity: warning}
+    annotations: {summary: "{{ $labels.host }}: the probe cannot write, read or remove its file on {{ $labels.mountpoint }} ({{ $labels.source }})"}
+  - alert: NfsSlow
+    expr: |
+      (
+        @METRIC_PREFIX@_nfs_probe_write_bytes_per_second < @SIG_NFS_SLOW_RATIO@ * quantile_over_time(0.5, @METRIC_PREFIX@_nfs_probe_write_bytes_per_second[7d])
+        or @METRIC_PREFIX@_nfs_probe_read_bytes_per_second < @SIG_NFS_SLOW_RATIO@ * quantile_over_time(0.5, @METRIC_PREFIX@_nfs_probe_read_bytes_per_second[7d])
+        or @METRIC_PREFIX@_nfs_probe_small_op_seconds > @SIG_NFS_OP_SECONDS@
+      ) unless on() (max(@METRIC_PREFIX@_spindle_busy) > 0)
+    for: 30m
+    labels: {severity: warning}
+    annotations: {summary: "{{ $labels.host }}: {{ $labels.mountpoint }} is slow for 30 min: a probe reading of {{ $value | humanize }} (bytes/s, or seconds per small file) against its usual, with no backup running"}
+  - alert: NfsRetransmitting
+    expr: rate(node_nfs_rpc_retransmissions_total[15m]) > 0.05 and rate(node_nfs_rpc_retransmissions_total[15m]) / clamp_min(rate(node_nfs_rpcs_total[15m]), 1) > 0.01
+    for: 15m
+    labels: {severity: warning}
+    annotations: {summary: "{{ $labels.host }}: over 1% of NFS calls are retransmitted ({{ $value | humanizePercentage }}): the NAS or the network to it is struggling"}
+  - alert: RestEndpointSlow
+    expr: @METRIC_PREFIX@_rest_endpoint_seconds > @SIG_ENDPOINT_SECONDS@
+    for: 15m
+    labels: {severity: warning}
+    annotations: {summary: "the NAS backup endpoint takes {{ $value | humanizeDuration }} to answer (over @SIG_ENDPOINT_SECONDS@ s for 15 min)"}
+  - alert: FabricLinkDown
+    # a port that is up most of the time (over half of the last week), not one plugged in for an afternoon
+    expr: node_infiniband_state_id != 4 and on(instance, device, port) avg_over_time((node_infiniband_state_id == bool 4)[7d:15m]) > 0.5
+    for: 2m
+    labels: {severity: critical}
+    annotations: {summary: "{{ $labels.host }}: RoCE port {{ $labels.device }} is down; it was up most of the week (the GPU pair's link)"}
+  - alert: FabricLinkSlow
+    expr: (node_infiniband_rate_bytes_per_second < on(instance, device, port) max_over_time(node_infiniband_rate_bytes_per_second[7d])) and on(instance, device, port) node_infiniband_state_id == 4
+    for: 5m
+    labels: {severity: warning}
+    annotations: {summary: "{{ $labels.host }}: RoCE port {{ $labels.device }} runs at {{ $value | humanize }}B/s, below the rate it had this week (a renegotiated link: cable or port)"}
+  - alert: FabricLinkErrors
+    expr: |
+      sum by (host, instance, device) (
+        increase(node_infiniband_link_downed_total[1h]) + increase(node_infiniband_link_error_recovery_total[1h])
+        + increase(node_infiniband_symbol_error_total[1h]) + increase(node_infiniband_port_errors_received_total[1h])
+        + increase(node_infiniband_local_link_integrity_errors_total[1h])
+      ) > 0
+    labels: {severity: warning}
+    annotations: {summary: "{{ $labels.host }}: RoCE port {{ $labels.device }} logged {{ $value | humanize }} link errors in the last hour (link drops, recoveries, symbol or receive errors)"}
+  - alert: FabricRetransmits
+    expr: |
+      sum by (host, instance, device) (
+        rate(node_infiniband_roce_adp_retransmits_total[10m]) + rate(node_infiniband_local_ack_timeout_errors_total[10m])
+        + rate(node_infiniband_out_of_sequence_packets_received_total[10m]) + rate(node_infiniband_packet_sequence_errors_total[10m])
+      ) > @SIG_FABRIC_RETRANSMITS_PER_SECOND@
+    for: 10m
+    labels: {severity: warning}
+    annotations: {summary: "{{ $labels.host }}: RoCE port {{ $labels.device }} retransmits or reorders {{ $value | humanize }}/s (over @SIG_FABRIC_RETRANSMITS_PER_SECOND@/s for 10 min): congestion or a bad link slows the pair"}
+  - alert: SshFailedLoginsBurst
+    expr: increase(@METRIC_PREFIX@_ssh_failed_logins_total[15m]) + increase(@METRIC_PREFIX@_ssh_invalid_user_attempts_total[15m]) > @SIG_SSH_FAILED_PER_15M@
+    labels: {severity: warning}
+    annotations: {summary: "{{ $labels.host }}: {{ $value | humanize }} failed or invalid-user ssh logins in 15 min (over @SIG_SSH_FAILED_PER_15M@)"}
+  - alert: SshLoginFromNewAddress
+    expr: time() - @METRIC_PREFIX@_ssh_new_source_login_timestamp_seconds < 3600
+    labels: {severity: warning}
+    annotations: {summary: "{{ $labels.host }}: {{ $labels.user }} logged in over ssh from {{ $labels.addr }}, an address no login came from before"}
+  - alert: StorageFullSoon
+    expr: |
+      predict_linear(node_filesystem_avail_bytes{fstype=~"ext4|xfs|btrfs|zfs|nfs|nfs4|apfs",mountpoint!~"/boot.*|/snap/.*|/System/Volumes/.*|/Volumes/Recovery|/private/var/.*"}[7d], @SIG_FULL_WITHIN_DAYS@ * 86400) < 0
+      and node_filesystem_avail_bytes{fstype=~"ext4|xfs|btrfs|zfs|nfs|nfs4|apfs",mountpoint!~"/boot.*|/snap/.*|/System/Volumes/.*|/Volumes/Recovery|/private/var/.*"} / node_filesystem_size_bytes < 0.5
+    # the week's trend, held for 6 h: a download or benchmark run that is cleaned up again does not set it off
+    for: 6h
+    labels: {severity: warning}
+    annotations: {summary: "{{ $labels.host }}: {{ $labels.mountpoint }} fills within @SIG_FULL_WITHIN_DAYS@ days at its rate of the last week"}
+  - alert: StorageGrewFast
+    expr: (node_filesystem_avail_bytes{fstype=~"ext4|xfs|btrfs|zfs|nfs|nfs4|apfs",mountpoint!~"/boot.*|/snap/.*|/System/Volumes/.*|/Volumes/Recovery|/private/var/.*"} offset 1h - node_filesystem_avail_bytes{fstype=~"ext4|xfs|btrfs|zfs|nfs|nfs4|apfs",mountpoint!~"/boot.*|/snap/.*|/System/Volumes/.*|/Volumes/Recovery|/private/var/.*"}) > @SIG_GROWTH_GB_PER_HOUR@ * 1e9
+    labels: {severity: info}
+    annotations: {summary: "{{ $labels.host }}: {{ $labels.mountpoint }} grew by {{ $value | humanize1024 }}B in the last hour (over @SIG_GROWTH_GB_PER_HOUR@ GB)"}

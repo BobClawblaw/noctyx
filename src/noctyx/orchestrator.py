@@ -3576,6 +3576,22 @@ def cmd_checkpoint_set(a):
     sys.exit(0 if all(ok for ok, _ in res.values()) else 1)
 
 
+def cmd_signals_set(a):
+    """noctyx signals-set --json '{...}': the thresholds of the fleet's early warnings (noctyx.signals), merged
+    over the stored ones; noctyx heal renders them into the alert rules within 5 minutes."""
+    from noctyx import signals
+    c = cfg()
+    new, errs = signals.validate(json.loads(a.json))
+    if errs:
+        sys.exit("invalid: " + "; ".join(errs))
+    blk = {**(c.get("signals") or {}), **new}
+    _write_block("signals", blk, lines=True)
+    pol = signals.policy({"signals": blk})
+    audit("signals-set", **pol, by=os.environ.get("NOCTYX_BY") or os.environ.get("SUDO_USER"))
+    print("signals: " + " · ".join(f"{k} {v:g}" for k, v in pol.items()))
+    print("the alert rules follow at noctyx heal's next run (or now: sudo noctyx heal)")
+
+
 def cmd_config_history(a):
     """noctyx config-history [--diff NAME]: the site config as it was before each rewrite, and what restoring one
     would change."""
@@ -3753,7 +3769,12 @@ def site_values(c):
             "HEAD_HOST": head.get("name") or "", "RESTIC_VERSION": str(c.get("restic_version") or "0.19.1"),
             "REST_PORT": str(s.get("rest_port", 20998)), "TICK_MINUTES": str(tick_minutes(c)), "TLS_CERT": s.get("tls", {}).get("cert", ""),
             "TLS_KEY": s.get("tls", {}).get("key", ""), "NAS_REPO_ROOT": (s.get("nas_ssh") or {}).get("repo_root", ""),
-            "HEAD_EXPORTER_PORT": str(HEAD_EXPORTER_PORT)}
+            "HEAD_EXPORTER_PORT": str(HEAD_EXPORTER_PORT), **_signal_values(c)}
+
+
+def _signal_values(c):
+    from noctyx import signals
+    return signals.placeholders(c)
 
 
 def render_site(c, text):
@@ -3997,6 +4018,8 @@ def main():
     cks.add_argument("--host"); cks.add_argument("--json", action="store_true")
     cps = sub.add_parser("checkpoint-set", help="set the checkpoint policy (JSON) and put the apt hook on the nodes")
     cps.add_argument("--json", required=True); cps.add_argument("--host", help="the apt hook on this host only")
+    sgs = sub.add_parser("signals-set", help="the thresholds of the fleet's early warnings (JSON: noctyx.signals)")
+    sgs.add_argument("--json", required=True)
     chh = sub.add_parser("config-history", help="the site config as it was before each rewrite")
     chh.add_argument("--diff", metavar="NAME", help="what restoring that copy would change")
     chr_ = sub.add_parser("config-restore", help="put a kept copy of the site config back")
@@ -4043,7 +4066,7 @@ def main():
                "recipe-catalog": cmd_recipe_catalog, "recipe-discover": cmd_recipe_discover, "nightly": cmd_nightly, "install-head": cmd_install_head, "console-set": cmd_console_set, "user": cmd_user, "setup": cmd_setup, "assistant-set": cmd_assistant_set, "versions": cmd_versions,
                "upgrade": cmd_upgrade, "versions-skip": cmd_versions_skip, "heal": cmd_heal, "heal-set": cmd_heal_set,
                "changes": cmd_changes, "revert": cmd_revert, "checkpoint": cmd_checkpoint, "checkpoints": cmd_checkpoints,
-               "checkpoint-set": cmd_checkpoint_set, "config-history": cmd_config_history,
+               "checkpoint-set": cmd_checkpoint_set, "config-history": cmd_config_history, "signals-set": cmd_signals_set,
                "config-restore": cmd_config_restore, "self-checkpoint": cmd_self_checkpoint,
                "self-rollback": cmd_self_rollback}[a.cmd]
     rc = 0

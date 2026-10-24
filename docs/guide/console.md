@@ -40,7 +40,7 @@ collapse it with ▾. The layout is saved in the browser. **Reset panel layout**
 |---|---|
 | Cluster | fleet tokens/s, running requests, GPU power, tokens generated in 24 h, network, health. One row per node and model |
 | Fleet | a card per node: CPU, GPU, temperature and power, network, memory, disk, the model it serves, uptime, its next scheduled backup |
-| Machine Report | the selected node, with tabs **overview, llm, network, storage, gpu, health, backups**, and *backup now* / *verify now* (backed-up hosts only) |
+| Machine Report | the selected node, with tabs **overview, llm, network, storage, gpu, health** (with its ssh logins, RoCE ports and NFS mounts: [early warnings](signals.md)), **backups**, and *backup now* / *verify now* (backed-up hosts only) |
 | Storage Tiers | NAS free and used space, size per repository, growth forecast |
 | Alerts | firing alerts with LLM triage (when an assistant is configured); silence one for a while; on a component alert *upgrade* it (or *upgrade all N*, one machine first) or *skip* that release ([upgrade](upgrade.md#acting-on-a-component-alert)); on `NoctyxNeedsAttention`, *repair now*; under an alert self-repair has a playbook for, what it did about it ([self-repair](self-repair.md)) |
 | Morning Brief | the assistant's summary of the fleet |
@@ -261,6 +261,8 @@ The console exports its own state for Prometheus, cached for 30 seconds:
   `noctyx_heal_actions_1h`, `noctyx_heal_auto`; the rules `NoctyxNeedsAttention`, `NoctyxHealFrozen`,
   `NoctyxRepairedItself` and `NoctyxHealNotRunning` read them ([self-repair](self-repair.md))
 - **GPU and temperatures from the node collectors:** `noctyx_gpu_*`, `noctyx_system_temperature_celsius`
+- **the NAS endpoint's answer time:** `noctyx_rest_endpoint_seconds`; the node collectors add the NFS probe
+  (`noctyx_nfs_probe_*`) and sshd logins (`noctyx_ssh_*`): [early warnings](signals.md)
 - **per-source health:** `noctyx_source_ok{source=…}`. A failing source drops its own series and never the whole
   scrape.
 

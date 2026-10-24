@@ -22,6 +22,7 @@ rewrite *one* top-level block in place and leave the rest of the file byte for b
 | `assistant-set` | `assistant` |
 | `heal-set` | `heal` |
 | `checkpoint-set` | `checkpoints` |
+| `signals-set` | `signals` |
 | `console-set` | `console` |
 | `recipe-catalog` | `recipes.catalog` |
 
@@ -54,6 +55,7 @@ the mode and group a rewrite finds.
 | `assistant` | the LLM the console asks | off |
 | `heal` | what self-repair may do on its own | see [heal](#heal) |
 | `checkpoints` | checkpoints before changes and apt | see [checkpoints](#checkpoints) |
+| `signals` | the thresholds of the early warnings | see [signals](#signals) |
 | `recipes` | GPU slots and the recipe catalog | none |
 | `console` | display defaults for every browser | `{}` |
 | `restic_version` | restic release put on recovery sticks, shown in About | `"0.19.1"` |
@@ -302,6 +304,16 @@ Every key is optional.
 
 ```bash
 sudo noctyx checkpoint-set --json '{"max_age_hours": 2, "require": true}'
+```
+
+## signals
+
+The thresholds of the early warnings ([early warnings](signals.md)): `full_within_days` (7), `growth_gb_per_hour`
+(200), `nfs_slow_ratio` (0.25), `nfs_op_seconds` (0.5), `endpoint_seconds` (2), `ssh_failed_per_15m` (20),
+`fabric_retransmits_per_second` (1). Every key is optional; `noctyx heal` renders them into the alert rules.
+
+```bash
+sudo noctyx signals-set --json '{"growth_gb_per_hour": 500}'
 ```
 
 ## recipes

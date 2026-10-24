@@ -124,6 +124,7 @@ Regenerate them with `python3 tools/screenshots.py`.
 | [Hygiene](docs/guide/hygiene.md) | housekeeping reports and fixes |
 | [Accounts](docs/guide/accounts.md) | sign-in, roles, sessions |
 | [Upgrade](docs/guide/upgrade.md) | upgrading, rolling back, moving from an older layout |
+| [Early warnings](docs/guide/signals.md) | NFS and NAS speed, the GPU pairs' RoCE link, ssh logins, storage filling up: alerts before they break |
 | [Checkpoints](docs/guide/checkpoints.md) | restic checkpoints before upgrades and apt, `noctyx revert`, the site config's history, `noctyx self-rollback` |
 | [Self-repair](docs/guide/self-repair.md) | `noctyx heal`: its playbooks, its safety rules, automatic upgrades, and its log |
 | [Troubleshooting](docs/guide/troubleshooting.md) | what an error means and what to do |
