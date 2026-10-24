@@ -11,6 +11,8 @@ def ledger(tmp_path, monkeypatch):
     monkeypatch.setattr(change, "LEDGER", tmp_path / "changes.jsonl")
     monkeypatch.setattr(change, "LOCK", tmp_path / "change.lock")
     monkeypatch.setattr(heal, "HEAL_FILE", tmp_path / "heal.json")
+    monkeypatch.setattr(heal, "LOG_FILE", tmp_path / "heal-log.jsonl")
+    monkeypatch.setattr(heal, "LOCK_FILE", tmp_path / "heal.lock")
     from noctyx import orchestrator as cm
     monkeypatch.setattr(cm, "AUDIT", tmp_path / "audit.jsonl")
     return tmp_path
@@ -184,6 +186,8 @@ def one_finding(monkeypatch):
     monkeypatch.setattr(heal, "check_exporters", lambda *a: [found[1]])
     monkeypatch.setattr(heal, "check_textfiles", lambda *a: [])
     monkeypatch.setattr(heal, "check_rules", lambda *a: [])
+    for name in ("check_disk", "check_units", "check_nas", "check_backups", "check_slots", "check_upgrades"):
+        monkeypatch.setattr(heal, name, lambda *a: [])
     monkeypatch.setattr(cm, "reboot_pending", lambda name=None: {})
     return calls
 

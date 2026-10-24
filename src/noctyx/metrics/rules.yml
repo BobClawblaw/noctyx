@@ -75,7 +75,9 @@ groups:
     labels: {severity: info}
     annotations: {summary: "{{ $labels.host }}: {{ $labels.component }} {{ $labels.latest }} is out (running {{ $labels.installed }}) — {{ $labels.upgrade }}"}
   - alert: NoctyxNeedsAttention
-    expr: @METRIC_PREFIX@_heal_problem == 1
+    # disk, units, backups, slots, upgrades and a freeze have their own alerts (HostRootFilesystemFull, …,
+    # NoctyxHealFrozen), which show what self-repair did about them
+    expr: @METRIC_PREFIX@_heal_problem{check!~"disk|units|backups|slots|upgrades|heal"} == 1
     for: 15m
     labels: {severity: warning}
     annotations: {summary: "{{ $labels.host }}: {{ $labels.what }} — noctyx heal cannot repair this on its own"}
@@ -83,6 +85,10 @@ groups:
     expr: @METRIC_PREFIX@_heal_repairs_24h > 0
     labels: {severity: info}
     annotations: {summary: "{{ $labels.host }}: Noctyx repaired its {{ $labels.check }} {{ $value }} time(s) in the last 24 h (Jobs / Audit says what)"}
+  - alert: NoctyxHealFrozen
+    expr: @METRIC_PREFIX@_heal_frozen == 1
+    labels: {severity: warning}
+    annotations: {summary: "self-repair is frozen: several repairs in a row failed, and none runs until someone unfreezes it (Self-repair page, or noctyx heal --unfreeze)"}
   - alert: NoctyxHealNotRunning
     expr: time() - @METRIC_PREFIX@_heal_last_run_timestamp_seconds > 1800
     for: 10m

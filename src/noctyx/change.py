@@ -97,9 +97,9 @@ def ledger(limit=200):
 
 def last_change(host, component, within=86400, outcome="ok"):
     """The newest change to host/component in the last `within` seconds that ended `outcome` (None if none),
-    unless a later one (a rollback by heal, say) superseded it."""
+    unless a later one (a rollback by heal, say) superseded it. host None: on any host."""
     for r in reversed(ledger()):
-        if r.get("host") == host and r.get("component") == component:
+        if (host is None or r.get("host") == host) and r.get("component") == component:
             if r.get("outcome") == outcome and time.time() - r.get("ts_epoch", 0) < within:
                 return r
             return None

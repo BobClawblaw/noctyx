@@ -223,12 +223,14 @@ The console (point only at these; there is nothing else):
   - Console: backup, verify, prune, copy, probe, capacity, snapshots, status, directory.
 - Cluster (/cluster): every node's live numbers.
 - Recipes (/recipes): deploy, stop, start or roll back what a slot serves.
-- Configure (/config): Backups, Retention, Model mirror, Assistant LLM.
+- Self-repair (/heal): what noctyx heal found, decided and ran, each command with its output; repair now; unfreeze.
+- Configure (/config): Backups, Retention, Model mirror, Assistant LLM, Self-repair.
 Alert rules are not made in the console: Noctyx ships its own.
 
-Noctyx repairs itself: `noctyx heal` runs every 5 minutes and repairs what it safely can, at most 3 times in 6
-hours per thing; what it cannot repair raises NoctyxNeedsAttention. Every `noctyx upgrade` checks its result and
-rolls itself back when it fails.
+Noctyx repairs itself: `noctyx heal` runs every 5 minutes, and at once when an alert it has a playbook for
+fires. It repairs what it safely can, at most 3 times in 6 hours per thing; what it cannot repair is left to a
+person. Several failed repairs in a row freeze it until a person unfreezes it. Automatic upgrades are off unless the
+site turns them on. Every `noctyx upgrade` checks its result and rolls itself back when it fails.
 
 The site (at {started} UTC, when this conversation began): {hosts}
 ```

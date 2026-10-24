@@ -91,9 +91,12 @@ Regenerate them with `python3 tools/screenshots.py`.
   A failed upgrade cancels the queued ones like it.
 - Takes over a distro's Prometheus and Alertmanager with its pinned releases: a 2.x → 3.x move runs a trial on a
   copy of the data beside the old one first, and switches only when the two agree.
-- `noctyx heal`, every 5 minutes: restarts failed services, undoes its own recent upgrade that broke something,
-  puts back drifted config and alert rules, refreshes stale collectors; bounded tries, then an alert for a
-  person. Every repair is in the audit trail, the morning brief and Ask Noctyx.
+- `noctyx heal`, every 5 minutes and at once when an alert fires: restarts failed services, undoes its own recent
+  upgrade that broke something, puts back drifted config and alert rules, refreshes stale collectors, clears a
+  full disk's journal and package cache (never Docker), restarts the units and model servers you allow, and, if
+  you turn it on, upgrades components in a nightly window. A per-hour budget, a freeze after repeated failures,
+  and shadow mode keep it safe. Every decision and command is in its log (the Self-repair page), the audit trail,
+  the morning brief and Ask Noctyx.
 
 **Run it your way**
 - Pure Python standard library on the head, on Linux (systemd) or macOS (launchd); bash and restic on the nodes.
@@ -118,7 +121,7 @@ Regenerate them with `python3 tools/screenshots.py`.
 | [Hygiene](docs/guide/hygiene.md) | housekeeping reports and fixes |
 | [Accounts](docs/guide/accounts.md) | sign-in, roles, sessions |
 | [Upgrade](docs/guide/upgrade.md) | upgrading, rolling back, moving from an older layout |
-| [Self-repair](docs/guide/self-repair.md) | `noctyx heal`: what it checks, repairs and leaves to a person |
+| [Self-repair](docs/guide/self-repair.md) | `noctyx heal`: its playbooks, its safety rules, automatic upgrades, and its log |
 | [Troubleshooting](docs/guide/troubleshooting.md) | what an error means and what to do |
 
 Try it without a cluster: `PYTHONPATH=src python3 -m noctyx.cli demo` serves the console on

@@ -12,8 +12,8 @@ Related pages: [accounts](accounts.md) · [site config](site-config.md) · [inst
 
 ![The header menus](../screenshots/menu.png)
 
-The header has four menus: **Monitor** (Dashboard, Cluster), **Deploy** (Recipes), **Configure** (Backups,
-Retention, Model mirror, Assistant LLM) and **Kiosk**. It also shows the page name, the head and node count, the
+The header has four menus: **Monitor** (Dashboard, Cluster, Self-repair), **Deploy** (Recipes), **Configure**
+(Backups, Retention, Model mirror, Assistant LLM, Self-repair) and **Kiosk**. It also shows the page name, the head and node count, the
 clock, status pills (*backups N/N on schedule*, alerts) and your sign-in state. **Ask** opens a drawer where the
 assistant answers questions about the site from its own data (see [Assistant](assistant.md#ask-noctyx)). The gear
 opens the display settings. Click the logo for About.
@@ -42,7 +42,7 @@ collapse it with ▾. The layout is saved in the browser. **Reset panel layout**
 | Fleet | a card per node: CPU, GPU, temperature and power, network, memory, disk, the model it serves, uptime, its next scheduled backup |
 | Machine Report | the selected node, with tabs **overview, llm, network, storage, gpu, health, backups**, and *backup now* / *verify now* (backed-up hosts only) |
 | Storage Tiers | NAS free and used space, size per repository, growth forecast |
-| Alerts | firing alerts with LLM triage (when an assistant is configured); silence one for a while; on a component alert *upgrade* it (or *upgrade all N*, one machine first) or *skip* that release ([upgrade](upgrade.md#acting-on-a-component-alert)); on `NoctyxNeedsAttention`, *repair now* ([self-repair](self-repair.md)) |
+| Alerts | firing alerts with LLM triage (when an assistant is configured); silence one for a while; on a component alert *upgrade* it (or *upgrade all N*, one machine first) or *skip* that release ([upgrade](upgrade.md#acting-on-a-component-alert)); on `NoctyxNeedsAttention`, *repair now*; under an alert self-repair has a playbook for, what it did about it ([self-repair](self-repair.md)) |
 | Morning Brief | the assistant's summary of the fleet |
 | Hygiene | housekeeping findings per host, the space each fix frees, fixes you can run |
 | Snapshot Browser | browse and search (`*.conf`) any snapshot; operators can download files and directories. Restore to staging or the host |
@@ -100,6 +100,19 @@ Below the cards, **Discover on GitHub** searches for public recipes that fit thi
 `fastest`, `newest` or `stars`, and **add** one to the **Catalog**. The CLI equivalents are `recipe-deploy`,
 `recipe-stop`, `recipe-start`, `recipe-rollback`, `recipe-status`, `recipe-catalog` and `recipe-discover`.
 
+## Self-repair (`/heal`)
+
+What `noctyx heal` found, decided and ran:
+- whether repairs are on and whether they are frozen, with **unfreeze** and **repair now**;
+- the repairs this hour against the budget;
+- the open problems with their state and why;
+- the last day's repairs;
+- each playbook's mode;
+- the log, newest first. Filter it by machine, playbook or text. Open a run for its steps, and a command for its
+  exit code and output.
+
+See [self-repair](self-repair.md#the-log).
+
 ## Configuration (`/config`)
 
 ![Configuration](../screenshots/config.png)
@@ -113,8 +126,9 @@ has an anchor that the Configure menu links to:
 | `/config#sec-retention` | daily, weekly and monthly snapshots kept |
 | `/config#sec-mirror` | HF mirror status, `HF_ENDPOINT`, nightly harvest, hosts to harvest, bandwidth limit, **harvest now** |
 | `/config#sec-assistant` | assistant endpoint, model, timeout, fallback, API key, **test**, **save assistant** |
+| `/config#sec-heal` | self-repair: on or report only, repairs per hour, freeze, disk limit, each playbook's mode, units and model servers it may restart, automatic upgrades (off by default), **save self-repair** |
 
-Saving runs the same validated CLI commands (`policy-set`, `assistant-set`). See
+Saving runs the same validated CLI commands (`policy-set`, `assistant-set`, `heal-set`). See
 [the site config](site-config.md#backup_policy). Saving needs the `admin` role in accounts mode.
 
 ## Kiosk (`/kiosk`)
@@ -207,12 +221,13 @@ when the system asks for reduced motion.
 | URL | What |
 |---|---|
 | `/` | Dashboard (`#host=…&panel=…&tab=…` to focus) |
-| `/cluster`, `/recipes`, `/config`, `/kiosk`, `/about` | the views above |
+| `/cluster`, `/recipes`, `/heal`, `/config`, `/kiosk`, `/about` | the views above |
 | `/#settings` | Dashboard with the settings drawer open |
 | `/login` | sign-in (`?next=/path`) |
 | `/metrics` | Prometheus exposition, no sign-in |
 | `/api/v1/versions` | every critical component per machine: installed, pinned, latest, state, upgrade command |
-| `/api/v1/heal` | the repair loop: open problems, the last day's repairs, the changes ledger |
+| `/api/v1/heal` | the repair loop: open problems, the last day's repairs, the changes ledger, the policy in effect |
+| `/api/v1/heal/log` | its runs, newest first (`n`, `host`, `check`, `all=1`, `q`, `run`) |
 | `/api/v1/…` | the JSON the panels read. `POST /api/v1/action` runs actions ([accounts](accounts.md#api-token-for-scripts)) |
 
 ## Prometheus `/metrics`
@@ -231,7 +246,8 @@ The console exports its own state for Prometheus, cached for 30 seconds:
   `installed`, `pinned`, `latest` and `upgrade` (the command); `noctyx_versions_timestamp_seconds`. The alert rules
   `ComponentBehind`, `ComponentUpgradeAvailable` and `VersionsUnknown` (not checked for 3 days) read them
 - **self-repair:** `noctyx_heal_problem` (1: broken, and `noctyx heal` cannot repair it; labelled `check`, `host`,
-  `what`), `noctyx_heal_repairs_24h`, `noctyx_heal_last_run_timestamp_seconds`; the rules `NoctyxNeedsAttention`,
+  `what`), `noctyx_heal_repairs_24h`, `noctyx_heal_last_run_timestamp_seconds`, `noctyx_heal_frozen`,
+  `noctyx_heal_actions_1h`, `noctyx_heal_auto`; the rules `NoctyxNeedsAttention`, `NoctyxHealFrozen`,
   `NoctyxRepairedItself` and `NoctyxHealNotRunning` read them ([self-repair](self-repair.md))
 - **GPU and temperatures from the node collectors:** `noctyx_gpu_*`, `noctyx_system_temperature_celsius`
 - **per-source health:** `noctyx_source_ok{source=…}`. A failing source drops its own series and never the whole

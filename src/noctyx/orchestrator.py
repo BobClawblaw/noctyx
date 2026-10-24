@@ -99,15 +99,30 @@ def rest_up(c):
         return False
 
 
-def ensure_rest(c):
+def ensure_rest(c, bounded=True):
     """Called by every tick and before backups: bring the NAS endpoint back
-    after a NAS reboot (DSM has no boot hook we can install without the GUI)."""
+    after a NAS reboot (DSM has no boot hook we can install without the GUI).
+    bounded: after 3 failed starts in 6 h the tick stops trying (each tick
+    used to try again, 31 times in a row once); noctyx heal reports it then."""
     if not rest_on_nas(c) or rest_up(c):
         return True
+    f = STATE_DIR / "nas-rest-tries.json"
+    try:
+        fails = [t for t in json.loads(f.read_text()) if time.time() - t < 6 * 3600]
+    except Exception:
+        fails = []
+    if bounded and len(fails) >= 3:
+        print("  NAS rest-server is down: 3 starts failed in 6 h, not trying again (noctyx heal reports it)")
+        return False
     r = nas_ssh(c, f"sh ~/{c['server']['nas_ssh']['dir']}/run.sh start", timeout=60)
     ok = rest_up(c)
     audit("nas-rest-restart", ok=ok, out=(r.stdout or b"").decode()[-200:])
     print(f"  NAS rest-server was down: restart {'OK' if ok else 'FAILED'}")
+    try:
+        STATE_DIR.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps([] if ok else fails + [time.time()]))
+    except OSError:
+        pass
     return ok
 
 
@@ -3387,12 +3402,54 @@ def cmd_upgrade(a):
 
 
 def cmd_heal(a):
-    """noctyx heal [--dry-run]: compare what Noctyx manages with what it expects and repair what it safely can
-    (noctyx.heal). The heal timer runs it every 5 minutes."""
+    """noctyx heal [--dry-run] [--host H] [--trigger WHY] [--unfreeze]: compare what Noctyx manages with what it
+    expects and repair what it safely can (noctyx.heal). The heal timer runs it every 5 minutes; an alert with a
+    playbook runs it for its host. --unfreeze: let repairs run again after too many failed in a row."""
     from noctyx import heal
-    st = heal.run(cfg(), dry=a.dry_run)
+    c = cfg()
+    by = os.environ.get("NOCTYX_BY") or os.environ.get("SUDO_USER")
+    if a.unfreeze:
+        if not heal.unfreeze(by=by):
+            print("repairs were not frozen" if not heal.load().get("frozen") else "a heal run is going: try again")
+            return
+        print("repairs unfrozen: the next run repairs again")
+        return
+    if a.host:
+        host_by_name(c, a.host)
+    st = heal.run(c, dry=a.dry_run, host=a.host, trigger=a.trigger or "cli")
     if any(p.get("needs_person") for p in st.get("problems") or []):
         sys.exit(1)
+
+
+def cmd_heal_set(a):
+    """noctyx heal-set --json '{...}': the site's self-repair policy (noctyx.heal.DEFAULTS; given keys are merged
+    over the stored ones, upgrades key by key)."""
+    from noctyx import heal
+    c = cfg()
+    new, errs = heal.validate_policy(json.loads(a.json))
+    slots = set(recipes_cfg(c)["slots"])
+    errs += [f"restart_slots: {n} is not a slot ({', '.join(sorted(slots)) or 'none'})"
+             for n in (new or {}).get("restart_slots") or [] if n not in slots]
+    if errs:
+        sys.exit("invalid: " + "; ".join(errs))
+    old = c.get("heal") or {}
+    blk = {**old, **{k: v for k, v in new.items() if k != "upgrades"}}
+    if "upgrades" in new:
+        blk["upgrades"] = {**(old.get("upgrades") or {}), **new["upgrades"]}
+    if "playbooks" in new:
+        blk["playbooks"] = new["playbooks"]
+    for k in ("playbooks", "restart_units", "restart_slots"):
+        if k in blk and not blk[k]:
+            blk.pop(k)
+    _write_block("heal", blk, lines=True)
+    pol = heal.policy({"heal": blk})
+    audit("heal-set", auto=pol["auto"], budget_per_hour=pol["budget_per_hour"], freeze_after=pol["freeze_after"],
+          disk_pct=pol["disk_pct"], playbooks={k: v for k, v in pol["playbooks"].items() if v != "on"},
+          restart_units=pol["restart_units"], restart_slots=pol["restart_slots"], upgrades=pol["upgrades"],
+          by=os.environ.get("NOCTYX_BY") or os.environ.get("SUDO_USER"))
+    print(f"self-repair: {'on' if pol['auto'] else 'report only'} · {pol['budget_per_hour']}/h · freeze after "
+          f"{pol['freeze_after']} · disk {pol['disk_pct']}% · automatic upgrades "
+          + (f"on, {pol['upgrades']['window']}" if pol["upgrades"]["auto"] else "off"))
 
 
 def cmd_versions_skip(a):
@@ -3727,6 +3784,12 @@ def main():
                      help="Prometheus 2.x -> 3.x: how long the trial runs beside the old one (default 30)")
     hl = sub.add_parser("heal", help="repair what Noctyx manages when it is not as expected (the heal timer); --dry-run reports only")
     hl.add_argument("--dry-run", action="store_true")
+    hl.add_argument("--host", help="check and repair only this machine (an alert's)")
+    hl.add_argument("--trigger", help="why it runs, for the log (timer, alert:NAME, console)")
+    hl.add_argument("--unfreeze", action="store_true", help="let repairs run again after too many failed in a row")
+    hs = sub.add_parser("heal-set", help="set the self-repair policy (JSON: auto, budget_per_hour, freeze_after, disk_pct, "
+                                         "playbooks, restart_units, restart_slots, upgrades)")
+    hs.add_argument("--json", required=True)
     vsk = sub.add_parser("versions-skip", help="stop alerting on a newer release you choose not to take (--undo: alert again)")
     vsk.add_argument("--host", required=True, help="a host, or all"); vsk.add_argument("--component", required=True)
     vsk.add_argument("--release"); vsk.add_argument("--undo", action="store_true")
@@ -3758,7 +3821,7 @@ def main():
                "recipe-deploy": cmd_recipe_deploy, "recipe-stop": cmd_recipe_stop, "recipe-start": cmd_recipe_start,
                "recipe-rollback": cmd_recipe_rollback, "recipe-status": cmd_recipe_status,
                "recipe-catalog": cmd_recipe_catalog, "recipe-discover": cmd_recipe_discover, "nightly": cmd_nightly, "install-head": cmd_install_head, "console-set": cmd_console_set, "user": cmd_user, "setup": cmd_setup, "assistant-set": cmd_assistant_set, "versions": cmd_versions,
-               "upgrade": cmd_upgrade, "versions-skip": cmd_versions_skip, "heal": cmd_heal}[a.cmd]
+               "upgrade": cmd_upgrade, "versions-skip": cmd_versions_skip, "heal": cmd_heal, "heal-set": cmd_heal_set}[a.cmd]
     rc = 0
     try:
         handler(a)

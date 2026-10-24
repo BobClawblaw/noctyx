@@ -131,8 +131,8 @@ def cli_check():
             argv.pop(0)
         if not argv or argv.pop(0) != "noctyx":
             return True                         # not a noctyx command: not this check's business
-        if not argv or argv[0] in plain:
-            return True
+        if not argv or argv[0] in plain or (len(argv) == 1 and re.fullmatch(r"v?\d+(\.\d+)+", argv[0])):
+            return True                         # "noctyx 0.1.0": a version, not a command
         if len(argv) == 1 and argv[0] in main._subparsers._group_actions[0].choices:
             return True                         # the command named, not run (`noctyx upgrade` does that)
         p, argv = (init, argv[1:]) if argv[0] == "init" else (main, argv)

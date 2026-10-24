@@ -20,6 +20,7 @@ rewrite *one* top-level block in place and leave the rest of the file byte for b
 | `schedule-set` | `schedule` |
 | `policy-set` | `backup_policy`, `retention`, `hf_mirror` |
 | `assistant-set` | `assistant` |
+| `heal-set` | `heal` |
 | `console-set` | `console` |
 | `recipe-catalog` | `recipes.catalog` |
 
@@ -49,6 +50,7 @@ the mode and group a rewrite finds.
 | `common_exclusions_extra` | extra lines appended to the baseline exclusion list (e.g. this site's separate mount points) | `[]` |
 | `hf_mirror` | Hugging Face mirror | see [hf_mirror](#hf_mirror) |
 | `assistant` | the LLM the console asks | off |
+| `heal` | what self-repair may do on its own | see [heal](#heal) |
 | `recipes` | GPU slots and the recipe catalog | none |
 | `console` | display defaults for every browser | `{}` |
 | `restic_version` | restic release put on recovery sticks, shown in About | `"0.19.1"` |
@@ -248,6 +250,37 @@ goes to `<llm_keys>/assistant` (0600) with `"key_host": "assistant"`. See [the a
 
 ```bash
 sudo noctyx assistant-set --json '{"enabled": true, "url": "http://192.0.2.21:8000/v1", "timeout_seconds": 60}'
+```
+
+## heal
+
+What `noctyx heal` may repair on its own ([self-repair](self-repair.md)). Every key is optional.
+
+| Key | Meaning | Default |
+|---|---|---|
+| `auto` | repair; `false`: check and report only | `true` |
+| `budget_per_hour` | repairs across the fleet in any hour (1..100) | `10` |
+| `freeze_after` | failed repairs in a row that stop every repair until `noctyx heal --unfreeze` (1..20) | `3` |
+| `disk_pct` | a root filesystem fuller than this gets the disk playbook (50..99) | `92` |
+| `playbooks` | `{playbook: "on" \| "shadow" \| "off"}` for `service`, `exporter`, `dropin`, `textfile`, `rules`, `disk`, `units`, `nas`, `backups`, `slots`, `upgrades` | all `on` |
+| `restart_units` | failed units it may restart: names or shell patterns (4+ letters), never the units it never restarts | `[]` |
+| `restart_slots` | recipe slots it may start again after 15 minutes down | `[]` |
+| `upgrades.auto` | automatic upgrades to Noctyx's pin | `false` |
+| `upgrades.window` | when, `HH:MM-HH:MM` in the head's local time (may wrap midnight) | `"03:00-05:00"` |
+| `upgrades.components` | some of `node_exporter`, `prometheus`, `alertmanager` | all three |
+| `upgrades.major` | also a new major version | `false` |
+| `upgrades.soak_minutes` | the wait after one machine's upgrade before the next (0..10080) | `60` |
+
+```json
+"heal": {
+  "restart_units": ["nginx.service"],
+  "restart_slots": ["rtx5090"],
+  "upgrades": { "auto": true, "window": "03:00-05:00", "components": ["node_exporter"] }
+},
+```
+
+```bash
+sudo noctyx heal-set --json '{"playbooks": {"disk": "shadow"}, "budget_per_hour": 5}'
 ```
 
 ## recipes

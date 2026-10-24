@@ -234,6 +234,12 @@ The nightly run refreshes the inventory (`<state>/versions.json`, upstream relea
 `<state>/upstream-releases.json`). The console shows it in each machine's Components table and exports it on
 `/metrics`; the alert rules `ComponentBehind`, `ComponentUpgradeAvailable` and `VersionsUnknown` notify on it.
 
+**Automatic upgrades.** Self-repair can run these upgrades on its own, inside a nightly window, one machine at a
+time. This is **off by default**: turn it on in Configure › Self-repair or with
+`noctyx heal-set --json '{"upgrades": {"auto": true}}'`. See
+[self-repair](self-repair.md#automatic-upgrades) for the window, the wait between machines, major versions and
+what happens after a failure.
+
 **Moving a pin.** The pinned versions and their SHA-256 sums live in
 [`src/noctyx/components.py`](../../src/noctyx/components.py). Change a version and its sums (from the release's own
 sums file) together, in one commit. Setup refuses a download whose sum does not match. Then run the upgrade command

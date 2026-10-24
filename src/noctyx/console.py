@@ -38,7 +38,8 @@ already publishes; POST whitelisted actions, tokened unless NOCTYX_CONSOLE_AUTH=
   GET  /api/v1/metrics/<h>?tab=overview|network|storage|gpu|health   one report tab
   GET  /api/v1/job/<id>       one UI job
   GET  /api/v1/versions       every critical component per machine: installed, pinned, latest, upgrade command
-  GET  /api/v1/heal           the repair loop: open problems, the last day's repairs, the changes ledger
+  GET  /api/v1/heal           the repair loop: open problems, the last day's repairs, the changes ledger, the policy
+  GET  /api/v1/heal/log?n=&host=&check=&all=&q=&run=   its runs, newest first: each check, decision and command
   POST /api/v1/action         whitelisted orchestrator argv
   POST /api/v1/ask            {text, sid?, tunit?, tz?} -> Ask Noctyx: a question to the assistant, which looks things up (copilot.py)
   GET  /api/v1/ask/<sid>?since=<rev>      that conversation since a revision
@@ -149,7 +150,9 @@ ACTIONS = {
     "upgradeComponent": lambda p: [ORCH, "upgrade", "--host", p["host"], "--component", p["component"]],
     "upgradeEverywhere": lambda p: [ORCH, "upgrade", "--host", "all", "--component", p["component"]],
     # the repair loop now, not at its next 5-minute turn (noctyx heal)
-    "healNow": lambda: [ORCH, "heal"],
+    "healNow": lambda: [ORCH, "heal", "--trigger", "console"],
+    "healUnfreeze": lambda: [ORCH, "heal", "--unfreeze"],
+    "setHeal": lambda p: [ORCH, "heal-set", "--json", json.dumps(p["heal"])],
     "skipRelease": lambda p: [ORCH, "versions-skip", "--host", p["host"], "--component", p["component"]]
                              + (["--undo"] if p.get("undo") else ["--release", p["release"]]),
     "dumpsNow":   lambda p: [ORCH, "dumps"] + (["--host", p["host"]] if p.get("host") else []),
@@ -164,13 +167,13 @@ VALID_PROFILES = set(CFG.get("profiles", {}).keys())
 # host-REQUIRED actions: their builders index p["host"] directly; missing would KeyError
 HOST_REQUIRED = {"backupHost", "verifyHost", "reboot", "rebootFinish"}
 RECIPE_ACTIONS = {"recipeDeploy", "recipeStop", "recipeStart", "recipeRollback", "recipeCatalog"}
-PARAM_ACTIONS = HOST_REQUIRED | RECIPE_ACTIONS | {"upgradeComponent", "upgradeEverywhere", "skipRelease", "setAssistant", "setConsoleDefaults", "setSchedule", "restore", "hygieneFix", "setPolicy", "dumpsNow"}
+PARAM_ACTIONS = HOST_REQUIRED | RECIPE_ACTIONS | {"upgradeComponent", "upgradeEverywhere", "skipRelease", "setAssistant", "setHeal", "setConsoleDefaults", "setSchedule", "restore", "hygieneFix", "setPolicy", "dumpsNow"}
 # Only these wait for the one-long-job slot; everything else (status, schedule
 # edits, probes) runs at once instead of queueing silently behind a 3-hour seed.
 LONG_ACTIONS = {"backup", "verify", "copy", "prune", "backupHost", "verifyHost", "restore", "hygieneFix", "upgradeComponent",
                 "upgradeEverywhere"}
 # how long a job may run before the console stops it (SIGTERM first: a change rolls itself back); default 3 days
-ACTION_TIMEOUT = {"upgradeComponent": 90 * 60, "upgradeEverywhere": 4 * 3600, "healNow": 30 * 60}
+ACTION_TIMEOUT = {"upgradeComponent": 90 * 60, "upgradeEverywhere": 4 * 3600, "healNow": 90 * 60}
 # a failed one of these cancels the queued ones for the same component: they would fail the same way
 CANCEL_ON_FAIL = {"upgradeComponent", "upgradeEverywhere"}
 HYGIENE_FILE = UI_STATE / "hygiene.json"
@@ -192,7 +195,24 @@ def policy_summary():
             "baseline": {"common": CM.common_exclusions(c), "profiles": extra},
             "not_covered": [h["name"] for h in c["hosts"] if h.get("enabled", True) is not False
                             and h.get("address") and h["name"] not in names],
-            "hf": hf_summary(c), "assistant": assistant_summary()}
+            "hf": hf_summary(c), "assistant": assistant_summary(), "heal": heal_config(c)}
+
+
+def heal_errors(blk):
+    from noctyx import heal
+    errs = heal.validate_policy(blk)[1]
+    slots = set(CM.recipes_cfg(CM.cfg())["slots"])
+    return errs + [f"restart_slots: {n} is not a slot" for n in ((blk or {}).get("restart_slots") or [])
+                   if isinstance(n, str) and n not in slots]
+
+
+def heal_config(c):
+    """Configure › Self-repair: the stored block, what is in effect, and what each playbook does."""
+    from noctyx import heal
+    return {"stored": c.get("heal") or {}, "policy": heal.policy(c),
+            "playbooks": {k: {"default": m, "does": d} for k, (m, d) in heal.PLAYBOOKS.items()},
+            "never_units": list(heal.NEVER_UNITS), "upgradable": list(heal.UPGRADABLE),
+            "slots": sorted(CM.recipes_cfg(c)["slots"])}
 
 
 def hf_summary(c):
@@ -251,7 +271,7 @@ def console_mode():
 
 
 # what each action needs: everything else that changes something needs "operate"
-ADMIN_ACTIONS = {"setPolicy", "setSchedule", "setAssistant", "setConsoleDefaults", "recipeCatalog", "upgradeComponent",
+ADMIN_ACTIONS = {"setPolicy", "setSchedule", "setAssistant", "setHeal", "setConsoleDefaults", "recipeCatalog", "upgradeComponent",
                  "upgradeEverywhere",
                  "reboot", "rebootFinish", "nasRest", "policyApply"}
 NEED_RANK = {"view": 0, "operate": 1, "admin": 2}
@@ -353,6 +373,8 @@ def valid_params(name: str, p: dict) -> bool:
         a = p.get("assistant")
         if not isinstance(a, dict) or "key_host" in a or CM.validate_assistant(a)[1]:
             return False
+    if name == "setHeal":
+        return not heal_errors(p.get("heal"))
     if name == "setPolicy":
         pol, errs = CM.validate_policy(p.get("policy"))
         r = p.get("retention")
@@ -1794,6 +1816,13 @@ def metrics_text():
             return
         out.append("# HELP noctyx_heal_problem 1: something Noctyx manages is broken and noctyx heal cannot repair it.")
         out.append(f"noctyx_heal_last_run_timestamp_seconds {st['ts']}")
+        out.append("# HELP noctyx_heal_frozen 1: too many repairs failed in a row; none run until noctyx heal --unfreeze.")
+        out.append(f"noctyx_heal_frozen {int(bool(st.get('frozen')))}")
+        out.append(f"noctyx_heal_actions_1h {st.get('actions_1h', 0)}")
+        try:
+            out.append(f"noctyx_heal_auto {int(heal.policy(CM.cfg())['auto'])}")
+        except Exception:
+            pass
         for pr in st["problems"]:
             if pr.get("needs_person"):
                 out.append(f"noctyx_heal_problem{_lbl(check=pr['check'], host=pr['host'], what=pr['what'])} 1")
@@ -1841,7 +1870,33 @@ def record_alerts(payload):
         for r in recs:
             if r.get("status") == "firing" and assistant_cfg():
                 threading.Thread(target=triage_alert, args=(r,), daemon=True).start()
+            wake_heal(r)
     return len(recs)
+
+
+_HEAL_WOKEN = {}               # host -> when an alert last ran noctyx heal for it
+HEAL_WAKE_EVERY = 120
+
+
+def wake_heal(rec, now=None, start=None):
+    """A firing alert that has a playbook (heal.ALERT_CHECKS) runs `noctyx heal --host H` now instead of at the
+    timer's next turn; at most once per host every 2 minutes. -> True when it started one."""
+    from noctyx import heal
+    chk, host = heal.ALERT_CHECKS.get(rec.get("name")), rec.get("host")
+    if rec.get("status") != "firing" or not chk or host not in {h["name"] for h in CM.hosts(CM.cfg())}:
+        return False
+    pol = heal.policy(CM.cfg())
+    if not pol["auto"] or pol["playbooks"].get(chk) == "off":
+        return False
+    now = now or time.time()
+    if now - _HEAL_WOKEN.get(host, 0) < HEAL_WAKE_EVERY:
+        return False
+    _HEAL_WOKEN[host] = now
+    argv = [sys.executable, ORCH, "heal", "--host", host, "--trigger", f"alert:{rec['name']}"]
+    (start or (lambda a: threading.Thread(target=lambda: subprocess.run(
+        a, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=90 * 60), daemon=True).start()))(argv)
+    audit_write({"ts": _utcnow(), "event": "heal-wake", "alert": rec["name"], "host": host, "check": chk})
+    return True
 
 
 def alerts_view():
@@ -1884,6 +1939,15 @@ def alerts_view():
                                         if r["component"] == row["component"] and (r.get("fix") or {}).get("change"))
         if a["name"] == "NoctyxNeedsAttention":
             a["heal"] = True
+    try:
+        from noctyx import heal
+        hp = {(p["check"], p["host"]): p for p in heal.summary()["problems"]}
+        for a in active:
+            p = hp.get((heal.ALERT_CHECKS.get(a["name"]), a.get("host")))
+            if p:
+                a["selfrepair"] = {k: p.get(k) for k in ("state", "why", "detail", "how", "check")}
+    except Exception:
+        pass
     sev = {"critical": 0, "warning": 1}
     active.sort(key=lambda a: (sev.get(a["severity"], 2), a["name"] or ""))
     sil, serr = silences_view()
@@ -2682,6 +2746,33 @@ a.tag{text-decoration:none}
 tr.go:hover td{background:color-mix(in srgb,var(--accent) 9%,transparent)}
 tr.hl td{background:color-mix(in srgb,var(--warn) 13%,transparent)}
 .golnk{color:var(--info);cursor:pointer;font:11px var(--mono);white-space:nowrap}
+/* /heal: the self-repair page */
+.sr{display:flex;flex-direction:column;gap:12px}
+.srbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;font:12px var(--mono)}
+.srbar .tag{margin-left:0}
+.sr h4{margin:4px 0 2px;font:700 12px var(--mono);color:var(--fg-dim);text-transform:uppercase;letter-spacing:.06em}
+.srf{display:flex;flex-wrap:wrap;gap:8px;align-items:center;font-size:12px}
+.srf input[type=search]{min-width:180px}
+.srrun{border:1px solid var(--line-soft);border-radius:var(--radius);background:var(--bg-1)}
+.srrun>summary{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:center;padding:6px 10px;cursor:pointer;font:12px var(--mono)}
+.srrun>summary .tag{margin-left:0}
+.srsteps{width:100%;font:11.5px/1.45 var(--mono);border-top:1px solid var(--line-soft)}
+.srsteps td{padding:3px 8px;vertical-align:top;border-bottom:1px solid var(--line-soft);white-space:normal;overflow-wrap:anywhere}
+.srsteps td:first-child{color:var(--fg-dim);white-space:nowrap;width:1%}
+.srsteps .k{white-space:nowrap;width:1%}
+.srsteps pre{margin:4px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;max-height:260px;overflow:auto;background:var(--bg-0);padding:6px;border-radius:4px}
+.srsteps details>summary{cursor:pointer}
+.srsteps code{white-space:pre-wrap;overflow-wrap:anywhere}
+.srpb{display:flex;flex-wrap:wrap;gap:6px}
+.srpb span{font:11px var(--mono);border:1px solid var(--line-soft);border-radius:999px;padding:2px 8px}
+.srnote{font:11.5px/1.5 var(--sans);margin-top:4px;border-left:2px solid var(--line);padding-left:8px;white-space:normal}
+.srt td{white-space:normal;overflow-wrap:anywhere;vertical-align:top}.srt td.nowrap{white-space:nowrap;overflow-wrap:normal}
+.srscroll{overflow-x:auto;max-width:100%}
+@media (max-width:640px){.srsteps td:first-child{display:none}
+ .srsteps,.srsteps tbody,.srsteps tr{display:block}.srsteps tr{border-bottom:1px solid var(--line-soft);padding:3px 0}
+ .srsteps td,.srsteps td.k{display:inline-block;width:auto;border:0;padding:1px 6px}.srsteps td:last-child{display:block}
+ .srt,.srt tbody,.srt tr,.srt td{display:block;width:auto}.srt tr:first-child:has(th){display:none}
+ .srt tr{border-bottom:1px solid var(--line-soft);padding:4px 0}.srt td{border:0;padding:1px 0}}
 .golnk:hover{text-decoration:underline}
 .nowrap{white-space:nowrap}
 /* per-alert dismissal controls: small enough to sit in the table, explicit about the window */
@@ -3069,11 +3160,11 @@ html[data-style=phosphor] button.act:hover{box-shadow:0 0 calc(14px * var(--gl))
   <a class=brand href="/about" title="About Noctyx"><span class=mark></span><span class=wordmark>Noct<b>yx</b></span></a>
   <nav class=pages id=nav aria-label="Pages">
    <div class=menu><button type=button class=menu-title aria-haspopup=true aria-expanded=false>Monitor</button>
-    <div class="menu-pop hide" role=menu><a role=menuitem href="/" data-v=main>Dashboard<kbd>1</kbd></a><a role=menuitem href="/cluster" data-v=cluster>Cluster<kbd>2</kbd></a></div></div>
+    <div class="menu-pop hide" role=menu><a role=menuitem href="/" data-v=main>Dashboard<kbd>1</kbd></a><a role=menuitem href="/cluster" data-v=cluster>Cluster<kbd>2</kbd></a><a role=menuitem href="/heal" data-v=heal>Self-repair</a></div></div>
    <div class=menu><button type=button class=menu-title aria-haspopup=true aria-expanded=false>Deploy</button>
     <div class="menu-pop hide" role=menu><a role=menuitem href="/recipes" data-v=recipes>Recipes<kbd>3</kbd></a></div></div>
    <div class=menu><button type=button class=menu-title aria-haspopup=true aria-expanded=false>Configure</button>
-    <div class="menu-pop hide" role=menu><a role=menuitem href="/config#sec-backups" data-v=config>Backups<kbd>4</kbd></a><a role=menuitem href="/config#sec-retention">Retention</a><a role=menuitem href="/config#sec-mirror">Model mirror</a><a role=menuitem href="/config#sec-assistant">Assistant LLM</a></div></div>
+    <div class="menu-pop hide" role=menu><a role=menuitem href="/config#sec-backups" data-v=config>Backups<kbd>4</kbd></a><a role=menuitem href="/config#sec-retention">Retention</a><a role=menuitem href="/config#sec-mirror">Model mirror</a><a role=menuitem href="/config#sec-assistant">Assistant LLM</a><a role=menuitem href="/config#sec-heal">Self-repair</a></div></div>
    <a class="menu-title direct" href="/kiosk" title="The wall display">Kiosk<kbd>5</kbd></a>
   </nav>
   <span class=pagename id=hpage></span>
@@ -3322,6 +3413,10 @@ if(VIEW=='recipes'){
   {id:'recipes',title:'Recipes',sp:12,h:0,int:20,render:rRecipes,api:()=>fetchJSON('/api/v1/recipes')});
  document.getElementById('desk').classList.add('stack');
 }
+if(VIEW=='heal'){
+ PANELS.splice(0,PANELS.length,{id:'heal',title:'Self-repair',sp:12,h:0,int:20,render:rHeal,api:srApi});
+ document.getElementById('desk').classList.add('stack');
+}
 if(VIEW=='about'){
  PANELS.splice(0,PANELS.length,{id:'about',title:'About',sp:12,h:0,int:3600,render:rAbout,api:()=>fetchJSON('/api/v1/about')});
  document.getElementById('desk').classList.add('stack');
@@ -3350,7 +3445,7 @@ if(VIEW=='cluster'){
  document.getElementById('desk').classList.add('stack');
 }
 /* ── navigation: menus in the header, the page name, 1–4 to jump ── */
-const PAGES={main:['/','Dashboard'],cluster:['/cluster','Cluster'],recipes:['/recipes','Recipes'],config:['/config','Configuration'],about:['/about','About'],kiosk:['/kiosk','Kiosk']};
+const PAGES={main:['/','Dashboard'],cluster:['/cluster','Cluster'],recipes:['/recipes','Recipes'],config:['/config','Configuration'],heal:['/heal','Self-repair'],about:['/about','About'],kiosk:['/kiosk','Kiosk']};
 (function nav(){
  const name=(PAGES[VIEW]||PAGES.main)[1];const pn=$('hpage');if(pn)pn.textContent=name;document.title=`Noctyx · ${name}`;
  document.querySelectorAll('#nav .menu').forEach(m=>{
@@ -4629,6 +4724,54 @@ function cfgDirty(){CFGDIRTY=true;const b=$('cf-state');if(b){b.textContent='uns
 function triSel(id,val,eff){const v=val===true?'on':val===false?'off':'';
  return `<div class=seg id="${id}" data-v="${v}">${[['',`default (${eff?'on':'off'})`],['on','on'],['off','off']].map(([k,l])=>`<button type=button class="${k==v?'on':''}" onclick="segPick(this,'${k}')">${l}</button>`).join('')}</div>`}
 function segPick(btn,v){const s=btn.parentElement;s.dataset.v=v;s.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b===btn));cfgDirty()}
+/* ── /heal: the self-repair loop (heal.py). What it found, each decision and why, every command it ran
+   with its output: heal-log.jsonl, newest run first. ── */
+const SRF={host:'',check:'',all:false,q:'',open:new Set()};
+const SRST={repaired:'ok',failed:'bad',partial:'warn',needs_person:'bad',waiting:'warn',shadow:'warn',would:'info'};
+const SRWORD={repaired:'repaired',failed:'failed',partial:'did what it could',needs_person:'needs a person',waiting:'waiting',shadow:'shadow',would:'would repair'};
+function srApi(){const q=new URLSearchParams({n:'60'});if(SRF.host)q.set('host',SRF.host);if(SRF.check)q.set('check',SRF.check);
+ if(SRF.all)q.set('all','1');if(SRF.q)q.set('q',SRF.q);
+ return Promise.all([fetchJSON('/api/v1/heal'),fetchJSON('/api/v1/heal/log?'+q)]).then(([s,l])=>{s._log=l.runs||[];return s})}
+async function srReload(){const p=PANELS.find(x=>x.id=='heal');if(!p)return;const d=await p.api().catch(e=>({error:String(e)}));p._data=d;repaint('heal',d)}
+function srSet(k,v){SRF[k]=v;srReload()}
+function srToggle(id,open){if(open)SRF.open.add(id);else SRF.open.delete(id)}
+async function srUnfreeze(btn){if(!confirm('Let self-repair act again? It froze because several repairs in a row failed.'))return;
+ btn.disabled=true;const r=await act('healUnfreeze');if(r&&r.error){btn.disabled=false;alert(r.error)}setTimeout(srReload,2500)}
+function srStep(r,s,i){const id=r.run+':'+i,k=s.kind;
+ const kc={found:'warn',repair:'info',result:SRST[s.outcome]||'',decide:SRST[s.state]||'',error:'bad',freeze:'bad',cmd:'',change:'',note:'',skip:'warn'}[k]||'';
+ const who=[s.host,s.check].filter(Boolean).map(esc).join(' · ');
+ const body=k=='cmd'?`<details${SRF.open.has(id)?' open':''} ontoggle="srToggle('${esc(id)}',this.open)"><summary><code>${esc(s.text.length>160?s.text.slice(0,160)+'…':s.text)}</code> <span class="${s.rc===0?'ok':'bad'}">rc ${esc(s.rc)}</span></summary>${s.text.length>160?`<pre>${esc(s.text)}</pre>`:''}<pre>${esc(s.out||'(no output)')}</pre></details>`
+  :esc(s.text)+(s.seconds!=null?` <span class=mut>(${esc(s.seconds)} s)</span>`:'');
+ return `<tr><td>+${esc(Number(s.t).toFixed(1))}s</td><td class=k><span class="tag ${kc}">${esc(k=='result'?SRWORD[s.outcome]||k:k=='decide'?SRWORD[s.state]||k:k)}</span></td><td class=k>${who}</td><td>${body}</td></tr>`}
+function srRun(r){const S=r.summary||{},id=r.run;
+ const chips=S.skipped?`<span class="tag warn">${esc(S.skipped)}</span>`:['repaired','failed','partial','needs_person','waiting','shadow'].filter(k=>S[k]).map(k=>`<span class="tag ${SRST[k]}">${S[k]} ${esc(SRWORD[k])}</span>`).join('')||(S.found?`<span class="tag info">${S.found} found</span>`:'<span class="tag ok">all as expected</span>');
+ return `<details class=srrun${SRF.open.has(id)?' open':''} ontoggle="srToggle('${esc(id)}',this.open)"><summary><b>${esc(fmtTs(r.ts_epoch))}</b><span class=mut>${esc(agoS(r.ts_epoch))}</span><span>${esc(r.trigger||'')}${r.host?' · '+esc(r.host):''}${r.dry?' · dry run':''}</span><span class=mut>${esc(r.seconds??'?')} s</span>${chips}</summary>
+  <table class=srsteps>${(r.steps||[]).map((s,i)=>srStep(r,s,i)).join('')||'<tr><td></td><td colspan=3 class=mut>no steps</td></tr>'}
+  <tr><td></td><td colspan=3 class=mut>checks: ${Object.entries(r.checks||{}).map(([k,v])=>esc(k)+' '+esc(v)+'s').join(' · ')||'—'}</td></tr></table></details>`}
+function rHeal(d){
+ if(!d)return '<div class=empty>loading…</div>';
+ if(d.error)return `<div class="empty bad">${esc(d.error)}</div>`;
+ const P=d.policy||{},U=P.upgrades||{},fr=d.frozen,pb=P.playbooks||{};
+ const bar=`<div class=srbar><span class="tag ${P.auto?'ok':'warn'}">${P.auto?'repairs on':'report only'}</span>
+  ${fr?`<span class="tag bad">frozen</span><span class=bad>${esc(fr.why)}</span><button class=act onclick="srUnfreeze(this)">unfreeze</button>`:''}
+  <span>${esc(d.actions_1h||0)} of ${esc(P.budget_per_hour)} repairs this hour</span>
+  <span>automatic upgrades ${U.auto?'<b>on</b>, '+esc(U.window):'off'}</span>
+  <span class=mut>last run ${esc(agoS(d.ts))}${d.skipped?' · '+esc(d.skipped):''}</span><span class=hspacer></span>
+  <button class=act onclick="healNow(this);setTimeout(srReload,4000)" title="run noctyx heal now">repair now</button><a class=lnk href="/config#sec-heal">policy →</a></div>`;
+ const probs=(d.problems||[]).map(p=>`<tr><td class=nowrap><b>${esc(p.host)}</b></td><td>${esc(p.what)}${p.detail?`<div class=mut>${esc(p.detail)}</div>`:''}</td><td><span class="tag ${SRST[p.state]||(p.needs_person?'bad':'warn')}">${esc(SRWORD[p.state]||(p.needs_person?'needs a person':'next try'))}</span></td><td>${esc(p.why||p.how||'')}</td><td class=mut>${esc(agoS(p.since))}</td></tr>`).join('');
+ const reps=(d.repairs||[]).slice(-12).reverse().map(r=>`<tr><td class="mut nowrap">${esc(agoS(r.ts_epoch||r.ts))}</td><td class=nowrap><b>${esc(r.host)}</b></td><td>${esc(r.how)}</td><td class="${r.ok?'ok':r.ok===null?'warn':'bad'}">${r.ok?'✓':r.ok===null?'·':'✗'} ${esc(r.detail||'')}</td></tr>`).join('');
+ const pbs=Object.entries(d.playbooks||{}).map(([k,t])=>`<span title="${esc(t)}" class="${pb[k]=='off'?'mut':pb[k]=='shadow'?'warn':''}">${esc(k)}: ${esc(pb[k]||'on')}</span>`).join('');
+ const opt=(v,l,cur)=>`<option value="${esc(v)}"${v==cur?' selected':''}>${esc(l)}</option>`;
+ const filt=`<div class=srf><select onchange="srSet('host',this.value)">${opt('','every machine',SRF.host)}${(d.hosts||[]).map(h=>opt(h,h,SRF.host)).join('')}</select>
+  <select onchange="srSet('check',this.value)">${opt('','every playbook',SRF.check)}${Object.keys(d.playbooks||{}).map(k=>opt(k,k,SRF.check)).join('')}</select>
+  <label><input type=checkbox${SRF.all?' checked':''} onchange="srSet('all',this.checked)"> also the runs that found nothing</label>
+  <input type=search placeholder="search the log" value="${esc(SRF.q)}" onchange="srSet('q',this.value.trim())"></div>`;
+ const log=(d._log||[]).map(srRun).join('')||`<div class=mut>${SRF.all||SRF.host||SRF.check||SRF.q?'no run matches':'no run found anything yet (tick “also the runs that found nothing” to see every run)'}</div>`;
+ return `<div class=sr>${bar}
+  <div><h4>Open problems</h4>${probs?`<table class=srt><tr><th>machine</th><th>what</th><th>state</th><th>why</th><th>since</th></tr>${probs}</table>`:'<div class=ok>none: everything Noctyx manages is as expected</div>'}</div>
+  <div><h4>Repairs, last 24 h</h4>${reps?`<table class=srt>${reps}</table>`:'<div class=mut>none</div>'}</div>
+  <div><h4>Playbooks</h4><div class=srpb>${pbs}</div></div>
+  <div><h4>Log</h4>${filt}<div class=sr style="gap:6px;margin-top:8px">${log}</div></div></div>`}
 function rConfig(d){
  if(!d)return '<div class=empty>loading…</div>';
  if(d.error)return `<div class="empty bad">${esc(d.error)}</div>`;
@@ -4673,6 +4816,7 @@ function rConfig(d){
   <div class=setrow><label>Monthly</label><div><input id=cf-rm type=number min=0 max=999 value="${esc(R.monthly??'')}" oninput="cfgDirty()"></div><div class=hint>Then one a month for this many months. How often backups run: the <a class=lnk href="/#panel=schedule">Schedule panel</a>.</div></div></div>
  ${hfSection(d.hf||{})}
  ${asSection(d.assistant||{})}
+ ${srSection(d.heal||{})}
  <div class=cfgsec><details><summary>baseline exclusions — always applied (exclusions-common.conf; a profile with its own list in the site's etc dir uses that instead)</summary>
   <div class=cfgcols><pre class=cfgpre>${esc(d.baseline&&d.baseline.common||'')}</pre>${Object.entries((d.baseline||{}).profiles||{}).map(([k,v])=>`<pre class=cfgpre><b>${esc(k)}</b>\n${esc(v)}</pre>`).join('')}</div></details></div>
  <pre id=cf-out class="cfgpre${CFGJOB?'':' hide'}">${esc(CFGJOB?CFGJOB.text:'')}</pre>
@@ -4710,6 +4854,35 @@ function asSection(A){
    <div class=hint>Your own replaces the built-in one. Noctyx fills in ${(A.ask_fields||[]).map(f=>'<code>{'+esc(f)+'}</code>').join(' ')}; write a literal brace as <code>{{</code> or <code>}}</code>. It changes only what Ask is told: its tools stay read-only and your role's. A new conversation uses it.</div></div>
   <div class=setrow><label></label><div class=hfline><button class=act onclick="asTest()" title="one short request with the values above, before saving">test</button>
    <button class=act onclick="asSave()">save assistant</button> <span id=as-res class=mut></span></div></div></div>`}
+function srSection(H){
+ const P=H.policy||{},U=P.upgrades||{},pb=P.playbooks||{};
+ const rows=Object.entries(H.playbooks||{}).map(([k,x])=>`<tr><td><b>${esc(k)}</b></td><td><select id="sr-pb-${esc(k)}" onchange="cfgDirty()">${['on','shadow','off'].map(m=>`<option${(pb[k]||x.default)==m?' selected':''}>${m}</option>`).join('')}</select></td><td class=mut>${esc(x.does)}</td></tr>`).join('');
+ const slots=(H.slots||[]).map(n=>`<label class=dbc><input type=checkbox data-srslot="${esc(n)}"${(P.restart_slots||[]).includes(n)?' checked':''} onchange="cfgDirty()"><b>${esc(n)}</b></label>`).join('')||'<span class=mut>no recipe slots</span>';
+ const comps=(H.upgradable||[]).map(n=>`<label class=dbc><input type=checkbox data-srcomp="${esc(n)}"${(U.components||[]).includes(n)?' checked':''} onchange="cfgDirty()"><b>${esc(n)}</b></label>`).join('');
+ return `<div class=cfgsec id=sec-heal><h4>Self-repair</h4><p class=gnote>What <code>noctyx heal</code> may repair on its own: every 5 minutes, and at once when an alert it has a playbook for fires. Each repair is checked and bounded; the <a class=lnk href="/heal">Self-repair page</a> shows every run, decision and command.</p>
+  <div class=setrow><label>Repair on its own</label><div><input type=checkbox class=sw id=sr-auto${P.auto!==false?' checked':''} onchange="cfgDirty()"></div><div class=hint>Off: it only reports what it would do.</div></div>
+  <div class=setrow><label>Repairs per hour</label><div><input id=sr-budget type=number min=1 max=100 value="${esc(P.budget_per_hour??10)}" oninput="cfgDirty()"></div><div class=hint>Across the fleet. More wait for the next hour.</div></div>
+  <div class=setrow><label>Freeze after</label><div><input id=sr-freeze type=number min=1 max=20 value="${esc(P.freeze_after??3)}" oninput="cfgDirty()"> failed repairs in a row</div><div class=hint>Then no repair runs until someone unfreezes it (the Self-repair page).</div></div>
+  <div class=setrow><label>Disk full at</label><div><input id=sr-disk type=number min=50 max=99 value="${esc(P.disk_pct??92)}" oninput="cfgDirty()"> %</div><div class=hint>A root filesystem over this: the journal is vacuumed to 1 GiB and apt's package cache cleared. Docker is never pruned (a prune removes stopped containers someone means to start again); what is still full goes to a person with its largest directories.</div></div>
+  <div class=setrow><label>Playbooks</label><div class=srscroll><table class=cfgt><tr><th>playbook</th><th>mode</th><th>what it does</th></tr>${rows}</table></div><div class=hint><b>shadow</b>: logs what it would do and leaves it to a person; <b>off</b>: not even checked.</div></div>
+  <div class=setrow><label>Units it may restart</label><div><textarea id=sr-units rows=3 oninput="cfgDirty()" placeholder="nginx.service&#10;myapp-*.service">${esc((P.restart_units||[]).join('\n'))}</textarea></div><div class=hint>One unit name or pattern per line. A failed unit not listed is left to a person (with its last log lines). Never restarted, whatever is listed: ${(H.never_units||[]).map(x=>'<code>'+esc(x)+'</code>').join(' ')}.</div></div>
+  <div class=setrow><label>Model servers it may restart</label><div class=dbs>${slots}</div><div class=hint>A ticked slot that stops answering for 15 minutes is started again with <code>noctyx recipe-start</code>, but only when Noctyx has seen that slot's own unit serve in the last 7 days. Stop a slot through Noctyx (Recipes, or <code>noctyx recipe-stop</code>) and it stays stopped.</div></div>
+  <div class=setrow><label>Automatic upgrades</label><div><input type=checkbox class=sw id=sr-up${U.auto?' checked':''} onchange="cfgDirty()"></div><div class=hint><b>Off by default.</b> On: a component older than Noctyx's pin is upgraded inside the window, one machine per run, nodes before the head, as a change that checks itself and rolls back. A release that fails anywhere is not tried again on its own.</div></div>
+  <div class=setrow><label>Upgrade window</label><div><input id=sr-win value="${esc(U.window||'03:00-05:00')}" placeholder="03:00-05:00" oninput="cfgDirty()"></div><div class=hint>HH:MM-HH:MM, the head's local time.</div></div>
+  <div class=setrow><label>Upgrade</label><div class=dbs>${comps}</div></div>
+  <div class=setrow><label>Between machines</label><div><input id=sr-soak type=number min=0 max=10080 value="${esc(U.soak_minutes??60)}" oninput="cfgDirty()"> min</div><div class=hint>After one machine's upgrade, the next waits this long.</div></div>
+  <div class=setrow><label>Major versions</label><div><input type=checkbox class=sw id=sr-major${U.major?' checked':''} onchange="cfgDirty()"></div><div class=hint>Off: a pin in a new major version (Prometheus 2 → 3) waits for a person.</div></div>
+  <div class=setrow><label></label><div class=hfline><button class=act onclick="srSave()">save self-repair</button></div></div></div>`}
+function srVals(){const H=(PANELS.find(x=>x.id=='config')._data||{}).heal||{},pb={};
+ Object.keys(H.playbooks||{}).forEach(k=>{const e=$('sr-pb-'+k);if(e)pb[k]=e.value});
+ const n=id=>Number($(id).value);
+ return {auto:$('sr-auto').checked,budget_per_hour:n('sr-budget'),freeze_after:n('sr-freeze'),disk_pct:n('sr-disk'),playbooks:pb,
+  restart_units:lines($('sr-units').value),restart_slots:[...document.querySelectorAll('input[data-srslot]')].filter(c=>c.checked).map(c=>c.dataset.srslot),
+  upgrades:{auto:$('sr-up').checked,window:$('sr-win').value.trim(),components:[...document.querySelectorAll('input[data-srcomp]')].filter(c=>c.checked).map(c=>c.dataset.srcomp),
+   soak_minutes:n('sr-soak'),major:$('sr-major').checked}}}
+function srSave(){const v=srVals();
+ if(v.upgrades.auto&&!confirm('Turn on automatic upgrades? Noctyx then upgrades '+(v.upgrades.components.join(', ')||'nothing')+' on its own inside '+v.upgrades.window+'.'))return;
+ cfgRun('setHeal',{heal:v},'save self-repair')}
 function asPick(i){const A=(PANELS.find(x=>x.id=='config')._data||{}).assistant||{},e=(A.endpoints||[])[i];if(!e)return;
  $('as-url').value=e.url;$('as-model').value=e.model||'';cfgDirty()}
 function asVals(){return {enabled:$('as-on').checked,url:$('as-url').value.trim(),model:$('as-model').value.trim(),
@@ -4775,7 +4948,7 @@ async function cfgRun(action,params,what){
   let s;try{s=await fetchJSON('/api/v1/job/'+j.id)}catch(e){continue}
   CFGJOB.text=`${what}${s.done?(s.rc===0?' — done':' — FAILED (rc='+s.rc+')'):' — running…'}\n${(s.output||'').trim()}`;
   const o=$('cf-out');if(o){o.textContent=CFGJOB.text;o.classList.toggle('bad',s.done&&s.rc!==0)}
-  if(s.done){if(s.rc===0&&(action=='setPolicy'||action=='setAssistant'))CFGDIRTY=false;
+  if(s.done){if(s.rc===0&&(action=='setPolicy'||action=='setAssistant'||action=='setHeal'))CFGDIRTY=false;
    const p=PANELS.find(x=>x.id=='config');const data=await p.api().catch(()=>null);if(data){p._data=data;if(!CFGDIRTY)repaint('config',data)}
    return}}}
 /* ── recipes (/recipes): each GPU slot serves one recipe; deploy builds the next one while the
@@ -5049,7 +5222,7 @@ function rAlerts(d){
  const rows=act.map(a=>{const t=alertTarget(a);const fp=a.fingerprint||'';const comp=(a.labels||{}).component||'';
   const sil=fp?`<button class=silbtn onclick="event.stopPropagation();silenceAlert('${fp}',60,this)" title="silence this one alert for 1 hour">1h</button><button class=silbtn onclick="event.stopPropagation();silenceAlert('${fp}',1440,this)" title="silence this one alert for 24 hours">24h</button><button class=silbtn onclick="event.stopPropagation();silenceAlert('${fp}',10080,this)" title="silence this one alert for 7 days">7d</button>`:'';
   return `<tr ${goAttr({host:t.host,panel:t.panel,tab:t.tab})} title="open ${esc(t.what||'')}"><td><span class="tag ${a.severity=='critical'?'bad':'warn'}">${esc(a.severity||'')}</span></td>
-  <td>${esc(a.name||'')}${comp?`<div class=mut style="font:10px var(--mono)">${esc(comp)}</div>`:''}</td><td>${esc(a.host||'')}</td><td>${esc(a.summary||'')}${a.fix?`<div class=compbtns>${compBtns(a.host,a.fix)}</div>`:''}${a.heal?`<div class=compbtns><button class=silbtn onclick="event.stopPropagation();healNow(this)" title="run noctyx heal now: it tries the safe repairs again">repair now</button></div>`:''}${a.triage?`<div style="font:11.5px/1.5 var(--sans);color:var(--fg);margin-top:4px;white-space:normal;border-left:2px solid var(--line);padding-left:8px">${esc(a.triage)}<span class=mut style="font:10px var(--mono)"> — ${esc(a.triage_model||'assistant')}</span></div>`:''}</td><td class=mut>${esc(agoS(a.since))}</td><td class=golnk>${t.what?esc(t.what)+' →':''}</td><td class=nowrap>${sil}</td></tr>`}).join('');
+  <td>${esc(a.name||'')}${comp?`<div class=mut style="font:10px var(--mono)">${esc(comp)}</div>`:''}</td><td>${esc(a.host||'')}</td><td>${esc(a.summary||'')}${a.fix?`<div class=compbtns>${compBtns(a.host,a.fix)}</div>`:''}${a.heal?`<div class=compbtns><button class=silbtn onclick="event.stopPropagation();healNow(this)" title="run noctyx heal now: it tries the safe repairs again">repair now</button></div>`:''}${a.selfrepair?`<div class=srnote>self-repair: <span class="${SRST[a.selfrepair.state]||''}">${esc(SRWORD[a.selfrepair.state]||a.selfrepair.state||'')}</span> — ${esc(a.selfrepair.why||a.selfrepair.how||'')} <a class=lnk href="/heal" onclick="event.stopPropagation()">log →</a></div>`:''}${a.triage?`<div style="font:11.5px/1.5 var(--sans);color:var(--fg);margin-top:4px;white-space:normal;border-left:2px solid var(--line);padding-left:8px">${esc(a.triage)}<span class=mut style="font:10px var(--mono)"> — ${esc(a.triage_model||'assistant')}</span></div>`:''}</td><td class=mut>${esc(agoS(a.since))}</td><td class=golnk>${t.what?esc(t.what)+' →':''}</td><td class=nowrap>${sil}</td></tr>`}).join('');
  const sl=(d.silenced||[]).map(s=>{const m=(s.matchers||[]).map(x=>esc(x.name)+'='+esc(x.value)).join(' · ');
   const until=s.ends?fmtTs(new Date(s.ends).getTime()/1000):'—';
   return `<tr><td class=mut style="font:10.5px var(--mono)">${m}</td><td class=mut>${esc(until)}</td><td class=mut>${esc(s.by||'')}</td>
@@ -5348,7 +5521,7 @@ class H(BaseHTTPRequestHandler):
         if p in ("/", "/index.html"):
             return self._send(page(), "text/html; charset=utf-8")
         if p in ("/cluster", "/cluster/", "/config", "/config/", "/recipes", "/recipes/", "/about", "/about/",
-                 "/kiosk", "/kiosk/"):
+                 "/kiosk", "/kiosk/", "/heal", "/heal/"):
             # systems-only / config views: same page, different panel set (see VIEW in the JS)
             return self._send(page(p.strip("/")), "text/html; charset=utf-8")
         if p in ("/favicon.ico", "/favicon.svg"):
@@ -5486,8 +5659,20 @@ class H(BaseHTTPRequestHandler):
             return self._json(_versions())
         if p == "/api/v1/heal":
             from noctyx import change, heal
+            c = CM.cfg()
             return self._json({**heal.summary(), "changes": [{k: v for k, v in r.items() if k != "snap"}
-                                                              for r in change.ledger(30)[::-1]]})
+                                                              for r in change.ledger(30)[::-1]],
+                               "policy": heal.policy(c), "hosts": [h["name"] for h in CM.hosts(c)],
+                               "playbooks": {k: d for k, (_, d) in heal.PLAYBOOKS.items()}})
+        if p == "/api/v1/heal/log":
+            from noctyx import heal
+            try:
+                n = max(1, min(int(q.get("n") or 50), 500))
+            except ValueError:
+                n = 50
+            return self._json({"runs": heal.runs(n, host=q.get("host") or None, check=q.get("check") or None,
+                                                  everything=q.get("all") == "1", q=(q.get("q") or "")[:100] or None,
+                                                  run=q.get("run") or None)})
         if p == "/api/v1/probes":
             return self._json(probe_last())
         if p == "/api/v1/ask-prompt":
@@ -5678,6 +5863,10 @@ class H(BaseHTTPRequestHandler):
             return self._deny(need)
         if name == "setAssistant":
             errs = CM.validate_assistant(params.get("assistant"))[1]
+            if errs:
+                return self._json({"error": "; ".join(errs)}, 400)
+        if name == "setHeal":
+            errs = heal_errors(params.get("heal"))
             if errs:
                 return self._json({"error": "; ".join(errs)}, 400)
         if name == "recipeCatalog" and not params.get("remove"):

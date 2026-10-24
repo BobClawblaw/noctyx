@@ -232,8 +232,12 @@ def t_repairs(sess, a):
     hours = _int(a.get("hours"), 1, 168, 24)
     st = heal.summary(within=hours * 3600)
     since = time.time() - hours * 3600
+    pol = heal.policy(C.CM.cfg())
     return {"last_check": _ago(st.get("ts")), "skipped": st.get("skipped"),
-            "problems": [{k: p.get(k) for k in ("host", "check", "what", "detail", "how", "needs_person", "tries")}
+            "repairs_on": pol["auto"], "automatic_upgrades": pol["upgrades"]["auto"],
+            "frozen": (st.get("frozen") or {}).get("why"), "repairs_last_hour": st.get("actions_1h"),
+            "problems": [{k: p.get(k) for k in ("host", "check", "what", "detail", "how", "needs_person", "tries",
+                                                "state", "why")}
                          | {"since": _ago(p.get("since"))} for p in st["problems"]],
             "repairs": [{k: r.get(k) for k in ("ts", "host", "check", "what", "how", "ok", "detail")} for r in st["repairs"]],
             "changes": [{k: r.get(k) for k in ("ts", "host", "component", "what", "outcome", "problems", "after_rollback",
@@ -387,12 +391,14 @@ then the rest) and skip-this-release. NoctyxNeedsAttention has "repair now".
   - Console: backup, verify, prune, copy, probe, capacity, snapshots, status, directory.
 - Cluster (/cluster): every node's live numbers.
 - Recipes (/recipes): deploy, stop, start or roll back what a slot serves.
-- Configure (/config): Backups, Retention, Model mirror, Assistant LLM.
+- Self-repair (/heal): what noctyx heal found, decided and ran, each command with its output; repair now; unfreeze.
+- Configure (/config): Backups, Retention, Model mirror, Assistant LLM, Self-repair.
 Alert rules are not made in the console: Noctyx ships its own.
 
-Noctyx repairs itself: `noctyx heal` runs every 5 minutes and repairs what it safely can, at most 3 times in 6 \
-hours per thing; what it cannot repair raises NoctyxNeedsAttention. Every `noctyx upgrade` checks its result and \
-rolls itself back when it fails.
+Noctyx repairs itself: `noctyx heal` runs every 5 minutes, and at once when an alert it has a playbook for \
+fires. It repairs what it safely can, at most 3 times in 6 hours per thing; what it cannot repair is left to a \
+person. Several failed repairs in a row freeze it until a person unfreezes it. Automatic upgrades are off unless the \
+site turns them on. Every `noctyx upgrade` checks its result and rolls itself back when it fails.
 
 The site (at {started} UTC, when this conversation began): {hosts}"""
 
