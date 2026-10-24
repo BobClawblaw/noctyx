@@ -172,9 +172,10 @@ def test_accounts_change_one_at_a_time(tmp_path, monkeypatch):
     assert oct(os.stat(tmp_path / "users.json").st_mode)[-3:] == "600"
 
 
-def test_restic_reads_are_bounded(monkeypatch):
+def test_restic_reads_are_bounded(monkeypatch, tmp_path):
     from noctyx import console
     monkeypatch.setattr(console, "_host_repo", lambda h: ("r", "/tmp/r"))
+    monkeypatch.setattr(console, "RESTIC_CACHE", tmp_path / "restic-cache")     # never the real console state
     monkeypatch.setattr(console, "RESTIC_WAIT", 0.05)
     sem = threading.BoundedSemaphore(1)
     monkeypatch.setattr(console, "RESTIC_READS", sem)
