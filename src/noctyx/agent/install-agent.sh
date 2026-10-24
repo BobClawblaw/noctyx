@@ -58,6 +58,11 @@ run "command -v restic >/dev/null" || {
 # 2. agent (rendered for this site by the orchestrator)
 put 0755 "$NX_AGENT_FILE" "$NX_AGENT_BIN"
 echo "  agent        -> $NX_AGENT_BIN"
+# needrestart (apt's "restart services using old libraries") must never restart a backup or copy mid-run
+if [[ -n ${NX_NEEDRESTART_FILE:-} ]] && $E "[ -d /etc/needrestart/conf.d ]"; then
+  put 0644 "$NX_NEEDRESTART_FILE" "/etc/needrestart/conf.d/$NX_UNIT_PREFIX.conf"
+  echo "  needrestart  -> /etc/needrestart/conf.d/$NX_UNIT_PREFIX.conf (never restarts $NX_UNIT_PREFIX-* units)"
+fi
 
 # 3. CA (also into the system trust store so curl/python/tooling agree)
 put 0644 "$CA_LOCAL" "$NX_NODE_ETC/tls/ca.crt"

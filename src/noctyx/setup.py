@@ -462,6 +462,9 @@ def head_units(c):
 
 def setup_units(c):
     """The head's services and timers: console, directory, HF mirror; tick, nightly, hygiene, retention, heal."""
+    nr = pathlib.Path("/etc/needrestart/conf.d")
+    if nr.is_dir():                       # apt's needrestart must never restart a backup, copy or tick mid-run
+        _write(nr / f"{P['unit_prefix']}.conf", cm.render((cm.NX_HOME / "agent" / "needrestart.conf").read_text()), 0o644)
     done = hostos.install_services(head_units(c), cm.UNIT, _label(), _log_dir())
     cm.audit("install-head", units=done)
     print(f"  installed and enabled: {', '.join(done)}")

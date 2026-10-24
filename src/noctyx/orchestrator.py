@@ -1194,11 +1194,12 @@ def cmd_install_agent(a):
     with tempfile.TemporaryDirectory() as td:
         files = {"common": str(pathlib.Path(td) / "exclusions-common.conf")}
         pathlib.Path(files["common"]).write_text(common_exclusions(c))
-        for src, name in (("noctyx-agent.sh", "agent"), ("noctyx-dumps.py", "dumps")):
+        for src, name in (("noctyx-agent.sh", "agent"), ("noctyx-dumps.py", "dumps"), ("needrestart.conf", "needrestart")):
             f = pathlib.Path(td) / src
             f.write_text(render((NX_HOME / "agent" / src).read_text()))
             files[name] = str(f)
         env = {**os.environ, "NOCTYX_CONFIG": CFG_PATH, "NX_AGENT_FILE": files["agent"], "NX_DUMPS_FILE": files["dumps"],
+               "NX_NEEDRESTART_FILE": files["needrestart"],
                "NX_COMMON_FILE": files["common"],
                "NX_ORCH": str(pathlib.Path(__file__).resolve()), "NX_PY": sys.executable,
                **{f"NX_{k.upper()}": str(v) for k, v in P.items()}}
