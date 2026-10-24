@@ -420,3 +420,13 @@ def test_the_tick_stops_restarting_the_nas_endpoint_after_3_failures(monkeypatch
     assert len(tried) == 3
     cm.ensure_rest(c, bounded=False)                                       # heal's own try is its own bound
     assert len(tried) == 4
+
+
+def test_a_stray_file_among_the_job_logs_is_not_a_job_that_died(tmp_path, monkeypatch):
+    from noctyx import console
+    monkeypatch.setattr(console.CM, "JOB_LOG_DIR", tmp_path)
+    monkeypatch.setattr(console, "_systemd_prop", lambda unit, prop: "inactive")
+    (tmp_path / f"{console.UNIT}-stick-test.log").write_text("someone's notes\n")
+    (tmp_path / f"{console.UNIT}-backup-gpu-01-20261024T010000Z-42.log").write_text("…\nNOCTYX_EXIT 0\n")
+    got = console.runs(10)
+    assert [(r["cmd"], r["host"], r["state"]) for r in got] == [("backup", "gpu-01", "ok")]

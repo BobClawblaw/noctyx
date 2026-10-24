@@ -919,6 +919,8 @@ def runs(n=15):
     for f in logs:
         unit = f.stem
         m = re.match(rf"{re.escape(UNIT)}-([a-z]+)-(?:(.+)-)?(\d{{8}}T\d{{6}}Z)-\d+$", unit)
+        if not m:
+            continue                     # another file in the folder (a log someone left), not a detached job's
         try:
             with open(f, "rb") as fh:
                 fh.seek(max(0, f.stat().st_size - 6000))
@@ -933,11 +935,9 @@ def runs(n=15):
         else:
             state, rc = "died", None
         lines = [l for l in tail.splitlines() if l.strip() and not re.match(r"NOCTYX_EXIT", l)]
-        started = None
-        if m:
-            started = datetime.datetime.strptime(m.group(3), "%Y%m%dT%H%M%SZ") \
-                .replace(tzinfo=datetime.timezone.utc).timestamp()
-        out.append({"unit": unit, "cmd": m.group(1) if m else "?", "host": m.group(2) if m else None,
+        started = datetime.datetime.strptime(m.group(3), "%Y%m%dT%H%M%SZ") \
+            .replace(tzinfo=datetime.timezone.utc).timestamp()
+        out.append({"unit": unit, "cmd": m.group(1), "host": m.group(2),
                     "started_ts": started, "ended_ts": None if state == "running" else f.stat().st_mtime,
                     "state": state, "rc": rc, "last": lines[-1][:160] if lines else ""})
     return out
