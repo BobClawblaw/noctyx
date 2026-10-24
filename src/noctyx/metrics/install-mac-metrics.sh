@@ -71,14 +71,15 @@ A"
 </dict></plist>
 P
 launchctl bootout gui/\$(id -u) ~/Library/LaunchAgents/@LAUNCHD_PREFIX@.node_exporter.plist 2>/dev/null; launchctl bootstrap gui/\$(id -u) ~/Library/LaunchAgents/@LAUNCHD_PREFIX@.node_exporter.plist"
-# powermetrics collector: root LaunchDaemon every 15 s
+# powermetrics collector: root LaunchDaemon every 15 s. Named <prefix>-mac-textfile, not the textfile unit's name, which
+# a Mac that is itself a Noctyx head uses for its own collector (one Mac can be a node of one site and a head of another)
 put 0755 "$HERE/mac-textfile.sh" "/tmp/nx-mac-textfile.sh"
-"${E[@]}" "sudo -n install -m 0755 /tmp/nx-mac-textfile.sh /usr/local/bin/@TEXTFILE_UNIT@ && sudo -n sh -c 'cat > /Library/LaunchDaemons/@LAUNCHD_PREFIX@.textfile.plist <<P
+"${E[@]}" "sudo -n install -m 0755 /tmp/nx-mac-textfile.sh /usr/local/bin/@UNIT_PREFIX@-mac-textfile && sudo -n sh -c 'cat > /Library/LaunchDaemons/@LAUNCHD_PREFIX@.textfile.plist <<P
 <?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
 <plist version=\"1.0\"><dict>
  <key>Label</key><string>@LAUNCHD_PREFIX@.textfile</string>
- <key>ProgramArguments</key><array><string>/usr/local/bin/@TEXTFILE_UNIT@</string></array>
+ <key>ProgramArguments</key><array><string>/usr/local/bin/@UNIT_PREFIX@-mac-textfile</string></array>
  <key>EnvironmentVariables</key><dict><key>TEXTFILE_DIR</key><string>$TF</string></dict>
  <key>RunAtLoad</key><true/><key>StartInterval</key><integer>15</integer>
 </dict></plist>
