@@ -16,8 +16,8 @@
 # Noctyx
 
 The night-shift operator for your AI cluster. One console that **deploys** model recipes safely,
-**caches** every model locally, **protects** your machines and data, and **watches** all of it with an
-LLM that explains what it sees. Built for DGX Spark pairs, RTX workstations, NAS-backed home labs and
+**caches** every model locally, **protects** your machines and data, **watches** all of it with an
+LLM that explains what it sees, and **heals** what breaks. Built for DGX Spark pairs, RTX workstations, NAS-backed home labs and
 small inference clusters. The head runs on Linux or macOS; the machines it backs up are Linux, and a Mac is
 monitored (Time Machine backs it up).
 
@@ -29,7 +29,8 @@ monitored (Time Machine backs it up).
 | **Deploy** | Build the next recipe while the current one serves; switch under the GPU lock; roll back automatically. Discover public recipes for your hardware, ranked by measured speed |
 | **Cache** | One copy of every Hugging Face model on the cluster, served back as `HF_ENDPOINT`; keeps working when the Hub does not |
 | **Protect** | Nightly snapshots of every Linux node, Docker volumes, consistent database dumps, bare-metal restore |
-| **Watch** | Live fleet console: temperatures, power, tokens/s per model, alerts with LLM triage, a morning brief |
+| **Watch** | Live fleet console: temperatures, power, tokens/s per model, alerts with LLM triage, a morning brief, and Ask Noctyx: questions answered from the cluster's own data |
+| **Heal** | Every upgrade checks itself and rolls back when it fails; a repair loop puts back what drifts and restarts what stops, and tells you what it did |
 
 <p align="center"><img src="docs/screenshots/phosphor-dashboard.png" alt="The Noctyx dashboard in the Phosphor theme: fleet throughput, GPU power, per-node LLM, CPU, memory and network, storage tiers" width="100%"></p>
 
@@ -74,15 +75,31 @@ Regenerate them with `python3 tools/screenshots.py`.
   network fabric, disks, uptime, containers.
 - Alerts with LLM triage, a morning brief, Prometheus metrics, a kiosk view.
 - Hygiene: old kernels, unused packages, journal and Docker leftovers per node, with the space each fix frees.
-- Every critical component on every machine (restic, rest-server, Prometheus, node_exporter, the agent) checked
-  nightly against Noctyx's pin and the latest release, with the command that upgrades it, as alerts.
+- **Ask Noctyx**: a drawer in the console where the site's LLM answers questions about the cluster by looking
+  them up first (live metrics, Prometheus history, alerts, backups, logs, versions, what Noctyx repaired),
+  within the asker's role, with every secret redacted before the model sees it. It only looks; it says which
+  page, button or command would change things. Up and Down recall earlier questions.
+- Every critical component on every machine (restic, rest-server, Prometheus, Alertmanager, node_exporter, the
+  agent) checked nightly against Noctyx's pin and the latest release, as alerts with an upgrade button.
 - Macs are monitored, not backed up: vitals, GPU power, LLM servers and their Time Machine status.
+
+**Heal**
+- Every upgrade is a transaction: check first, keep what it replaces, change, check the result the way it is
+  used (a scrape within the timeout, every target and rule still working), and roll back on any failure.
+- Fleet rollouts change one machine first, watch it, then the rest one at a time, and stop at the first failure.
+  A failed upgrade cancels the queued ones like it.
+- Takes over a distro's Prometheus and Alertmanager with its pinned releases: a 2.x → 3.x move runs a trial on a
+  copy of the data beside the old one first, and switches only when the two agree.
+- `noctyx heal`, every 5 minutes: restarts failed services, undoes its own recent upgrade that broke something,
+  puts back drifted config and alert rules, refreshes stale collectors; bounded tries, then an alert for a
+  person. Every repair is in the audit trail, the morning brief and Ask Noctyx.
 
 **Run it your way**
 - Pure Python standard library on the head, on Linux (systemd) or macOS (launchd); bash and restic on the nodes.
   No database, no containers needed.
-- First-time setup by questions (`noctyx init`), the site's LLM set up first so it can explain any step that
-  fails, then `noctyx setup all` and an end-to-end `noctyx setup verify`.
+- First-time setup by questions (`noctyx init`), or in a browser (`noctyx init --web`, the assistant proposing
+  each step), the site's LLM set up first so it can explain any step that fails, then `noctyx setup all` and an
+  end-to-end `noctyx setup verify`.
 - Accounts with roles, or open access on a LAN you trust. Themes. An audit log of every action.
 
 ## Documentation

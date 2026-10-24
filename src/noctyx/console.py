@@ -3538,7 +3538,8 @@ function rAbout(d){
     <div class=afeat><b>Deploy</b><span>Model recipes onto GPU slots: built while the current model serves, switched under the slot's GPU lock, rolled back automatically. Public recipes for your hardware, ranked by measured speed.</span></div>
     <div class=afeat><b>Cache</b><span>One copy of every Hugging Face model on the cluster, served back as <code>HF_ENDPOINT</code>; keeps working when the Hub does not.</span></div>
     <div class=afeat><b>Protect</b><span>Nightly snapshots of every node, Docker volumes, consistent database dumps, retention, verification, a dual-arch recovery stick for bare-metal restores.</span></div>
-    <div class=afeat><b>Watch</b><span>Live fleet: temperatures, power, tokens/s per model, alerts with LLM triage, a morning brief, hygiene with the space each fix frees.</span></div></div>
+    <div class=afeat><b>Watch</b><span>Live fleet: temperatures, power, tokens/s per model, alerts with LLM triage, a morning brief, hygiene with the space each fix frees. <b style="font:inherit;color:var(--fg)">Ask</b> answers questions from the cluster's own data.</span></div>
+    <div class=afeat><b>Heal</b><span>Every upgrade checks itself and rolls back when it fails, one machine first. A repair loop every 5 minutes restarts what stopped and puts back what drifted, then says what it did.</span></div></div>
    <div class=acard><h3>This site</h3>
     <div class=arow><span>head node</span><b>${esc(S.head||'?')}</b></div>
     <div class=arow><span>hosts</span><b>${esc(S.hosts)}</b></div>
