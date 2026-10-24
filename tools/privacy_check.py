@@ -40,9 +40,15 @@ def main():
     bad = 0
     for f in files():
         try:
-            text = (ROOT / f).read_text(errors="replace")
+            raw = (ROOT / f).read_bytes()
         except (IsADirectoryError, FileNotFoundError):
             continue
+        if b"\0" in raw[:8192]:
+            # a binary file (an image): only its runs of readable text, as `strings` shows them; compressed pixels
+            # decoded as text match the e-mail pattern by chance
+            text = "\n".join(m.decode() for m in re.findall(rb"[\x20-\x7e]{6,}", raw))
+        else:
+            text = raw.decode(errors="replace")
         for n, line in enumerate(text.splitlines(), 1):
             m = rx.search(line)
             if m:
