@@ -1,10 +1,11 @@
 # Assistant
 
 The assistant is an LLM that Noctyx asks for plain-text help: it triages firing alerts, explains hygiene findings,
-and writes the dashboard's morning brief. It is usually one of the cluster's own model servers. You point it at
-any OpenAI-compatible endpoint. Every prompt is built only from data the console already holds, and every answer
-is shown with the name of the model that wrote it. In the console the assistant only produces text: nothing it
-says is run. The one place it may change something is the web setup, and there only what you approve runs.
+writes the dashboard's morning brief, and answers questions in the console's **Ask** drawer, looking things up
+first. It is usually one of the cluster's own model servers. You point it at any OpenAI-compatible endpoint. Every
+prompt is built only from data the console already holds, and every answer is shown with the name of the model
+that wrote it. In the console the assistant changes nothing: it reads and writes text. The one place it may
+change something is the web setup, and there only what you approve runs.
 
 It is also the first thing a new site sets up: during the install it explains what went wrong, on Linux and
 on macOS alike.
@@ -116,6 +117,46 @@ How requests are made:
 - **System prompt.** It tells the model to use only the data given, to say "not in the data" instead of guessing,
   and never to recommend rebooting a node that serves a model unless the data requires it.
 
+## Ask Noctyx
+
+**Ask** in the console's header opens a drawer beside the dashboard. Type a question about the site
+(*did anything fail last night?*, *which GPU ran hottest today?*, *when does the NAS fill up?*) and the
+assistant looks the answer up before it writes it. Each lookup shows as a line you can open to see exactly
+what it read. Answers give temperatures in your display unit. **New** starts a new conversation; the drawer
+keeps the current one while the tab stays open.
+
+It works through read-only tools that read what the panels read:
+
+| Tool | What it reads | Role |
+|---|---|---|
+| `cluster_now` | every host's live numbers, each LLM server's load and speed, the fleet's 24-hour totals | viewer |
+| `prometheus`, `metric_names` | any PromQL query, now or over up to 7 days: at most 20 series, each with its min and max (and when) from up to 1,500 samples, its last value and 40 points | viewer |
+| `host_details` | a host's site config and facts | viewer |
+| `alerts`, `backups`, `storage`, `hygiene`, `versions`, `recipes`, `audit` | the panels of the same names | viewer |
+| `snapshots`, `find_in_backups` | a host's snapshots, and files in them by name or glob | viewer |
+| `run_log` | the end of a backup, verify, prune or deploy run's log | operator |
+| `containers`, `service_log`, `container_log` | a Linux node's containers, a unit's journal, a container's log (over SSH) | operator |
+| `read_guide` | this guide | viewer |
+
+How it behaves:
+
+- **It changes nothing.** When something should change, it says what and where (the page and the button, or the
+  `noctyx` command), and you do it.
+- **Arguments are checked first.** Host names must be in the site, unit and container names must be plain
+  names, a run's log is named by its unit, and what goes to a node over SSH is quoted.
+- **Secrets are redacted.** Keys, tokens, passwords (in URLs too) and private keys are cut out of what a tool
+  returns before the model sees it.
+- **Tool output is data, not instructions.** The system prompt tells the model never to follow text it reads in a
+  log or a file name.
+- **Without tool calls.** A model whose server refuses the tools API (HTTP 400) still answers, from its system
+  prompt only, and the drawer says so.
+- **Twelve rounds per question.** On the last round the model is told to answer from what it has found.
+
+A conversation belongs to whoever opened it: another user's conversation id is refused. Each message uses your
+role as it is at that moment. Conversations live in the console's memory: a restart ends them, as does six hours
+without use. The API is `POST /api/v1/ask` with `{"text": "...", "sid": "..."}` (no `sid` starts a new
+conversation and returns one) and `GET /api/v1/ask/<sid>?since=<rev>`.
+
 ## Who may use it
 
 With console accounts (see [Accounts](accounts.md)):
@@ -123,6 +164,8 @@ With console accounts (see [Accounts](accounts.md)):
 | Action | Role |
 |---|---|
 | Read triage, explanations and the brief; refresh the brief | viewer |
+| **Ask**, with the viewer's tools | viewer |
+| **Ask** with the log tools (`run_log`, `containers`, `service_log`, `container_log`) | operator |
 | **explain** a finding; **test** an endpoint | operator |
 | Save the assistant settings; set or clear the API key | admin |
 
@@ -147,6 +190,8 @@ Use an `https://` URL if the endpoint is off the trusted network.
   - per-node state (up, GPU, root filesystem, failed units, the reboot flag);
   - LLM server stats and the last 24 hours' token, request and GPU energy totals;
   - NAS free space and RAID state, and the titles of open hygiene findings.
+- **Ask:** your questions and, redacted, what each lookup returned (live numbers, query results, facts, alerts,
+  backup state, file names from snapshots and, for operators, log lines).
 - **test:** only a fixed test prompt.
 - **Setup help** (`init`'s `?`, a failing setup step, `noctyx ask`): the question or the error text (the last
   3000 characters), the machine facts listed [above](#help-during-the-install), its address and host name (for

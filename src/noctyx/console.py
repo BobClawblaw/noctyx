@@ -40,6 +40,8 @@ already publishes; POST whitelisted actions, tokened unless NOCTYX_CONSOLE_AUTH=
   GET  /api/v1/versions       every critical component per machine: installed, pinned, latest, upgrade command
   GET  /api/v1/heal           the repair loop: open problems, the last day's repairs, the changes ledger
   POST /api/v1/action         whitelisted orchestrator argv
+  POST /api/v1/ask            {text, sid?} -> Ask Noctyx: a question to the assistant, which looks things up (copilot.py)
+  GET  /api/v1/ask/<sid>?since=<rev>      that conversation since a revision
 
 Control model: fixed argv whitelist, host/profile validated
 against the site config, audit every trigger, one job at a time + orchestrator locks.
@@ -56,6 +58,7 @@ from noctyx import orchestrator as CM                # noqa: E402  the console n
 from noctyx.paths import P, CONFIG                   # noqa: E402
 from noctyx import accounts as AC                    # noqa: E402
 from noctyx import hostos                            # noqa: E402
+from noctyx import copilot as COP                    # noqa: E402
 
 NX_HOME = pathlib.Path(__file__).resolve().parent
 CFG_PATH = CONFIG
@@ -1579,6 +1582,9 @@ def triage_alert(rec):
         pass
 
 
+COP.bind(sys.modules[__name__])                      # Ask Noctyx reads what the panels read
+
+
 def digest(force=False):
     """Morning brief: a compact state summary -> 5-8 lines from the assistant. Cached 1 h."""
     try:
@@ -2385,6 +2391,28 @@ a.menu-title{text-decoration:none;display:inline-flex;align-items:center;gap:6px
 .setscrim{position:absolute;inset:0;background:var(--scrim)}
 .setpanel{position:absolute;top:0;right:0;bottom:0;width:min(520px,100vw);overflow:auto;background:var(--bg-1);border-left:1px solid var(--line);padding:18px 20px 40px;box-shadow:-12px 0 40px rgba(0,0,0,.35)}
 .setpanel h2{display:flex;align-items:center;gap:8px;margin:0 0 4px;font:700 15px var(--sans)} .setpanel h2 .sp{flex:1}
+/* Ask Noctyx: a drawer beside the dashboard (not modal: the panels stay live while it looks things up) */
+.askwrap{position:fixed;top:0;right:0;bottom:0;width:min(470px,100vw);z-index:190;display:flex;flex-direction:column;background:var(--bg-1);border-left:1px solid var(--line);box-shadow:-12px 0 40px rgba(0,0,0,.35)}
+.askwrap.hide{display:none} body.kiosk .askwrap,body.kiosk #hask{display:none}
+.askhead{display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line-soft)}
+.askhead h2{margin:0;font:700 14px var(--sans);flex:1} .askhead .model{font:10.5px var(--mono);color:var(--fg-faint);max-width:170px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.asklog{flex:1;overflow:auto;padding:12px 14px;display:flex;flex-direction:column;gap:10px;font:13px/1.5 var(--sans)}
+.askmsg{white-space:pre-wrap;word-wrap:break-word} .askmsg.user{align-self:flex-end;max-width:85%;background:var(--bg-3);border:1px solid var(--line);border-radius:10px 10px 2px 10px;padding:7px 11px}
+.askmsg.bot{color:var(--fg)} .askmsg code{font:12px var(--mono);background:var(--bg-0);border:1px solid var(--line-soft);border-radius:4px;padding:0 4px}
+.askmsg pre{font:12px/1.45 var(--mono);background:var(--bg-0);border:1px solid var(--line-soft);border-radius:var(--radius-sm);padding:8px 10px;overflow:auto;white-space:pre;margin:4px 0}
+.askmsg .by{display:block;font:10px var(--mono);color:var(--fg-faint);margin-top:3px}
+.askmsg.err{color:var(--bad);font-size:12px}
+.asktool{font:11.5px var(--mono);color:var(--fg-dim)} .asktool summary{cursor:pointer;list-style:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .asktool summary::before{content:'▸ ';color:var(--fg-faint)}
+.asktool[open] summary::before{content:'▾ '} .asktool.bad summary{color:var(--warn)}
+.asktool pre{max-height:260px;overflow:auto;font:11px/1.4 var(--mono);background:var(--bg-0);border:1px solid var(--line-soft);border-radius:var(--radius-sm);padding:6px 8px;margin:4px 0 0;white-space:pre-wrap;word-break:break-all}
+.askbusy{font:12px var(--sans);color:var(--fg-dim)} .askbusy::after{content:'…';animation:askdots 1.2s steps(4) infinite}
+@keyframes askdots{0%{content:''}25%{content:'.'}50%{content:'..'}75%{content:'…'}}
+.askhint{display:flex;flex-wrap:wrap;gap:6px} .askhint button{background:var(--bg-2);border:1px solid var(--line);color:var(--fg-dim);border-radius:999px;padding:4px 10px;font:12px var(--sans);cursor:pointer}
+.askhint button:hover{border-color:var(--accent);color:var(--accent)}
+.askform{display:flex;gap:8px;padding:10px 14px 14px;border-top:1px solid var(--line-soft)}
+.askform textarea{flex:1;resize:none;min-height:38px;max-height:140px;background:var(--bg-0);color:var(--fg);border:1px solid var(--line);border-radius:var(--radius-sm);padding:8px 10px;font:13px var(--sans)}
+.askform textarea:focus{outline:none;border-color:var(--accent)}
+.asknote{padding:0 14px 10px;font:11px var(--sans);color:var(--fg-faint)}
 .setnote{margin:0 0 14px;font:12px var(--sans);color:var(--fg-dim)}
 .setstore{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font:12px var(--sans);padding:9px 11px;background:var(--bg-0);border:1px solid var(--line-soft);border-radius:var(--radius-sm);margin-bottom:6px}
 .setgrp{border-top:1px solid var(--line-soft);padding:14px 0 6px}
@@ -3051,8 +3079,15 @@ html[data-style=phosphor] button.act:hover{box-shadow:0 0 calc(14px * var(--gl))
   <span class="hpill go" id=halert onclick="goTo({panel:'alerts'})" title="open Alerts"></span>
   <span class=hspacer></span>
   <span class=huser id=huser></span>
+  <button type=button class=hbtn id=hask title="Ask Noctyx: questions about the cluster, answered from its own data" onclick="askToggle()">Ask</button>
   <button type=button class="hbtn gear" id=hgear title="Display settings: theme, units, layout" aria-label="Display settings" onclick="setOpen()"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" fill="currentColor"><path fill-rule="evenodd" d="M13.9 2c.5 0 .9.4 1 .9l.3 1.8c.5.2 1 .4 1.4.7l1.7-.7c.5-.2 1 0 1.3.4l1.4 2.5c.3.5.2 1-.2 1.3l-1.5 1.2v1.6l1.5 1.2c.4.3.5.8.2 1.3l-1.4 2.5c-.3.4-.8.6-1.3.4l-1.7-.7c-.4.3-.9.5-1.4.7l-.3 1.8c-.1.5-.5.9-1 .9h-2.9c-.5 0-.9-.4-1-.9l-.3-1.8c-.5-.2-1-.4-1.4-.7l-1.7.7c-.5.2-1 0-1.3-.4l-1.4-2.5c-.3-.5-.2-1 .2-1.3l1.5-1.2v-1.6L3.6 9c-.4-.3-.5-.8-.2-1.3l1.4-2.5c.3-.4.8-.6 1.3-.4l1.7.7c.4-.3.9-.5 1.4-.7l.3-1.8c.1-.5.5-.9 1-.9zM12 8.4a3.6 3.6 0 1 0 0 7.2 3.6 3.6 0 0 0 0-7.2z"/></svg></button>
 </header>
+<aside class="askwrap hide" id=askwrap aria-label="Ask Noctyx">
+ <div class=askhead><h2>Ask Noctyx</h2><span class=model id=askmodel></span><button type=button class=hbtn onclick="askNew()" title="Start a new conversation">New</button><button type=button class=hbtn onclick="askClose()" aria-label="Close">✕</button></div>
+ <div class=asklog id=asklog aria-live=polite></div>
+ <form class=askform id=askform><textarea id=askq rows=1 placeholder="Ask about the cluster…" maxlength=4000></textarea><button class=hbtn type=submit>Send</button></form>
+ <div class=asknote id=asknote>It looks things up but changes nothing: what it suggests, you do.</div>
+</aside>
 <div class="setwrap hide" id=setwrap role=dialog aria-modal=true aria-labelledby=setTitle><div class=setscrim onclick="setClose()"></div><section class=setpanel id=setpanel></section></div>
 <div id=desk></div>
 </div>
@@ -3322,7 +3357,7 @@ const PAGES={main:['/','Dashboard'],cluster:['/cluster','Cluster'],recipes:['/re
  });
  document.addEventListener('click',closeMenus);
  document.addEventListener('keydown',e=>{
-  if(e.key=='Escape'){closeMenus();setClose();return}
+  if(e.key=='Escape'){closeMenus();setClose();if(document.activeElement&&document.activeElement.id=='askq')askClose();return}
   if(e.ctrlKey||e.metaKey||e.altKey||/INPUT|TEXTAREA|SELECT/.test((document.activeElement||{}).tagName||''))return;
   const go={'1':'/','2':'/cluster','3':'/recipes','4':'/config','5':'/kiosk'}[e.key];if(go&&location.pathname!=go)location.href=go});
  if(VIEW=='config'&&location.hash)setTimeout(()=>{const el=document.getElementById(location.hash.slice(1));if(el)el.scrollIntoView({behavior:'smooth',block:'start'})},900);
@@ -3352,6 +3387,57 @@ async function loadSiteSettings(){try{SITESET=await fetchJSON('/api/v1/console-s
  setRender()}
 function setOpen(){$('setwrap').classList.remove('hide');setRender();loadSiteSettings()}
 function setClose(){$('setwrap').classList.add('hide')}
+
+/* ── Ask Noctyx (copilot.py): a conversation with the site's assistant, which looks things up with the
+   console's own data before it answers. The LLM's text is built as text nodes, never HTML. ── */
+const ASK={sid:null,rev:0,busy:false,timer:null};
+try{ASK.sid=sessionStorage.getItem('nx_ask_sid')}catch(e){}
+const askEl=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e};
+function askInline(t){const f=document.createDocumentFragment();t.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/).forEach(p=>{
+ if(p.length>2&&p.startsWith('`')&&p.endsWith('`'))f.append(askEl('code',null,p.slice(1,-1)));
+ else if(p.length>4&&p.startsWith('**')&&p.endsWith('**'))f.append(askEl('b',null,p.slice(2,-2)));else f.append(p)});return f}
+function askRich(text){const f=document.createDocumentFragment();text.split(/```[a-z]*\n?([\s\S]*?)```/).forEach((p,k)=>{
+ if(k%2)f.append(askEl('pre',null,p.replace(/\n$/,'')));else f.append(askInline(p.replace(/^\n|\n$/g,'')))});return f}
+const ASK_HINTS=['How is the cluster right now?','Did anything fail in the last 24 hours?','Which GPU ran hottest today?','When will the backup storage fill up?'];
+function askToggle(){const w=$('askwrap');if(w.classList.contains('hide'))askOpen();else askClose()}
+function askOpen(){$('askwrap').classList.remove('hide');if(ASK.sid&&!ASK.rev)askPoll();else if(!ASK.sid)askEmpty();setTimeout(()=>$('askq').focus(),30)}
+function askClose(){$('askwrap').classList.add('hide')}
+function askEmpty(){const L=$('asklog');L.textContent='';const h=askEl('div','askhint');
+ ASK_HINTS.forEach(t=>{const b=askEl('button',null,t);b.type='button';b.onclick=()=>askSend(t);h.append(b)});
+ L.append(askEl('div','askmsg bot','Ask anything about this site: its machines, models, backups, alerts or storage. I look at the live data before I answer.'),h)}
+function askNew(){ASK.sid=null;ASK.rev=0;try{sessionStorage.removeItem('nx_ask_sid')}catch(e){}$('askmodel').textContent='';askEmpty();$('askq').focus()}
+function askItem(i){
+ if(i.kind=='user')return askEl('div','askmsg user',i.text);
+ if(i.kind=='assistant'){const d=askEl('div','askmsg bot');d.append(askRich(i.text));if(i.model)$('askmodel').textContent=i.model;return d}
+ if(i.kind=='tool'){const d=askEl('details','asktool'+(i.ok?'':' bad'));const a=Object.entries(i.args||{}).map(([k,v])=>k+'='+JSON.stringify(v)).join(' ');
+  d.append(askEl('summary',null,(i.ok?'looked at ':'could not look at ')+i.tool+(a?' ('+a+')':'')),askEl('pre',null,i.out||''));return d}
+ if(i.kind=='error')return askEl('div','askmsg err',i.text);
+ return askEl('div','askmsg',i.text||'')}
+function askRender(v){const L=$('asklog');if(!ASK.rev)L.textContent='';
+ L.querySelectorAll('.askbusy').forEach(e=>e.remove());
+ (v.items||[]).forEach(i=>{const old=L.querySelector(`[data-i="${i.id}"]`);const n=askItem(i);n.dataset.i=i.id;if(old)old.replaceWith(n);else L.append(n)});
+ ASK.rev=Math.max(ASK.rev,v.rev||0);ASK.busy=!!v.busy;
+ if(ASK.busy)L.append(askEl('div','askbusy','looking'));
+ $('asknote').textContent=v.advice_only?'This model does not take tool calls: it answers without looking anything up.':'It looks things up but changes nothing: what it suggests, you do.';
+ L.scrollTop=L.scrollHeight}
+async function askPoll(){clearTimeout(ASK.timer);if(!ASK.sid)return;
+ let v;try{const r=await fetch('/api/v1/ask/'+encodeURIComponent(ASK.sid)+'?since='+ASK.rev);v=await r.json();
+  if(!r.ok){if(v.ended){ASK.sid=null;ASK.rev=0;ASK.busy=false;try{sessionStorage.removeItem('nx_ask_sid')}catch(e){}}
+   $('asklog').append(askEl('div','askmsg err',v.ended?'This conversation has ended (the console restarted, or it sat unused for hours): your next question starts a new one.':v.error||('HTTP '+r.status)));return}}
+ catch(e){ASK.timer=setTimeout(askPoll,2000);return}
+ askRender(v);if(ASK.busy)ASK.timer=setTimeout(askPoll,800)}
+async function askSend(text){text=(text||'').trim();if(!text||ASK.busy)return;
+ const L=$('asklog');if(!ASK.sid)L.textContent='';
+ const tok=localStorage.getItem(LS_TOK)||'';
+ let r,d;try{r=await fetch('/api/v1/ask',{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+tok},
+  body:JSON.stringify({sid:ASK.sid,text,tunit:TU})});d=await r.json()}catch(e){d={error:String(e)}}
+ if(!r||!r.ok){if(r&&r.status==409&&/ended/.test(d.error||'')){askNew();return askSend(text)}
+  L.append(askEl('div','askmsg err',d.error||'the console did not answer'));return}
+ if(d.sid!==ASK.sid){ASK.sid=d.sid;ASK.rev=0;try{sessionStorage.setItem('nx_ask_sid',d.sid)}catch(e){}}
+ ASK.busy=true;$('askq').value='';askPoll()}
+$('askform').addEventListener('submit',e=>{e.preventDefault();askSend($('askq').value)});
+$('askq').addEventListener('keydown',e=>{if(e.key=='Enter'&&!e.shiftKey){e.preventDefault();askSend($('askq').value)}});
+$('askq').addEventListener('input',e=>{const t=e.target;t.style.height='auto';t.style.height=Math.min(140,t.scrollHeight)+'px'});
 const segH=(cur,opts,fn)=>`<div class=seg>${opts.map(([v,l])=>`<button type=button class="${v==cur?'on':''}" onclick="${fn}('${v}')">${l}</button>`).join('')}</div>`;
 function setRender(){
  const P=$('setpanel');if(!P||$('setwrap').classList.contains('hide'))return;
@@ -5117,6 +5203,16 @@ class H(BaseHTTPRequestHandler):
             return self._json({"error": "bad token"}, 401)
         return self._json({"error": f"{w[1] if w else 'this session'} may not do this (needs {'admin' if need == 'admin' else 'operator'})"}, 403)
 
+    def _ask_who(self):
+        """(owner, role) for Ask Noctyx, or None: the signed-in person and their role (view, operate, admin);
+        open access and the site token act as admin, as they do for actions."""
+        mode, w = console_mode(), self._who()
+        if mode == "accounts":
+            return (w[0], ("view", "operate", "admin")[AC.rank(w[1])]) if w and AC.rank(w[1]) >= 0 else None
+        if mode == "token":
+            return None, "admin" if self._bearer_ok() else "view"
+        return (w[0] if w else None), "admin"
+
     def _origin_ok(self):
         o = self.headers.get("Origin")
         return not o or urllib.parse.urlparse(o).netloc == (self.headers.get("Host") or "")
@@ -5348,6 +5444,15 @@ class H(BaseHTTPRequestHandler):
                                                               for r in change.ledger(30)[::-1]]})
         if p == "/api/v1/probes":
             return self._json(probe_last())
+        if p.startswith("/api/v1/ask/"):
+            who = self._ask_who()
+            if not who:
+                return self._deny("view")
+            try:
+                sess = COP.get(p.rsplit("/", 1)[-1], who[0])     # a poll keeps the role the last message had
+                return self._json(sess.view(int(q.get("since") or 0)))
+            except (COP.Bad, ValueError) as e:
+                return self._json({"error": str(e), "ended": True}, 404)
         if p == "/api/v1/jobs":
             with JOBS_LOCK:
                 allj = sorted(JOBS.values(), key=lambda j: j.get("started_ts", 0))
@@ -5450,6 +5555,23 @@ class H(BaseHTTPRequestHandler):
             if key is not None and (not isinstance(key, str) or not 8 <= len(key.strip()) <= 512 or "\n" in key.strip()):
                 return self._json({"error": "key: 8-512 characters, one line"}, 400)
             return self._json(set_assistant_key(key))
+        if self.path == "/api/v1/ask":
+            who = self._ask_who()
+            if not who:
+                return self._deny("view")
+            try:
+                body = self._body()
+            except Exception:
+                return self._json({"error": "bad json"}, 400)
+            text, tunit = str(body.get("text") or "").strip(), body.get("tunit")
+            if not text:
+                return self._json({"error": "ask something"}, 400)
+            try:
+                sess = COP.get(body["sid"], *who, tunit) if body.get("sid") else COP.start(*who, tunit)
+                sess.say(text[:4000])
+            except COP.Bad as e:
+                return self._json({"error": str(e)}, 409)
+            return self._json({"sid": sess.sid})
         if self.path in ("/api/v1/alert-silence", "/api/v1/alert-unsilence"):
             # a silence changes what the whole cluster alerts on: operator and up
             if not self._allowed("operate"):

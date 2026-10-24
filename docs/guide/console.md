@@ -14,8 +14,9 @@ Related pages: [accounts](accounts.md) · [site config](site-config.md) · [inst
 
 The header has four menus: **Monitor** (Dashboard, Cluster), **Deploy** (Recipes), **Configure** (Backups,
 Retention, Model mirror, Assistant LLM) and **Kiosk**. It also shows the page name, the head and node count, the
-clock, status pills (*backups N/N on schedule*, alerts) and your sign-in state. The gear opens the display
-settings. Click the logo for About.
+clock, status pills (*backups N/N on schedule*, alerts) and your sign-in state. **Ask** opens a drawer where the
+assistant answers questions about the site from its own data (see [Assistant](assistant.md#ask-noctyx)). The gear
+opens the display settings. Click the logo for About.
 
 | Key | Goes to |
 |---|---|
@@ -24,7 +25,7 @@ settings. Click the logo for About.
 | `3` | Recipes `/recipes` |
 | `4` | Configuration `/config` |
 | `5` | Kiosk `/kiosk` |
-| `Esc` | closes menus and the settings drawer |
+| `Esc` | closes menus and the settings drawer (and the Ask drawer while you type in it) |
 
 Number keys do nothing while you type in a field or hold Ctrl, Alt or Cmd.
 
