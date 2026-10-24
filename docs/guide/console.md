@@ -100,7 +100,25 @@ machine, the ones that need a look first, each with:
   and **ssh** in the last 24 hours ([early warnings](signals.md));
 - what **self-repair** left open and the machine's **alerts**.
 
-Click a machine's name for its Machine Report. The page refreshes every 20 seconds (`GET /api/v1/machines`).
+Click a machine's name, or **open →**, for its own page. The page refreshes every 20 seconds (`GET /api/v1/machines`).
+
+## Machine (`/machine?host=…`)
+
+One machine, everything at once, with what can be done about it. **‹ ›**, the arrow keys **← →** or the dropdown
+(each machine with its status) walk the fleet.
+
+- **The header**: status, role and addresses, then each reason it needs a look as a chip that scrolls to the
+  details, with the fix where there is one (a backup now, a reboot, repair now). Below it, the machine's actions:
+  **backup now**, **verify now**, **checkpoint now**, **repair now**, **reboot…** (when it may), **ask about it**
+  (Ask Noctyx, with the question filled in), and links to the self-repair log and its snapshots. A started job
+  shows its progress next to them.
+- **The sections**: vitals (the last hour), LLM, GPU, storage (filesystems, NVMe health, disk I/O, and when the
+  root disk would be full), network, health with the fabric, NFS mounts and ssh, backups (schedule, recent
+  snapshots, agent jobs), components (**upgrade**, **skip**), hygiene (each fix), alerts (**silence** 1 h or
+  24 h), self-repair (**repair now**), the changes Noctyx made (**undo**), and the system (OS, CPU, memory,
+  addresses, disks and serials).
+
+It refreshes every 15 seconds (`GET /api/v1/machine/<host>`). The Machine Report on the dashboard links to it.
 
 ## Cluster (`/cluster`)
 
@@ -252,13 +270,14 @@ when the system asks for reduced motion.
 | URL | What |
 |---|---|
 | `/` | Dashboard (`#host=…&panel=…&tab=…` to focus) |
-| `/machines`, `/cluster`, `/recipes`, `/heal`, `/config`, `/kiosk`, `/about` | the views above |
+| `/machines`, `/machine?host=…`, `/cluster`, `/recipes`, `/heal`, `/config`, `/kiosk`, `/about` | the views above |
 | `/#settings` | Dashboard with the settings drawer open |
 | `/login` | sign-in (`?next=/path`) |
 | `/metrics` | Prometheus exposition, no sign-in |
 | `/api/v1/versions` | every critical component per machine: installed, pinned, latest, state, upgrade command |
 | `/api/v1/heal` | the repair loop: open problems, the last day's repairs, the changes ledger, the policy in effect |
 | `/api/v1/heal/log` | its runs, newest first (`n`, `host`, `check`, `all=1`, `q`, `run`) |
+| `/api/v1/machine/<host>` | one machine's page: its summary, every report tab, backups, components, hygiene, alerts, self-repair, changes |
 | `/api/v1/machines` | every machine's summary: status and why, vitals, what it serves, storage, backups, signals, alerts |
 | `/api/v1/changes` | every change, what is in effect, its checkpoint, whether it can be undone |
 | `/api/v1/checkpoints` | each machine's checkpoint snapshots (cached 5 min; `refresh=1`) |

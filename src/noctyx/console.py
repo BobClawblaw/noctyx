@@ -40,6 +40,8 @@ already publishes; POST whitelisted actions, tokened unless NOCTYX_CONSOLE_AUTH=
   GET  /api/v1/versions       every critical component per machine: installed, pinned, latest, upgrade command
   GET  /api/v1/heal           the repair loop: open problems, the last day's repairs, the changes ledger, the policy
   GET  /api/v1/heal/log?n=&host=&check=&all=&q=&run=   its runs, newest first: each check, decision and command
+  GET  /api/v1/machine/<h>    one machine, everything: summary and why, every report tab, backups, components,
+                              hygiene, alerts, self-repair, changes (the /machine page)
   GET  /api/v1/machines       every machine on one page: health and why, vitals, what it serves, storage, backups, signals
   GET  /api/v1/changes        every change Noctyx made, what is in effect, its checkpoint, whether it can be undone
   GET  /api/v1/checkpoints    the checkpoint snapshots per machine (cached 5 min; ?refresh=1)
@@ -2490,6 +2492,46 @@ def machines_view():
     return data
 
 
+def machine_view(name):
+    """/machine?host=…: one machine, everything at once: its summary (status and why), every report tab's live
+    numbers, its facts, backups and snapshots, components, hygiene, alerts, self-repair and changes."""
+    from noctyx import change
+    tabs = ("overview", "llm", "network", "storage", "gpu", "health")
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        fut = {t: ex.submit(host_metrics, name, t) for t in tabs}
+        fut["facts"] = ex.submit(host_facts, name, 120)
+        fut["machines"] = ex.submit(machines_view)
+        fut["alerts"] = ex.submit(alerts_view)
+        got = {}
+        for k, f in fut.items():
+            try:
+                got[k] = f.result()
+            except Exception as e:
+                got[k] = {"error": f"{type(e).__name__}: {str(e)[:160]}"}
+    ms = (got["machines"] or {}).get("machines") or []
+    me = next((m for m in ms if m["name"] == name), None)
+    ov = overview()
+    rows = [r for r in (ov.get("schedule") or {}).get("rows") or [] if r["host"] == name]
+    sn = ((ov.get("snapshots") or {}).get("hosts") or {}).get(name) or {}
+    h = next((x for x in ov["hosts"] if x["name"] == name), {"name": name})
+    recs = change.ledger(2000)
+    st = change.state_of(recs)
+    top = {v[-1]["id"] for v in change.stacks(recs).values() if v}
+    mine = [r for r in recs if r.get("host") == name][-15:][::-1]
+    return {"ts": time.time(), "host": name, "summary": me, "host_cfg": h,
+            "machines": [{"name": m["name"], "status": m["status"]} for m in ms],
+            "tabs": {t: got[t] for t in tabs}, "facts": got["facts"],
+            "schedule": rows, "snapshots": {"count": sn.get("count"), "last_ts": sn.get("last_ts"),
+                                            "recent": list(reversed(sn.get("recent") or []))[:8]},
+            "versions": ((ov.get("versions") or {}).get("hosts") or {}).get(name) or [],
+            "versions_ts": (ov.get("versions") or {}).get("ts"),
+            "hygiene": (hygiene_report().get("hosts") or {}).get(name) or {},
+            "alerts": [a for a in (got["alerts"] or {}).get("active") or [] if a.get("host") == name],
+            "changes": [{**{k: v for k, v in r.items() if k != "snap"}, "state": st.get(r["id"]),
+                         "revertible": r["id"] in top and not change.undoes(r)} for r in mine],
+            "job": None}
+
+
 # Favicon + brand mark: the watching eye (assets/favicon.svg, the source of truth), inlined so the
 # page stays one file.
 FAVICON = 'data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%20%3Cdefs%3E%20%3ClinearGradient%20id%3D%22tile%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%220%22%20y2%3D%221%22%3E%20%3Cstop%20offset%3D%220%22%20stop-color%3D%22%23151b3d%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%2305060d%22%2F%3E%20%3C%2FlinearGradient%3E%20%3ClinearGradient%20id%3D%22neon%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%20%3Cstop%20offset%3D%220%22%20stop-color%3D%22%233ff0ff%22%2F%3E%3Cstop%20offset%3D%22.55%22%20stop-color%3D%22%235b8cff%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%23b45cff%22%2F%3E%20%3C%2FlinearGradient%3E%20%3CradialGradient%20id%3D%22iris%22%20cx%3D%22.5%22%20cy%3D%22.42%22%20r%3D%22.62%22%3E%20%3Cstop%20offset%3D%220%22%20stop-color%3D%22%23f0feff%22%2F%3E%3Cstop%20offset%3D%22.3%22%20stop-color%3D%22%235ff3ff%22%2F%3E%3Cstop%20offset%3D%22.78%22%20stop-color%3D%22%235b6cff%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%237a3cff%22%2F%3E%20%3C%2FradialGradient%3E%20%3Cfilter%20id%3D%22glow%22%20x%3D%22-30%25%22%20y%3D%22-30%25%22%20width%3D%22160%25%22%20height%3D%22160%25%22%3E%20%3CfeGaussianBlur%20stdDeviation%3D%222%22%20result%3D%22b%22%2F%3E%3CfeMerge%3E%3CfeMergeNode%20in%3D%22b%22%2F%3E%3CfeMergeNode%20in%3D%22SourceGraphic%22%2F%3E%3C%2FfeMerge%3E%20%3C%2Ffilter%3E%20%3C%2Fdefs%3E%20%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2215%22%20fill%3D%22url%28%23tile%29%22%2F%3E%20%3Crect%20x%3D%22.75%22%20y%3D%22.75%22%20width%3D%2262.5%22%20height%3D%2262.5%22%20rx%3D%2214.25%22%20fill%3D%22none%22%20stroke%3D%22%233ff0ff%22%20stroke-opacity%3D%22.25%22%20stroke-width%3D%221.5%22%2F%3E%20%3Cg%20fill%3D%22%23d6ecff%22%3E%3Ccircle%20cx%3D%2212%22%20cy%3D%2212.5%22%20r%3D%221.1%22%2F%3E%3Ccircle%20cx%3D%2251.5%22%20cy%3D%2210%22%20r%3D%22.8%22%2F%3E%3Ccircle%20cx%3D%2254%22%20cy%3D%2252.5%22%20r%3D%221%22%2F%3E%3Ccircle%20cx%3D%229.5%22%20cy%3D%2250%22%20r%3D%22.7%22%2F%3E%3C%2Fg%3E%20%3Cg%20filter%3D%22url%28%23glow%29%22%3E%20%3Cpath%20d%3D%22M6.5%2032%20Q32%207%2057.5%2032%20Q32%2057%206.5%2032%20Z%22%20fill%3D%22none%22%20stroke%3D%22url%28%23neon%29%22%20stroke-width%3D%223.8%22%20stroke-linejoin%3D%22round%22%2F%3E%20%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2210.8%22%20fill%3D%22url%28%23iris%29%22%2F%3E%20%3C%2Fg%3E%20%3Cpath%20d%3D%22M32%2021.8%20Q35.6%2032%2032%2042.2%20Q28.4%2032%2032%2021.8%20Z%22%20fill%3D%22%2305060d%22%2F%3E%20%3Ccircle%20cx%3D%2228.2%22%20cy%3D%2227.9%22%20r%3D%222.1%22%20fill%3D%22%23fff%22%20fill-opacity%3D%22.92%22%2F%3E%20%3C%2Fsvg%3E'
@@ -3020,6 +3062,26 @@ tr.hl td{background:color-mix(in srgb,var(--warn) 13%,transparent)}
 .mxbarm{display:inline-block;width:70px;height:6px;border-radius:3px;background:var(--line-soft);vertical-align:middle;margin-right:6px;overflow:hidden}
 .mxbarm i{display:block;height:100%;background:var(--accent)} .mxbarm.warn i{background:var(--warn)} .mxbarm.bad i{background:var(--bad)}
 @media (max-width:640px){.mxgrid{grid-template-columns:1fr}.mxs{grid-template-columns:6.5em 1fr}}
+/* /machine: one machine, everything */
+.m1{display:flex;flex-direction:column;gap:12px}
+.m1nav{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:8px 0;background:var(--bg-1);border-bottom:1px solid var(--line-soft)}
+.m1nav select{font:700 15px var(--mono);padding:4px 8px;min-width:12em}
+.m1nav .arrow{font:700 18px var(--mono);padding:2px 12px}
+.m1head{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 14px}
+.m1head .big{font:800 26px var(--mono)}
+.m1why{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.m1why .chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:2px 4px 2px 10px;font:12px var(--sans);cursor:pointer}
+.m1why .chip.bad{border-color:color-mix(in srgb,var(--bad) 60%,var(--line));color:var(--bad)}
+.m1why .chip.warn{border-color:color-mix(in srgb,var(--warn) 60%,var(--line));color:var(--warn)}
+.m1why .chip button{font-size:11px}
+.m1acts{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.m1grid{column-width:470px;column-gap:12px}
+.m1sec{background:var(--bg-1);border:1px solid var(--line-soft);border-radius:var(--radius);padding:8px 12px;min-width:0;overflow-x:auto;
+ scroll-margin-top:70px;break-inside:avoid;margin:0 0 12px;display:inline-block;width:100%;box-sizing:border-box}
+.m1sec>h3:first-child{margin-top:2px}
+.m1sec table td{white-space:normal;overflow-wrap:anywhere}
+.m1job{font:12px var(--mono)}
+@media (max-width:640px){.m1grid{column-width:auto;column-count:1}.m1head .big{font-size:20px}}
 /* /heal: the self-repair page */
 .sr{display:flex;flex-direction:column;gap:12px}
 .srbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;font:12px var(--mono)}
@@ -3687,6 +3749,14 @@ if(VIEW=='recipes'){
   {id:'recipes',title:'Recipes',sp:12,h:0,int:20,render:rRecipes,api:()=>fetchJSON('/api/v1/recipes')});
  document.getElementById('desk').classList.add('stack');
 }
+if(VIEW=='machine'){
+ MX={host:new URLSearchParams(location.search).get('host')||localStorage.getItem(LS_SEL)||'',job:null,hy:{}};
+ PANELS.splice(0,PANELS.length,{id:'machine',title:'Machine',sp:12,h:0,int:15,render:rMachine,
+  api:()=>MX.host?fetchJSON('/api/v1/machine/'+encodeURIComponent(MX.host)):fetchJSON('/api/v1/machines').then(d=>{MX.host=((d.machines||[])[0]||{}).name;return fetchJSON('/api/v1/machine/'+encodeURIComponent(MX.host))})});
+ document.getElementById('desk').classList.add('stack');
+ document.addEventListener('keydown',e=>{if(e.ctrlKey||e.metaKey||e.altKey||/INPUT|TEXTAREA|SELECT/.test((document.activeElement||{}).tagName||''))return;
+  if(e.key=='ArrowLeft')mxStep(-1);else if(e.key=='ArrowRight')mxStep(1)});
+}
 if(VIEW=='machines'){
  PANELS.splice(0,PANELS.length,{id:'machines',title:'Machines',sp:12,h:0,int:20,render:rMachines,api:()=>fetchJSON('/api/v1/machines')});
  document.getElementById('desk').classList.add('stack');
@@ -3723,7 +3793,7 @@ if(VIEW=='cluster'){
  document.getElementById('desk').classList.add('stack');
 }
 /* ── navigation: menus in the header, the page name, 1–4 to jump ── */
-const PAGES={main:['/','Dashboard'],cluster:['/cluster','Cluster'],recipes:['/recipes','Recipes'],config:['/config','Configuration'],heal:['/heal','Self-repair'],machines:['/machines','Machines'],about:['/about','About'],kiosk:['/kiosk','Kiosk']};
+const PAGES={main:['/','Dashboard'],cluster:['/cluster','Cluster'],recipes:['/recipes','Recipes'],config:['/config','Configuration'],heal:['/heal','Self-repair'],machines:['/machines','Machines'],machine:['/machine','Machine'],about:['/about','About'],kiosk:['/kiosk','Kiosk']};
 (function nav(){
  const name=(PAGES[VIEW]||PAGES.main)[1];const pn=$('hpage');if(pn)pn.textContent=name;document.title=`Noctyx · ${name}`;
  document.querySelectorAll('#nav .menu').forEach(m=>{
@@ -4736,7 +4806,8 @@ function rDetail(f){
  const jtail=jj?((jj.output||'').trim().split('\n').filter(Boolean).slice(-6).join('\n')):'';
  return `<div class=rep>
  <div class=hero><span class=big>${esc(SEL)}</span>
-  <span class=mut>${esc(f.address||'')}${f.ip&&f.ip!=f.address?' · '+esc(f.ip):''}</span></div>
+  <span class=mut>${esc(f.address||'')}${f.ip&&f.ip!=f.address?' · '+esc(f.ip):''}</span>
+  <a class=lnk href="/machine?host=${esc(encodeURIComponent(SEL))}" title="everything about ${esc(SEL)} on one page">open full page →</a></div>
  ${mon?'':`<div style=margin-top:8px>
   <button class=act onclick="act('backupHost',{host:'${esc(SEL)}'})">backup now</button>
   <button class=act onclick="act('verifyHost',{host:'${esc(SEL)}'})">verify now</button></div>`}
@@ -5039,9 +5110,115 @@ function mxCard(m){
  rows.push(['system',`${esc(m.os_line||m.os||'')} · ${esc(m.arch||'')}${m.uptime?' · '+esc(m.uptime.replace(/^up /,'up ')):''}${m.reboot?' · <span class=warn>reboot required</span>':''}${m.failed_units?` · <span class=warn>${m.failed_units} failed unit(s)</span>`:''}${m.containers!=null?' · '+Math.round(m.containers)+(Math.round(m.containers)==1?' container':' containers'):''}${hy.items?` · ${hy.items} hygiene item(s)`:''}${upd.length?'<br>'+upd.join(' · '):''}`]);
  if((m.repairs||[]).length)rows.push(['self-repair',m.repairs.map(r=>`<span class="${r.state=='needs_person'?'bad':'warn'}">${esc(r.what)}</span> <span class=mut>${esc(r.why||'')}</span>`).join('<br>')]);
  if((m.alerts||[]).length)rows.push(['alerts',m.alerts.map(a=>`<span class="${a.severity=='critical'?'bad':'warn'}">${esc(a.name)}</span> ${esc(a.summary||'')}`).join('<br>')]);
- return `<div class="mxc ${st}"><div class=mxh>${dot}<b class=go onclick="${go}" title="open its Machine Report">${esc(m.name)}</b><span class=mut>${esc((m.role||[]).join(' · '))}</span><span class=hspacer></span><a class=lnk onclick="${go}">report →</a></div>
+ return `<div class="mxc ${st}"><div class=mxh>${dot}<b class=go onclick="${go}" title="open everything about ${esc(m.name)}">${esc(m.name)}</b><span class=mut>${esc((m.role||[]).join(' · '))}</span><span class=hspacer></span><a class=lnk href="/machine?host=${esc(encodeURIComponent(m.name))}">open →</a></div>
   ${why}<div class=mxs>${rows.map(([k,v])=>`<span>${esc(k)}</span><span>${v}</span>`).join('')}</div></div>`}
-function goMx(n){location.href='/#host='+encodeURIComponent(n)+'&panel=detail&tab=overview'}
+/* ── /machine: one machine, everything at once, with its actions. ‹ › or ← → walk the machines. ── */
+var MX=MX||{host:null,job:null,hy:{}};   // var: the /machine view sets it up before this line runs
+function mxStep(d){const p=PANELS.find(x=>x.id=='machine'),ms=((p&&p._data)||{}).machines||[];if(!ms.length)return;
+ const i=ms.findIndex(m=>m.name==MX.host);mxGo(ms[(i+d+ms.length)%ms.length].name)}
+function mxGo(n){if(!n||n==MX.host)return;MX.host=n;history.replaceState(null,'','/machine?host='+encodeURIComponent(n));
+ const p=PANELS.find(x=>x.id=='machine');if(p){p._data=undefined;repaint('machine',{loading:true});tick(p)}}
+async function mxReload(){const p=PANELS.find(x=>x.id=='machine');if(p){const d=await p.api().catch(e=>({error:String(e)}));p._data=d;repaint('machine',d)}}
+async function mxAct(action,params,what,btn){if(btn){btn.disabled=true}
+ const r=await act(action,params);if(!r||r.error){if(btn)btn.disabled=false;if(r&&r.error)alert(r.error);return}
+ MX.job={id:r.id,what,st:'queued'};mxJobPaint();mxJobPoll()}
+async function mxJobPoll(){const j=MX.job;if(!j)return;
+ for(;;){await new Promise(z=>setTimeout(z,1500));if(MX.job!==j)return;let s;try{s=await fetchJSON('/api/v1/job/'+j.id)}catch(e){continue}
+  j.st=s.done?(s.rc===0?'done':'failed (rc '+s.rc+')'):s.running?'running':'queued';j.last=((s.output||'').trim().split('\n').filter(Boolean).pop()||'').slice(0,140);mxJobPaint();
+  if(s.done){setTimeout(mxReload,800);return}}}
+function mxJobPaint(){const e=$('m1job');if(!e||!MX.job)return;const j=MX.job;
+ e.innerHTML=`<span class="tag ${/done/.test(j.st)?'ok':/failed/.test(j.st)?'bad':'warn'}">${esc(j.st)}</span> ${esc(j.what)} <span class=mut>${esc(j.last||'')}</span>`}
+function mxAsk(n){askOpen();$('askq').value=`How is ${n} doing, and is there anything I should do about it?`}
+function mxSec(id,title,body){return `<div class=m1sec id="mx-${id}"><h3>${esc(title)}</h3>${body}</div>`}
+function mxWhyAct(w,n,S,canBackup){const t=w.text;
+ if(/backup/.test(t)&&canBackup)return [`backups`,`<button class=silbtn onclick="event.stopPropagation();mxAct('backupHost',{host:'${esc(n)}'},'backup ${esc(n)}',this)">backup now</button>`];
+ if(/reboot required/.test(t))return [`health`,rbEligible(n)?rbBtn(n,'silbtn'):''];
+ if(/^behind/.test(t))return [`components`,''];
+ if(/hygiene|failed unit/.test(t))return [`hygiene`,''];
+ if(/needs a person/.test(t))return [`repair`,`<button class=silbtn onclick="event.stopPropagation();mxAct('healNow',{},'repair now',this)">repair now</button>`];
+ if(/^alert/.test(t))return [`alerts`,''];
+ if(/root disk/.test(t))return [`storage`,''];
+ if(/ssh|fabric|NFS/.test(t))return [`health`,''];
+ return [`alerts`,'']}
+function mxScroll(id){const e=$('mx-'+id);if(e)e.scrollIntoView({behavior:'smooth',block:'start'})}
+function rMachine(d){
+ if(!d||d.loading)return '<div class=empty>loading…</div>';
+ if(d.error)return `<div class="empty bad">${esc(d.error)}</div>`;
+ const n=d.host,S=d.summary||{},F=d.facts||{},T=d.tabs||{},H=d.host_cfg||{};
+ SEL=n;OVR=OVR||{hosts:[H]};if(!(OVR.hosts||[]).some(x=>x.name==n))OVR.hosts=[...(OVR.hosts||[]),H];
+ const canBackup=!H.monitored_only&&H.os!='macos';
+ const dot=st=>st=='ok'?'ok':st=='warn'?'warn':'bad';
+ const nav=`<div class=m1nav><button class="act arrow" onclick="mxStep(-1)" title="previous machine (←)">‹</button>
+  <select onchange="mxGo(this.value)">${(d.machines||[]).map(m=>`<option value="${esc(m.name)}"${m.name==n?' selected':''}>${m.status=='ok'?'●':m.status=='warn'?'▲':'■'} ${esc(m.name)}</option>`).join('')}</select>
+  <button class="act arrow" onclick="mxStep(1)" title="next machine (→)">›</button>
+  <span class=mut>${(d.machines||[]).map(m=>`<span class="dot ${dot(m.status)} go" title="${esc(m.name)}" onclick="mxGo('${esc(m.name)}')"></span>`).join(' ')}</span>
+  <span class=hspacer></span><span class=mut>← → to walk · updated ${esc(agoS(d.ts))}</span></div>`;
+ const why=(S.why||[]).length?(S.why).map(w=>{const [sec,btn]=mxWhyAct(w,n,S,canBackup);return `<span class="chip ${w.level}" onclick="mxScroll('${sec}')" title="show the details">${esc(w.text)}${btn}</span>`}).join('')
+  :'<span class=ok>✓ all good</span>';
+ const head=`<div class=m1head><span class="dot ${dot(S.status)}"></span><span class=big>${esc(n)}</span>
+  <span class=mut>${esc((S.role||[]).join(' · '))}</span><span class=mut>${esc(F.address||'')}${F.ip&&F.ip!=F.address?' · '+esc(F.ip):''}</span></div>
+  <div class=m1why>${why}</div>
+  <div class=m1acts>${canBackup?`<button class=act onclick="mxAct('backupHost',{host:'${esc(n)}'},'backup ${esc(n)}',this)">backup now</button>
+   <button class=act onclick="mxAct('verifyHost',{host:'${esc(n)}'},'verify ${esc(n)}',this)">verify now</button>
+   <button class=act onclick="if(confirm('Take a checkpoint of ${esc(n)} now (a system snapshot)?'))mxAct('takeCheckpoint',{host:'${esc(n)}'},'checkpoint ${esc(n)}',this)">checkpoint now</button>`:''}
+   <button class=act onclick="mxAct('healNow',{},'repair now',this)" title="run noctyx heal now">repair now</button>
+   ${rbEligible(n)?rbBtn(n):''}
+   <button class=act onclick="mxAsk('${esc(n)}')">ask about it</button>
+   <a class=lnk href="/heal">self-repair log →</a>${canBackup?` <a class=lnk href="/#host=${esc(encodeURIComponent(n))}&panel=browse">snapshots →</a>`:''}
+   <span id=m1job class=m1job></span></div>`;
+ // storage: the summary's forecast over the report's filesystems
+ const grow=S.root_use_per_day>0?`root disk: +${esc(fmtBytes(S.root_use_per_day))}/day over the last week${S.root_full_days!=null?(S.root_full_days>365?', not filling up soon':`, <span class="${S.root_full_days<14?'warn':''}">full in about ${Math.round(S.root_full_days)} days</span>`):''}`:'root disk: not growing';
+ // backups
+ const brows=(d.schedule||[]).map(r=>`<tr><td>${esc(r.profile)}</td><td class="${HCLS[r.health]||''}">${r.last_ts?esc(agoS(r.last_ts)):'never'}</td><td>${esc(fmtDur(r.every))}${r.window?' · '+esc(r.window):''}</td><td>${r.due?'<span class=warn>due now</span>':esc(fmtTs(r.next_ts))}</td><td><span class="tag ${HCLS[r.health]||''}">${esc(r.health)}</span>${r.failed_at?' <span class=warn>last attempt failed</span>':''}</td></tr>`).join('');
+ const snaps=(d.snapshots.recent||[]).map(r=>`<tr><td><code>${esc(r.id)}</code></td><td>${esc(fmtTs(r.ts))}</td><td>${esc(r.profile)}</td></tr>`).join('');
+ const jobs=(F.last_jobs||[]).slice(0,6).map(j=>`<tr><td>${esc(fmtTs(j.ts))}</td><td>${esc(j.event||'')}</td><td class="${(j.rc??0)==0?'ok':'bad'}">${j.rc??''}</td><td>${esc(j.snapshot||'')}</td></tr>`).join('');
+ const busy=F.agent_busy?`<div class=sline><span class="tag warn">running</span> a job holds the agent${F.progress?` · ${esc(F.progress.profile)} ${esc(fmtDur(+F.progress.elapsed||0))} · uploaded ${esc(F.progress.uploaded_mb)} MB`:''}</div>`:'';
+ const backups=canBackup?`${busy}<table><tr><th>profile</th><th>last</th><th>every</th><th>next</th><th>health</th></tr>${brows||'<tr><td colspan=5 class=mut>not scheduled</td></tr>'}</table>
+  <h3>Recent snapshots (${d.snapshots.count??0})</h3><table>${snaps||'<tr><td class=mut>none</td></tr>'}</table>
+  ${jobs?`<h3>Agent jobs</h3><table><tr><th>when</th><th>job</th><th>rc</th><th>snapshot</th></tr>${jobs}</table>`:''}
+  <div class=mut style="font:11px var(--mono)">agent ${esc((F.agent||[])[0]||'—')} · profiles ${esc((F.agent||[])[1]||'—')}</div>`
+  :`<div class=mut>monitored only: Noctyx does not back this machine up${H.os=='macos'?' (Time Machine does)':''}.</div>`;
+ // components
+ const CMARK={ok:'ok',upgrade:'warn',behind:'bad',missing:'bad',ahead:'mut',unknown:'mut',skipped:'mut'};
+ const comps=(d.versions||[]).map(r=>`<tr><td>${esc(r.component)}</td><td>${esc(r.installed||'—')}</td><td>${esc(r.pinned||'—')}</td><td>${esc(r.latest||'—')}</td><td class=${CMARK[r.state]||'mut'}>${esc(r.detail)}${r.fix||r.state=='skipped'?`<div class=compbtns>${compBtns(n,r)}</div>`:''}</td></tr>`).join('');
+ // hygiene
+ const hyItems=((d.hygiene||{}).items||[]).filter(i=>!i.fixed);
+ const hy=hyItems.map(i=>{const e=MX.hy[i.id];const btn=i.tier&&i.tier!='auto'?(e?`<span class=mut>${esc(e)}</span>`:`<button class=silbtn onclick="if(confirm('${esc((i.fix||'fix').replace(/'/g,''))} on ${esc(n)}?')){MX.hy['${esc(i.id)}']='sent';mxAct('hygieneFix',{host:'${esc(n)}',items:['${esc(i.id)}']},'hygiene fix ${esc(i.id)} on ${esc(n)}',this)}">${esc(i.fix||'fix')}${i.bytes?' (frees '+esc(fmtBytes(i.bytes))+')':''}</button>`):`<span class=mut>${i.tier=='auto'?'fixed by the daily run':'report only'}</span>`;
+   return `<tr><td class="${i.severity=='warning'?'warn':''}">${esc(i.title)}<div class=mut>${esc(i.detail||'')}</div></td><td>${btn}</td></tr>`}).join('');
+ // alerts and self-repair
+ const al=(d.alerts||[]).map(a=>`<tr><td class="${a.severity=='critical'?'bad':a.severity=='warning'?'warn':''}">${esc(a.name)}<div class=mut>${esc(a.summary||'')}</div>${a.triage?`<div class=srnote>${esc(a.triage)}</div>`:''}${a.selfrepair?`<div class=srnote>self-repair: ${esc(a.selfrepair.why||a.selfrepair.how||'')}</div>`:''}</td><td class=nowrap>${esc(agoS(a.since))}</td>
+  <td class=nowrap>${a.fingerprint?`<button class=silbtn onclick="silenceAlert('${esc(a.fingerprint)}',60,this).then(mxReload)">silence 1 h</button> <button class=silbtn onclick="silenceAlert('${esc(a.fingerprint)}',1440,this).then(mxReload)">24 h</button>`:''}${a.fix?`<div class=compbtns>${compBtns(n,a.fix)}</div>`:''}</td></tr>`).join('');
+ const rp=(S.repairs||[]).map(r=>`<tr><td class="${r.state=='needs_person'?'bad':'warn'}">${esc(r.what)}<div class=mut>${esc(r.why||'')}</div></td><td><button class=silbtn onclick="mxAct('healNow',{},'repair now',this)">repair now</button></td></tr>`).join('');
+ // changes
+ const CH={'in effect':'ok',undone:'mut',rolled_back:'warn',rollback_failed:'bad',refused:'mut'};
+ const ch=(d.changes||[]).map(r=>`<tr><td class=nowrap>${esc(agoS(r.ts_epoch||r.ts))}</td><td>${esc(r.what)}</td><td><span class="tag ${CH[r.state]||''}">${esc(r.state)}</span></td><td>${r.revertible?`<button class=silbtn onclick="srRevert('${esc(r.id)}','${esc(String(r.what).replace(/'/g,''))}',${['prometheus','alertmanager'].includes(r.component)},this).then(()=>setTimeout(mxReload,4000))">undo</button>`:''}</td></tr>`).join('');
+ // system
+ const devs=(F.blockdevs||[]).map(b=>`${esc(b.name)} ${b.size_gb} GB <span class=mut>${esc(b.serial||'')}</span>`).join(' · ');
+ const sys=`<div class=kv><span class=k>os</span><span>${esc((F.os_lines||[]).join(' · ')||S.os_line||'')}</span>
+  <span class=k>cpu</span><span>${esc((F.cpu||[]).join(' · '))}</span>
+  <span class=k>memory</span><span>${F.mem_used_gb??'—'} / ${F.mem_total_gb??'—'} GB</span>
+  <span class=k>uptime</span><span>${esc((F.uptime_lines||[]).join(' · '))}</span>
+  <span class=k>addresses</span><span>${esc(F.ip||F.address||'')}</span>
+  ${(F.gpu||[]).length?`<span class=k>gpu</span><span>${esc(F.gpu.join(' / '))}</span>`:''}
+  ${devs?`<span class=k>disks</span><span>${devs}</span>`:''}</div>`;
+ const gpu=(T.gpu&&(T.gpu.info||[]).length)?tabGpu(T.gpu,F):(S.gpu_util!=null?`<div class=kv><span class=k>${esc(S.gpu_name||'gpu')}</span><span>${Math.round(S.gpu_util)}% · ${esc(fmtT(S.gpu_temp))} · ${S.gpu_power!=null?Math.round(S.gpu_power)+' W':'—'}</span></div>`:'<div class=empty>no GPU reported</div>');
+ const secs=[
+  mxSec('vitals','Vitals (last hour)',tabOverview(T.overview)),
+  mxSec('llm','LLM',tabLLM(T.llm)),
+  mxSec('gpu','GPU',gpu),
+  mxSec('storage','Storage',`<div class=sline>${grow}</div>`+tabStorage(T.storage)),
+  mxSec('network','Network',tabNetwork(T.network)),
+  mxSec('health','Health, fabric, NFS, ssh',tabHealth(T.health)),
+  mxSec('backups','Backups',backups),
+  mxSec('components','Components',`<table><tr><th>component</th><th>installed</th><th>pin</th><th>latest</th><th></th></tr>${comps||'<tr><td class=mut colspan=5>not checked yet</td></tr>'}</table>${d.versions_ts?`<div class=mut style="font:10.5px var(--mono)">checked ${esc(agoS(d.versions_ts))}</div>`:''}`),
+  mxSec('hygiene','Hygiene',hy?`<table>${hy}</table>`:'<div class=ok>nothing open</div>'),
+  mxSec('alerts','Alerts',al?`<table>${al}</table>`:'<div class=ok>none firing</div>'),
+  mxSec('repair','Self-repair',rp?`<table>${rp}</table>`:'<div class=ok>nothing open</div>'),
+  mxSec('changes','Changes Noctyx made',ch?`<table>${ch}</table>`:'<div class=mut>none recorded</div>'),
+  mxSec('system','System',sys)];
+ setTimeout(mxJobPaint,0);
+ return `<div class=m1>${nav}${head}<div class=m1grid>${secs.join('')}</div></div>`}
+function goMx(n){location.href='/machine?host='+encodeURIComponent(n)}
 function rMachines(d){
  if(!d)return '<div class=empty>loading…</div>';
  if(d.error)return `<div class="empty bad">${esc(d.error)}</div>`;
@@ -5907,7 +6084,7 @@ class H(BaseHTTPRequestHandler):
         if p in ("/", "/index.html"):
             return self._send(page(), "text/html; charset=utf-8")
         if p in ("/cluster", "/cluster/", "/config", "/config/", "/recipes", "/recipes/", "/about", "/about/",
-                 "/kiosk", "/kiosk/", "/heal", "/heal/", "/machines", "/machines/"):
+                 "/kiosk", "/kiosk/", "/heal", "/heal/", "/machines", "/machines/", "/machine", "/machine/"):
             # systems-only / config views: same page, different panel set (see VIEW in the JS)
             return self._send(page(p.strip("/")), "text/html; charset=utf-8")
         if p in ("/favicon.ico", "/favicon.svg"):
@@ -5960,6 +6137,14 @@ class H(BaseHTTPRequestHandler):
                 return self._json(fleet_metrics())
             except Exception as e:
                 return self._json({"error": str(e)[:200], "hosts": {}}, 502)
+        if p.startswith("/api/v1/machine/"):
+            name = p.rsplit("/", 1)[-1]
+            if name not in VALID_HOSTS:
+                return self._json({"error": "unknown host"}, 404)
+            try:
+                return self._json(machine_view(name))
+            except Exception as e:
+                return self._json({"error": f"{type(e).__name__}: {str(e)[:200]}"}, 500)
         if p.startswith("/api/v1/metrics/"):
             name = p.rsplit("/", 1)[-1]
             if name not in VALID_HOSTS:
