@@ -93,9 +93,20 @@ def main(argv=None):
         print(json.dumps({"config": CONFIG, **P}, indent=1))
         return 0
     if cmd == "demo":
-        port = argv[argv.index("--port") + 1] if "--port" in argv else "20993"
+        port = "20993"
+        if "--port" in argv:
+            i = argv.index("--port")
+            port = argv[i + 1] if i + 1 < len(argv) else ""
+            if not port.isdigit() or not 1 <= int(port) <= 65535:
+                print("noctyx demo --port PORT: a port number, 1-65535", file=sys.stderr)
+                return 2
         here = pathlib.Path(__file__).resolve().parent / "demo"
-        scratch = tempfile.mkdtemp(prefix="noctyx-demo-")
+        # one scratch folder per user, emptied at each start: the console exits through os._exit, which skips any
+        # cleanup at exit, so a fresh folder per run would pile up
+        import shutil
+        scratch = os.path.join(tempfile.gettempdir(), f"noctyx-demo-{os.getuid()}")
+        shutil.rmtree(scratch, ignore_errors=True)
+        os.makedirs(scratch, mode=0o700)
         os.environ.update({"NOCTYX_CONFIG": str(here / "site.json"), "NOCTYX_DEMO": str(here / "fixtures.json"),
                            "NOCTYX_CONSOLE_PORT": port, "NOCTYX_CONSOLE_AUTH": "0"})
         for k in ("etc", "state", "locks", "job_logs", "console_state"):      # never the real site's files

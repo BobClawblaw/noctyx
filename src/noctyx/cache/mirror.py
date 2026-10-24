@@ -66,13 +66,26 @@ def repo_dir(kind, repo):
     return os.path.join(STORE, _IDX["map"].get(name.lower(), name))
 
 
+REV = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
+def safe_part(p):
+    """A URL path component after unquoting: never a separator (%2F, %5C), a parent or current directory, a NUL."""
+    return p not in ("", ".", "..") and not any(c in p for c in "/\\\0")
+
+
 def local_ref(rd, rev):
+    """The commit a revision names in the store, or None. Only a plain ref name is looked up (a PR ref such as
+    refs/pr/1 goes upstream), and only a 40-hex sha is ever returned: it becomes a path and a header."""
     if HEX40.match(rev):
         return rev if os.path.isdir(os.path.join(rd, "snapshots", rev)) else None
+    if not REV.match(rev):
+        return None
     try:
-        return open(os.path.join(rd, "refs", rev)).read().strip() or None
+        sha = open(os.path.join(rd, "refs", rev)).read().strip()
     except OSError:
         return None
+    return sha if HEX40.match(sha) else None
 
 
 def upstream(method, path, headers=None, body=None, timeout=30):
@@ -150,6 +163,8 @@ class H(BaseHTTPRequestHandler):
     def route(self, head=False):
         u = urllib.parse.urlsplit(self.path)
         parts = [urllib.parse.unquote(p) for p in u.path.strip("/").split("/") if p]
+        if not all(safe_part(p) for p in parts):
+            return self.proxy()       # never a local path from it; upstream judges it (a PR ref arrives as refs%2Fpr%2F1)
         if u.path == "/metrics":
             return self.metrics()
         if u.path in ("/", "/cm-status"):
@@ -177,6 +192,8 @@ class H(BaseHTTPRequestHandler):
             return self.proxy()
         auth = self.headers.get("Authorization")
         commit = upstream_sha(kind, repo, rev, auth) or local_ref(rd, rev)
+        if commit and not HEX40.match(commit):
+            commit = None                 # it becomes a path below and a response header
         f = os.path.join(rd, "snapshots", commit, path) if commit else None
         if f and os.path.isfile(f):
             blob = os.path.basename(os.readlink(f)) if os.path.islink(f) else None

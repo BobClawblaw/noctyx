@@ -48,7 +48,7 @@ if t.get("gpu_temp_avg"):
   fi
   # unified memory: what the UI shows as "gpu memory" = memory held by GPU-heavy processes isn't
   # exposed by macOS; report memory pressure instead (0..100 = % used incl. compressed)
-  vm_stat | awk -v total=$(sysctl -n hw.memsize) 'BEGIN{ps=16384} /page size of/{ps=$8} /Pages active/{a=$3} /Pages wired/{w=$4} /Pages occupied by compressor/{c=$5} END{gsub(/\./,"",a);gsub(/\./,"",w);gsub(/\./,"",c); printf "# HELP @METRIC_PREFIX@_memory_used_bytes active+wired+compressed.\n# TYPE @METRIC_PREFIX@_memory_used_bytes gauge\ncm_memory_used_bytes %d\n", (a+w+c)*ps}'
+  vm_stat | awk -v total=$(sysctl -n hw.memsize) 'BEGIN{ps=16384} /page size of/{ps=$8} /Pages active/{a=$3} /Pages wired/{w=$4} /Pages occupied by compressor/{c=$5} END{gsub(/\./,"",a);gsub(/\./,"",w);gsub(/\./,"",c); printf "# HELP @METRIC_PREFIX@_memory_used_bytes active+wired+compressed.\n# TYPE @METRIC_PREFIX@_memory_used_bytes gauge\n@METRIC_PREFIX@_memory_used_bytes %d\n", (a+w+c)*ps}'
   echo "# HELP @METRIC_PREFIX@_textfile_last_run_timestamp_seconds When this collector last ran."
   echo "# TYPE @METRIC_PREFIX@_textfile_last_run_timestamp_seconds gauge"
   echo "@METRIC_PREFIX@_textfile_last_run_timestamp_seconds $(date +%s)"

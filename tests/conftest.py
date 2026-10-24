@@ -8,6 +8,7 @@ import pytest
 
 SITE = {
     "server": {"hostname": "head", "address": "192.0.2.10", "ui_port": 20996, "rest_port": 20998,
+               "directory_port": 20999, "discovery_udp_port": 20997,
                "repo_root": "/mnt/nas/backups",
                "nas_ssh": {"user": "backup", "host": "192.0.2.5", "dir": "noctyx-rest", "repo_root": "/volume1/backups/noctyx"}, "ssh": {"user": "ops", "key": "/root/.ssh/id_ed25519"},
                "tls": {"cert": "/x/server.crt", "key": "/x/server.key", "ca": "/x/ca.crt"}},

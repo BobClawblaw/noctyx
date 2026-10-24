@@ -13,6 +13,9 @@ Users live in <etc>/users.json (0600, root); the session key in <etc>/session.ke
 use). A session cookie is "<user>.<expiry>.<hmac>": nothing secret in it, and it stops working the
 moment its user is deleted or the key is replaced. Passwords never touch a command line or a log.
 """
+import contextlib
+import fcntl
+import functools
 import hashlib
 import hmac
 import json
@@ -20,6 +23,8 @@ import os
 import pathlib
 import re
 import secrets
+import tempfile
+import threading
 import time
 
 from noctyx.paths import P
@@ -43,12 +48,38 @@ def _settings_dir():
 
 
 def _write_private(path, text):
+    """0600, atomically, through a temp file of its own (two writers never share one)."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as f:
-        f.write(text)
-    os.replace(tmp, path)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        pathlib.Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+_LOCK = threading.Lock()
+
+
+@contextlib.contextmanager
+def _locked():
+    """One change to users.json at a time: across the console's threads and the CLI's processes."""
+    f = _users_file().with_name(_users_file().name + ".lock")
+    f.parent.mkdir(parents=True, exist_ok=True)
+    with _LOCK, open(f, "a") as fh:
+        fcntl.flock(fh, fcntl.LOCK_EX)
+        yield
+
+
+def _mutates(fn):
+    """Read, change and save users.json as one step."""
+    @functools.wraps(fn)
+    def run(*a, **k):
+        with _locked():
+            return fn(*a, **k)
+    return run
 
 
 def users():
@@ -103,6 +134,7 @@ def check_new(name, role, pw=None):
     return errs
 
 
+@_mutates
 def add(name, role, pw):
     errs = check_new(name, role, pw)
     if name in users():
@@ -114,6 +146,7 @@ def add(name, role, pw):
     _save(us)
 
 
+@_mutates
 def set_password(name, pw):
     us = users()
     if name not in us:
@@ -125,6 +158,7 @@ def set_password(name, pw):
     _save(us)
 
 
+@_mutates
 def set_role(name, role):
     us = users()
     if name not in us or role not in ROLES:
@@ -133,6 +167,7 @@ def set_role(name, role):
     _save(us)
 
 
+@_mutates
 def delete(name):
     us = users()
     if us.pop(name, None) is None:
@@ -144,6 +179,7 @@ def delete(name):
         pass
 
 
+@_mutates
 def make_token(name):
     """A new API token for name (replacing any earlier one); the caller shows it once."""
     us = users()
@@ -156,6 +192,7 @@ def make_token(name):
     return tok
 
 
+@_mutates
 def revoke_token(name):
     us = users()
     if name not in us:

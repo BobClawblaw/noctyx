@@ -55,7 +55,7 @@ Control model: fixed argv whitelist, host/profile validated
 against the site config, audit every trigger, one job at a time + orchestrator locks.
 """
 from __future__ import annotations
-import base64, json, os, re, secrets, signal, ssl, subprocess, sys, threading, time
+import base64, hmac, json, os, re, secrets, signal, ssl, subprocess, sys, threading, time
 import datetime, pathlib, urllib.parse, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -78,12 +78,13 @@ _CFG_MTIME = os.path.getmtime(CFG_PATH)
 def _reload_cfg():
     """Pick up an edited site config (noctyx init, policy-set, a hand edit) without a restart. The TLS files
     and the port stay as they were at start: those need one."""
-    global CFG, S, _CFG_MTIME
+    global CFG, S, _CFG_MTIME, VALID_HOSTS, VALID_PROFILES
     try:
         m = os.path.getmtime(CFG_PATH)
         if m != _CFG_MTIME:
             CFG, _CFG_MTIME = json.load(open(CFG_PATH)), m
             S = CFG["server"]
+            VALID_HOSTS, VALID_PROFILES = _valid_hosts(CFG), set(CFG.get("profiles", {}).keys())
     except (OSError, ValueError):
         pass
 CERT, KEY, CA = S["tls"]["cert"], S["tls"]["key"], S["tls"]["ca"]
@@ -174,7 +175,11 @@ ACTIONS = {
                                 or ((["--every", p["every"]] if p.get("every") else [])
                                     + (["--window", p["window"]] if p.get("window") else []))),
 }
-VALID_HOSTS = {h["name"] for h in CFG["hosts"] if h.get("enabled", True) is not False}
+def _valid_hosts(c):
+    return {h["name"] for h in c["hosts"] if h.get("enabled", True) is not False}
+
+
+VALID_HOSTS = _valid_hosts(CFG)
 VALID_PROFILES = set(CFG.get("profiles", {}).keys())
 # host-REQUIRED actions: their builders index p["host"] directly; missing would KeyError
 HOST_REQUIRED = {"backupHost", "verifyHost", "reboot", "rebootFinish"}
@@ -704,9 +709,10 @@ def repo_sizes(max_age=1800):
                     d = f"{root}/{P['repo_dir_prefix']}{r['id']}"
                     if not os.path.isdir(d):
                         continue
-                    o = subprocess.run(["du", "-sb", d], capture_output=True, text=True, timeout=1800)
+                    # -sk, not GNU's -sb: a macOS head's du has no -b
+                    o = subprocess.run(["du", "-sk", d], capture_output=True, text=True, timeout=1800)
                     if o.returncode == 0 and o.stdout.split():
-                        sizes[r["id"]] = int(o.stdout.split()[0])
+                        sizes[r["id"]] = int(o.stdout.split()[0]) * 1024
                 if sizes:
                     _REPO_SIZES.update(ts=time.time(), repos=sizes)
                     cache.write_text(json.dumps({"ts": _REPO_SIZES["ts"], "repos": sizes}))
@@ -1337,12 +1343,25 @@ def _host_repo(host):
     return h["repo"], CM.repo_dir(CFG, h["repo"])
 
 
+# restic reads on request threads, bounded: each is a process holding the repository's index in memory, and a
+# burst of clicks must not start dozens. Downloads get their own, so a long one never blocks browsing.
+RESTIC_READS = threading.BoundedSemaphore(4)
+RESTIC_DUMPS = threading.BoundedSemaphore(2)
+RESTIC_WAIT = 60
+
+
 def _restic_ro(host, args, timeout=120, text=True):
     repo, path = _host_repo(host)
     RESTIC_CACHE.mkdir(parents=True, exist_ok=True)
-    return subprocess.run(["restic", "-r", path, "--password-file", f"{P['repo_keys']}/{repo}.key",
-                           "--no-lock", "--cache-dir", str(RESTIC_CACHE), "--quiet"] + args,
-                          capture_output=True, text=text, timeout=timeout)
+    argv = ["restic", "-r", path, "--password-file", f"{P['repo_keys']}/{repo}.key",
+            "--no-lock", "--cache-dir", str(RESTIC_CACHE), "--quiet"] + args
+    if not RESTIC_READS.acquire(timeout=RESTIC_WAIT):
+        busy = "the console is running as many repository reads as it allows: try again in a moment"
+        return subprocess.CompletedProcess(argv, 75, "" if text else b"", busy if text else busy.encode())
+    try:
+        return subprocess.run(argv, capture_output=True, text=text, timeout=timeout)
+    finally:
+        RESTIC_READS.release()
 
 
 def _profile_of(snap):
@@ -1537,7 +1556,8 @@ def assistant_test(url, model, timeout=60):
         return {"ok": False, "error": "url: http(s)://host:port/v1"}
     a = CM.cfg().get("assistant") or {}
     hdr = {"Content-Type": "application/json"}
-    key = _api_key(a.get("key_host"))
+    # the stored key goes to the configured endpoint only: a test of another url must not hand it over
+    key = _api_key(a.get("key_host")) if url == (a.get("url") or "").rstrip("/") else None
     if key:
         hdr["Authorization"] = f"Bearer {key}"
     out = {"ok": False}
@@ -5965,7 +5985,10 @@ class H(BaseHTTPRequestHandler):
 
     def _bearer_ok(self):
         tok = token()
-        return bool(tok) and self.headers.get("Authorization") == f"Bearer {tok}"
+        return bool(tok) and hmac.compare_digest(self.headers.get("Authorization") or "", f"Bearer {tok}")
+
+    def _loopback(self):
+        return self.client_address[0] in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
 
     def _allowed(self, need):
         mode = console_mode()
@@ -6028,6 +6051,14 @@ class H(BaseHTTPRequestHandler):
         name = os.path.basename(path.rstrip("/")) or "root"
         if is_dir:
             name += ".tar"
+        if not RESTIC_DUMPS.acquire(timeout=RESTIC_WAIT):
+            return self._json({"error": "two downloads are running already: try again when one ends"}, 503)
+        try:
+            return self._stream_dump_slot(host, snap, path, name, repo, rpath, is_dir)
+        finally:
+            RESTIC_DUMPS.release()
+
+    def _stream_dump_slot(self, host, snap, path, name, repo, rpath, is_dir):
         p = subprocess.Popen(["restic", "-r", rpath, "--password-file", f"{P['repo_keys']}/{repo}.key",
                               "--no-lock", "--cache-dir", str(RESTIC_CACHE), "--quiet", "dump", snap, path],
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -6074,7 +6105,9 @@ class H(BaseHTTPRequestHandler):
             return self._json({"mode": console_mode(), "user": w[0] if w else None, "role": w[1] if w else None,
                                "accounts": bool(AC.users())})
         # accounts mode: everything below needs a session (Prometheus' /metrics and the assets excepted)
-        if not (p.startswith("/assets/") or p in ("/favicon.ico", "/favicon.svg", "/metrics")) and not self._allowed("view"):
+        # /metrics without sign-in for the head's own Prometheus (loopback) only: it names hosts, repos, versions
+        if not (p.startswith("/assets/") or p in ("/favicon.ico", "/favicon.svg") or (p == "/metrics" and self._loopback())) \
+                and not self._allowed("view"):
             if p.startswith("/api/"):
                 return self._deny("view")
             return self._redirect("/login?next=" + urllib.parse.quote(self.path, safe=""))
@@ -6384,7 +6417,7 @@ class H(BaseHTTPRequestHandler):
                 return self._json(explain_hygiene(body["host"], body["id"]))
             return self._json({"error": "unknown kind/host"}, 400)
         if self.path in ("/api/v1/assistant-test", "/api/v1/assistant-key"):
-            need = "admin" if self.path.endswith("-key") else "operate"
+            need = "admin"                # like setAssistant: it reaches out to a url the caller names
             if not self._allowed(need):
                 return self._deny(need)
             try:

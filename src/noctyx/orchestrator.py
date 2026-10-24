@@ -114,7 +114,7 @@ def ensure_rest(c, bounded=True):
     if bounded and len(fails) >= 3:
         print("  NAS rest-server is down: 3 starts failed in 6 h, not trying again (noctyx heal reports it)")
         return False
-    r = nas_ssh(c, f"sh ~/{c['server']['nas_ssh']['dir']}/run.sh start", timeout=60)
+    r = nas_ssh(c, f"sh ~/{shlex.quote(c['server']['nas_ssh']['dir'])}/run.sh start", timeout=60)
     ok = rest_up(c)
     audit("nas-rest-restart", ok=ok, out=(r.stdout or b"").decode()[-200:])
     print(f"  NAS rest-server was down: restart {'OK' if ok else 'FAILED'}")
@@ -162,17 +162,19 @@ def cmd_nas_rest(a):
                  (f"{d}/tls/server.crt", str(crt), "0644"),
                  (f"{d}/tls/server.key", str(key), "0600"),
                  (f"{d}/htpasswd", f"{P['etc']}/htpasswd", "0600")]
-        nas_ssh(c, f"umask 077; mkdir -p ~/{d}/bin ~/{d}/tls && chmod 700 ~/{d}")
+        q = shlex.quote(d)               # ~/'dir': the tilde still expands, the rest stays one word
+        nas_ssh(c, f"umask 077; mkdir -p ~/{q}/bin ~/{q}/tls && chmod 700 ~/{q}")
         for dst, src, mode in files:
             # contents over stdin — no secret ever on a command line
-            r = nas_ssh(c, f"cat > ~/{dst}.new && chmod {mode} ~/{dst}.new && mv -f ~/{dst}.new ~/{dst}",
+            qd = shlex.quote(dst)
+            r = nas_ssh(c, f"cat > ~/{qd}.new && chmod {mode} ~/{qd}.new && mv -f ~/{qd}.new ~/{qd}",
                         stdin=open(src, "rb").read(), timeout=300)
             if r.returncode:
                 sys.exit(f"deploy {dst} failed: {r.stderr.decode()[-200:]}")
             print(f"  -> {nas_name(c)}:~/{dst}")
         a.action = "restart"
     if a.action in ("start", "stop", "restart", "status"):
-        r = nas_ssh(c, f"sh ~/{d}/run.sh {a.action}", timeout=60)
+        r = nas_ssh(c, f"sh ~/{shlex.quote(d)}/run.sh {a.action}", timeout=60)
         print((r.stdout or b"").decode().strip(), (r.stderr or b"").decode().strip())
         if a.action != "stop":
             up = rest_up(c)
@@ -360,7 +362,12 @@ class spindle_lock:
 # path to a client-side curl makes the probe silently return 0 bytes/s, which the
 # floor logic then reads as "network too slow" and refuses the job — a false
 # negative that looks like a network problem.
-CLIENT_CA = f"{P['tls']}/ca.crt"
+CLIENT_CA = f"{P['node_etc']}/tls/ca.crt"          # where install-agent puts the CA on a node
+
+
+def client_ca(cfg_, h):
+    """The CA path on the machine that runs the probe: the head's own TLS directory, a node's node_etc."""
+    return f"{P['tls']}/ca.crt" if h.get("local") or is_head(cfg_, h) else CLIENT_CA
 
 
 def net_floor(cfg_, h, probe_bytes=20_000_000):
@@ -368,7 +375,7 @@ def net_floor(cfg_, h, probe_bytes=20_000_000):
     that could take days. Returns Mbit/s or None if unmeasurable."""
     s = cfg_["server"]
     url = f"https://{s['address']}:{s['directory_port']}/api/v1/probe?bytes={probe_bytes}"
-    r = ssh(cfg_, h, f"curl -s --cacert {shlex.quote(CLIENT_CA)} -o /dev/null "
+    r = ssh(cfg_, h, f"curl -s --cacert {shlex.quote(client_ca(cfg_, h))} -o /dev/null "
                      f"-w '%{{speed_download}}' --max-time 120 {shlex.quote(url)}", timeout=180)
     try:
         bps = float(r.stdout.strip())
@@ -444,7 +451,7 @@ def _run_backup(c, h, profile, dry, force_low_net, _unlocked=False):
     if net is None and not force_low_net:
         print(f"  SKIP {h['name']}: could not measure the path (probe failed). Refusing to"
               f" start a possibly multi-day job blind. Check the directory service on"
-              f" :{c['server']['directory_port']} and the client CA at {CLIENT_CA},"
+              f" :{c['server']['directory_port']} and the client CA at {client_ca(c, h)},"
               f" or pass --force-low-net.")
         audit("backup-refused-unmeasurable", host=h["name"])
         return False
@@ -519,11 +526,13 @@ def _sweep_root_owned_repo_files(c):
     for root in roots:
         try:
             subprocess.run(["sudo", "sh", "-c",
-                            f"find {root} -mindepth 1 {sel} "
-                            f"-exec chown -h {P['repo_owner']}:{P['repo_owner']} {{{{}}}} + 2>/dev/null; true"],
+                            f"find {shlex.quote(root)} -mindepth 1 {sel} "
+                            # {{}} renders as {}: find -exec … + needs it bare (an f-string's {{{{}}}} was {{}},
+                            # which find refuses, and 2>/dev/null hid it: the sweep never ran before)
+                            f"-exec chown -h {shlex.quote(P['repo_owner'] + ':' + P['repo_owner'])} {{}} + 2>/dev/null; true"],
                            capture_output=True, text=True, timeout=180)
             r = subprocess.run(["sudo", "sh", "-c",
-                                f"find {root} -mindepth 1 {sel} -print | wc -l"],
+                                f"find {shlex.quote(root)} -mindepth 1 {sel} -print | wc -l"],
                                capture_output=True, text=True, timeout=60)
             if (r.stdout or "0").strip() not in ("0", ""):
                 audit("repo-ownership-sweep-incomplete", root=root, remaining=r.stdout.strip())
@@ -1536,6 +1545,37 @@ def _dump_lines(v, indent):
         + "\n" + " " * indent + "}"
 
 
+def _top_key(text, key):
+    """(where the key's quote is, where its value's "{" is) for a TOP-LEVEL key of the site config whose value is
+    an object, or None. Walks the JSON (strings, objects, arrays), so a nested key of the same name, a key
+    inside a comment string, or "key":{ without a space are all told apart from the real one."""
+    depth, i, n, want = 0, 0, len(text), json.dumps(key)
+    while i < n:
+        ch = text[i]
+        if ch == '"':
+            j, esc = i + 1, False
+            while j < n and (esc or text[j] != '"'):
+                esc = not esc and text[j] == "\\"
+                j += 1
+            tok = text[i:j + 1]
+            k = j + 1
+            while k < n and text[k] in " \t\r\n":
+                k += 1
+            if depth == 1 and k < n and text[k] == ":" and tok == want:
+                v = k + 1
+                while v < n and text[v] in " \t\r\n":
+                    v += 1
+                return (i, v) if v < n and text[v] == "{" else None
+            i = j + 1
+            continue
+        if ch in "{[":
+            depth += 1
+        elif ch in "}]":
+            depth -= 1
+        i += 1
+    return None
+
+
 def _write_block(key, value, lines=False):
     """Rewrite ONLY one top-level block of the site config ("schedule", "retention",
     "backup_policy"). The rest of the file is hand-written (comments, aligned
@@ -1543,18 +1583,20 @@ def _write_block(key, value, lines=False):
     A missing block is inserted before "schedule", or at the end. Verified by re-parsing before
     the atomic replace; owner/mode preserved (the UI runs as root)."""
     text = open(CFG_PATH).read()
-    if f'"{key}": {{' not in text:
-        if '"schedule": {' not in text:            # no schedule block: last, before the closing brace
+    loc = _top_key(text, key)
+    if loc is None:
+        sched = _top_key(text, "schedule")
+        if sched is None:                          # no schedule block: last, before the closing brace
             end = text.rstrip().rindex("}")
             body = text[:end].rstrip()
             new = (body + ("," if not body.endswith(("{", ",")) else "") + f'\n  "{key}": '
                    + _dump_compact_leaves(value, 2) + "\n" + text[end:])
             return _replace_cfg(new, key, value)
-        at = text.index('"schedule": {')
+        at = sched[0]
         ls = text.rfind("\n", 0, at) + 1
         new = text[:ls] + text[ls:at] + f'"{key}": ' + _dump_compact_leaves(value, at - ls) + ",\n\n" + text[ls:]
         return _replace_cfg(new, key, value)
-    j = text.index("{", text.index(f'"{key}": {{'))
+    j = loc[1]
     depth, k, in_str, esc = 0, j, False, False
     while True:
         ch = text[k]

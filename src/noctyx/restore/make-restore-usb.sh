@@ -36,12 +36,13 @@ run(){ if [[ -n $DRY ]]; then echo "DRY: $*"; else "$@"; fi; }
   [[ $FS == vfat || $FS == fat32 || $FS == fat16 ]] || { echo "$USB is $FS, not FAT — EFI firmware + the Ubuntu installer live env expects FAT labels; refusing" >&2; exit 1; }
 }
 
-put(){ [[ -n $DRY ]] && { echo "DRY: install -m $1 src $MNT/$2"; return; }
+put(){ [[ -n $DRY ]] && { echo "DRY: install -m $1 $2 $MNT/$3"; return; }    # mode, source, destination under $MNT
        install -m "$1" "$2" "$MNT/$3"; }
+shopt -s nullglob                    # no keys or creds: no loop, not an install of the literal pattern
 echo "== building restore payload on ${USB:-dry-run} =="
 run mkdir -p $MNT/keys $MNT/creds
-for k in @REPO_KEYS@/*.key;      do put 600 "$k" keys keys/$(basename "$k"); done
-for p in @REPO_CREDS@/*.pass;    do put 600 "$p" creds creds/$(basename "$p"); done
+for k in @REPO_KEYS@/*.key;      do put 600 "$k" "keys/$(basename "$k")"; done
+for p in @REPO_CREDS@/*.pass;    do put 600 "$p" "creds/$(basename "$p")"; done
 run install -m 700 "$HERE/noctyx-restore.sh" $MNT/noctyx-restore.sh
 run install -m 700 "$HERE/noctyx-menu.sh" $MNT/noctyx-menu.sh
 # the head node's own rebuild (GPT + ESP + /boot + LVM): rendered for this site like the rest

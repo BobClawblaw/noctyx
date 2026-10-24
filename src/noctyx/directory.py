@@ -138,6 +138,19 @@ class Handler(BaseHTTPRequestHandler):
             "/api/v1/restore-script", "/api/v1/snapshots/<host>"]}, 404)
 
 
+def discovery_reply():
+    """What a discovery probe gets: built for each probe, so a host added since (noctyx directory) is in it."""
+    return json.dumps({
+        "service": "noctyx",
+        "server": S["hostname"],
+        "address": S["address"],
+        "rest_url": f"https://{S['address']}:{S['rest_port']}",
+        "directory_url": f"https://{S['address']}:{PORT}",
+        "hosts": [h["name"] for h in (load("hosts.json", {}) or {}).get("hosts", [])],
+        "ts": now(),
+    }).encode()
+
+
 def udp_discovery():
     """Answer a broadcast 'NX_DISCOVER?' (or 'CM_DISCOVER?') with where to find us.
 
@@ -148,15 +161,6 @@ def udp_discovery():
     so.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     so.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     so.bind(("0.0.0.0", UDP_PORT))
-    reply = json.dumps({
-        "service": "noctyx",
-        "server": S["hostname"],
-        "address": S["address"],
-        "rest_url": f"https://{S['address']}:{S['rest_port']}",
-        "directory_url": f"https://{S['address']}:{PORT}",
-        "hosts": [h["name"] for h in (load("hosts.json", {}) or {}).get("hosts", [])],
-        "ts": now(),
-    }).encode()
     while True:
         try:
             data, peer = so.recvfrom(2048)
@@ -164,7 +168,7 @@ def udp_discovery():
             continue
         if data.strip().startswith((b"NX_DISCOVER", b"CM_DISCOVER")):
             try:
-                so.sendto(reply, peer)
+                so.sendto(discovery_reply(), peer)
             except OSError:
                 pass
 

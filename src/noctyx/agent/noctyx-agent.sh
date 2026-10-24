@@ -28,7 +28,8 @@ LOCK=$STATE/agent.lock
 VERBOSE=${NOCTYX_VERBOSE:-0}
 
 log() { printf '[cm-agent] %s\n' "$*" >&2; }
-die() { log "FATAL: $*"; emit "{\"event\":\"error\",\"host\":\"$(hostname -s)\",\"message\":\"$1\"}"; exit 1; }
+json_str() { local s=${1//\\/\\\\}; s=${s//\"/\\\"}; s=${s//$'\n'/\\n}; s=${s//$'\r'/}; s=${s//$'\t'/ }; printf '%s' "$s"; }
+die() { log "FATAL: $*"; emit "{\"event\":\"error\",\"host\":\"$(hostname -s)\",\"message\":\"$(json_str "$1")\"}"; exit 1; }
 
 emit() { printf '@RESULT_TOKEN@ %s\n' "$1"; [[ -d $STATE ]] && printf '%s\n' "$1" >> "$AUDIT"; }
 

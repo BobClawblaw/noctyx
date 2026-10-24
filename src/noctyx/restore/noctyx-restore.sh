@@ -308,10 +308,12 @@ if [[ -z $DRY ]]; then
   chroot "$MNT" update-grub || log "WARNING: update-grub failed"
 
   # Write an EFI boot entry. Names differ per distro; try the common ones.
-  DISKP="$DISK" ESPP="$ESPP" chroot "$MNT" sh -c '
+  # the ESP's partition number, from its device name (sda1 -> 1, nvme0n1p2 -> 2): not always the first
+  ESPN=${ESPP##*[!0-9]}
+  DISKP="$DISK" ESPN="${ESPN:-1}" chroot "$MNT" sh -c '
     for f in EFI/ubuntu/shimaa64.efi EFI/ubuntu/shimx64.efi EFI/boot/bootaa64.efi EFI/boot/bootx64.efi; do
       if [ -f "/boot/efi/$f" ]; then
-        efibootmgr -c -d "$DISKP" -p 1 -L Ubuntu -l "\\\\$f" && { echo "  efibootmgr entry created for $f"; exit 0; }
+        efibootmgr -c -d "$DISKP" -p "$ESPN" -L Ubuntu -l "\\\\$f" && { echo "  efibootmgr entry created for $f"; exit 0; }
       fi
     done
     echo "  WARNING: no shim/loader found on the ESP — the firmware may need a manual boot entry"'

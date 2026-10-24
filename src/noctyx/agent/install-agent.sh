@@ -20,6 +20,11 @@ while [[ $# -gt 0 ]]; do case $1 in
   *) echo "unknown arg: $1" >&2; exit 1;;
 esac; done
 [[ -n $HOST ]] || { echo "usage: $0 --host NAME [--profile P] [--with-client-timer]" >&2; exit 1; }
+# these go into shell commands on the node: plain names and paths only, so none needs quoting there
+[[ $PROFILE =~ ^[A-Za-z0-9_-]+$ ]] || { echo "profile '$PROFILE': letters, digits, - and _ only" >&2; exit 1; }
+for v in NX_NODE_ETC NX_AGENT_BIN NX_AGENT_UNIT NX_UNIT_PREFIX; do
+  [[ ${!v:-} =~ ^[A-Za-z0-9/._@-]+$ ]] || { echo "paths: $v '${!v:-}' has characters a node's shell would split or expand" >&2; exit 1; }
+done
 [[ $EUID -eq 0 ]] || { echo "run as root (needs $SSH_KEY)" >&2; exit 1; }
 
 read -r ADDR ARCH REPO LOCAL < <(python3 - "$CFG" "$HOST" <<'PY'
@@ -33,7 +38,7 @@ PY
 )
 [[ $ADDR == MISSING || -z $ADDR ]] && { echo "host '$HOST' not in $CFG (or has no address)" >&2; exit 1; }
 
-SRV=$(python3 -c "import json;c=json.load(open('$CFG'));s=c['server'];print(s.get('rest_host') or s['address'],s['rest_port'],s['tls']['ca'],sep='\t')")
+SRV=$(python3 -c 'import json,sys;c=json.load(open(sys.argv[1]));s=c["server"];print(s.get("rest_host") or s["address"],s["rest_port"],s["tls"]["ca"],sep="\t")' "$CFG")
 IFS=$'\t' read -r SRV_ADDR SRV_PORT CA_LOCAL <<<"$SRV"
 KEY_LOCAL="$NX_REPO_KEYS/$REPO.key"
 CREDS_LOCAL="$NX_REPO_CREDS/$NX_REPO_DIR_PREFIX$REPO.pass"
