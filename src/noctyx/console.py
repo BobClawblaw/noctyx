@@ -140,6 +140,11 @@ ACTIONS = {
     "recipeCatalog":  lambda p: [ORCH, "recipe-catalog", "--name", p["name"]]
                                 + (["--remove"] if p.get("remove") else ["--json", json.dumps(p["entry"])]),
     "policyApply": lambda: [ORCH, "policy-apply"],
+    # a component alert's buttons: Noctyx's own upgrade (the orchestrator plans it again from the last versions
+    # check, refuses what Noctyx does not install, and checks the host again after), or skipping one release
+    "upgradeComponent": lambda p: [ORCH, "upgrade", "--host", p["host"], "--component", p["component"]],
+    "skipRelease": lambda p: [ORCH, "versions-skip", "--host", p["host"], "--component", p["component"]]
+                             + (["--undo"] if p.get("undo") else ["--release", p["release"]]),
     "dumpsNow":   lambda p: [ORCH, "dumps"] + (["--host", p["host"]] if p.get("host") else []),
     "setSchedule": lambda p: [ORCH, "schedule-set", "--profile", p["profile"]]
                              + (["--host", p["host"]] if p.get("host") else [])
@@ -152,10 +157,10 @@ VALID_PROFILES = set(CFG.get("profiles", {}).keys())
 # host-REQUIRED actions: their builders index p["host"] directly; missing would KeyError
 HOST_REQUIRED = {"backupHost", "verifyHost", "reboot", "rebootFinish"}
 RECIPE_ACTIONS = {"recipeDeploy", "recipeStop", "recipeStart", "recipeRollback", "recipeCatalog"}
-PARAM_ACTIONS = HOST_REQUIRED | RECIPE_ACTIONS | {"setAssistant", "setConsoleDefaults", "setSchedule", "restore", "hygieneFix", "setPolicy", "dumpsNow"}
+PARAM_ACTIONS = HOST_REQUIRED | RECIPE_ACTIONS | {"upgradeComponent", "skipRelease", "setAssistant", "setConsoleDefaults", "setSchedule", "restore", "hygieneFix", "setPolicy", "dumpsNow"}
 # Only these wait for the one-long-job slot; everything else (status, schedule
 # edits, probes) runs at once instead of queueing silently behind a 3-hour seed.
-LONG_ACTIONS = {"backup", "verify", "copy", "prune", "backupHost", "verifyHost", "restore", "hygieneFix"}
+LONG_ACTIONS = {"backup", "verify", "copy", "prune", "backupHost", "verifyHost", "restore", "hygieneFix", "upgradeComponent"}
 HYGIENE_FILE = UI_STATE / "hygiene.json"
 
 
@@ -234,7 +239,7 @@ def console_mode():
 
 
 # what each action needs: everything else that changes something needs "operate"
-ADMIN_ACTIONS = {"setPolicy", "setSchedule", "setAssistant", "setConsoleDefaults", "recipeCatalog",
+ADMIN_ACTIONS = {"setPolicy", "setSchedule", "setAssistant", "setConsoleDefaults", "recipeCatalog", "upgradeComponent",
                  "reboot", "rebootFinish", "nasRest", "policyApply"}
 NEED_RANK = {"view": 0, "operate": 1, "admin": 2}
 _LOGIN_FAILS = None          # ip -> [failures, locked_until]; kept on disk so a restart does not reset it
@@ -320,6 +325,14 @@ def valid_params(name: str, p: dict) -> bool:
             return False
     if name == "setConsoleDefaults":
         return not CM.validate_console(p.get("settings"))[1]
+    if name in ("upgradeComponent", "skipRelease"):
+        row = next((r for r in (_versions().get("hosts") or {}).get(p.get("host"), [])
+                    if r["component"] == p.get("component")), None)
+        if not row:
+            return False
+        if name == "upgradeComponent":
+            return bool((row.get("fix") or {}).get("argv"))
+        return bool(p.get("undo")) or (row["state"] == "upgrade" and p.get("release") == row.get("latest"))
     if name == "setAssistant":
         a = p.get("assistant")
         if not isinstance(a, dict) or "key_host" in a or CM.validate_assistant(a)[1]:
@@ -1701,13 +1714,16 @@ def metrics_text():
     def components():
         if not CM.VERSIONS.exists():      # not checked yet: the nightly run (or `noctyx versions`) makes it
             return
-        inv = json.loads(CM.VERSIONS.read_text())
+        inv = _versions()
         out.append("# HELP noctyx_component_behind 1: a critical component is older than Noctyx's pin, or missing.")
         out.append("# HELP noctyx_component_upgrade_available 1: a newer release than the pin exists upstream.")
         for host, rows in (inv.get("hosts") or {}).items():
             for r in rows:
+                fx = r.get("fix") or {}           # the alert names the fix that works, not one that does nothing
+                how = (f"sudo noctyx upgrade --host {host} --component {r['component']} (or the alert's upgrade button)"
+                       if fx.get("argv") else fx.get("why") or r.get("upgrade") or "")
                 l = _lbl(host=host, component=r["component"], installed=r.get("installed") or "",
-                         pinned=r.get("pinned") or "", latest=r.get("latest") or "", upgrade=r.get("upgrade") or "")
+                         pinned=r.get("pinned") or "", latest=r.get("latest") or "", upgrade=how)
                 out.append(f"noctyx_component_behind{l} {int(r['state'] in ('behind', 'missing'))}")
                 out.append(f"noctyx_component_upgrade_available{l} {int(r['state'] == 'upgrade')}")
         out.append(f"noctyx_versions_timestamp_seconds {inv.get('ts', 0)}")
@@ -1780,6 +1796,14 @@ def alerts_view():
         if t:
             a["triage"], a["triage_model"] = t.get("triage"), t.get("triage_model")
     recent = [r for r in recent if r.get("event") != "alert-triage"]
+    inv = None
+    for a in active:                      # a component alert carries what its buttons can do
+        if a["name"] in ("ComponentUpgradeAvailable", "ComponentBehind") and a.get("host"):
+            inv = inv or _versions()
+            row = next((r for r in (inv.get("hosts") or {}).get(a["host"], [])
+                        if r["component"] == (a.get("labels") or {}).get("component")), None)
+            if row:
+                a["fix"] = {k: row.get(k) for k in ("component", "state", "installed", "latest", "fix")}
     sev = {"critical": 0, "warning": 1}
     active.sort(key=lambda a: (sev.get(a["severity"], 2), a["name"] or ""))
     sil, serr = silences_view()
@@ -2026,10 +2050,12 @@ def probe_last():
 
 
 def _versions():
+    """The last versions check, skipped releases marked, each row with how Noctyx would upgrade it (`fix`)."""
     try:
-        return json.loads(CM.VERSIONS.read_text())
-    except (OSError, ValueError):
-        return {"ts": 0, "hosts": {}}
+        inv = CM.versions_view()
+    except Exception:
+        inv = {}
+    return inv if inv.get("hosts") is not None else {"ts": 0, "hosts": {}}
 
 
 def overview():
@@ -2280,6 +2306,7 @@ a.menu-title{text-decoration:none;display:inline-flex;align-items:center;gap:6px
 .hbtn.gear{display:inline-flex;align-items:center;padding:5px 8px}
 .huser{display:inline-flex;align-items:center;gap:8px;font:12px var(--sans);color:var(--fg-dim);flex:0 0 auto}
 .huser b{color:var(--fg)} .huser .role{font:10.5px var(--mono);border:1px solid var(--line);border-radius:999px;padding:1px 7px}
+.compbtns{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:5px 0 2px;white-space:normal}
 .setwrap{position:fixed;inset:0;z-index:200} .setwrap.hide{display:none}
 .setscrim{position:absolute;inset:0;background:var(--scrim)}
 .setpanel{position:absolute;top:0;right:0;bottom:0;width:min(520px,100vw);overflow:auto;background:var(--bg-1);border-left:1px solid var(--line);padding:18px 20px 40px;box-shadow:-12px 0 40px rgba(0,0,0,.35)}
@@ -4113,9 +4140,9 @@ function rDetail(f){
   h=(o.hosts||[]).find(x=>x.name==SEL)||{name:SEL},
   sn=(o.snapshots&&o.snapshots.hosts||{})[SEL]||{},g=f.gpu_stats;
  // monitored only (a Mac, or backup:false): its own backups are reported, never run from here
- const vs=o.versions||{},CMARK={ok:'ok',upgrade:'warn',behind:'bad',missing:'bad',ahead:'mut',unknown:'mut'};
+ const vs=o.versions||{},CMARK={ok:'ok',upgrade:'warn',behind:'bad',missing:'bad',ahead:'mut',unknown:'mut',skipped:'mut'};
  const comps=((vs.hosts||{})[SEL]||[]).map(r=>`<tr><td>${esc(r.component)}</td><td>${esc(r.installed||'—')}</td><td>${esc(r.pinned||'—')}</td><td>${esc(r.latest||'—')}</td>
-  <td class=${CMARK[r.state]||'mut'} title="${esc(r.upgrade||'')}">${esc(r.detail)}${(r.state=='behind'||r.state=='missing'||r.state=='upgrade')&&r.upgrade?` · <code>${esc(r.upgrade)}</code>`:''}</td></tr>`).join('');
+  <td class=${CMARK[r.state]||'mut'}>${esc(r.detail)}${r.fix||r.state=='skipped'?`<div class=compbtns>${compBtns(SEL,r)}</div>`:''}</td></tr>`).join('');
  const mon=h.os=='macos'||!!h.monitored_only,tm=f.timemachine||{},tmOld=mon&&h.os=='macos'&&(!tm.latest_ts||Date.now()/1000-tm.latest_ts>2*86400);
  const rows=(f.last_jobs||[]).map(j=>
   `<tr><td>${esc(fmtTs(j.ts))}</td><td>${esc(j.event||'')}</td><td class="${(j.rc??0)==0?'ok':'bad'}">${j.rc??''}</td><td>${esc(j.snapshot||'')}</td></tr>`).join('');
@@ -4792,6 +4819,22 @@ async function unsilenceAlert(id,btn){
   const p=PANELS.find(x=>x.id=='alerts');if(p){const data=await p.api();p._data=data;repaint('alerts',data)}
  }catch(e){btn.disabled=false;btn.textContent=was;btn.title='unsilence failed: '+e.message;btn.classList.add('bad')}
 }
+/* a component's buttons (alerts and the Machine Report): Noctyx's own upgrade where it has one, or skip the release */
+function compBtns(host,f){if(!f)return '';const x=f.fix||{},h=esc(JSON.stringify(host)),c=esc(JSON.stringify(f.component));let b='';
+ if(x.argv)b+=`<button class=silbtn onclick="event.stopPropagation();compUpgrade(${h},${c},${esc(JSON.stringify(x.what||''))},this)" title="${esc(x.what||'')}">upgrade</button>`;
+ else if(x.why)b+=`<span class=mut style="font:10px var(--mono)" title="${esc(x.why)}">no upgrade here ⓘ</span>`;
+ if(f.state=='upgrade'&&f.latest)b+=`<button class=silbtn onclick="event.stopPropagation();compSkip(${h},${c},${esc(JSON.stringify(f.latest))},false,this)" title="stay on ${esc(f.installed||'this version')}: no alert for ${esc(f.latest)}; a later release alerts again">skip ${esc(f.latest)}</button>`;
+ if(f.state=='skipped')b+=`<button class=silbtn onclick="event.stopPropagation();compSkip(${h},${c},'',true,this)" title="alert on this release again">unskip</button>`;
+ return b}
+async function compUpgrade(host,component,what,btn){
+ if(!confirm(`${what}?\n\nRuns as a job (Jobs / Audit shows it), then checks ${host}'s versions again: the alert clears when it is current.`))return;
+ if(btn){btn.disabled=true;btn.textContent='upgrading…'}
+ const r=await act('upgradeComponent',{host,component});if(r&&r.error&&btn){btn.disabled=false;btn.textContent='upgrade';alert(r.error)}}
+async function compSkip(host,component,release,undo,btn){
+ if(!undo&&!confirm(`Skip ${component} ${release} on ${host}?\n\nThe alert resolves and stays quiet until a newer release than ${release} appears.`))return;
+ if(btn){btn.disabled=true;btn.textContent=undo?'…':'skipping…'}
+ const r=await act('skipRelease',undo?{host,component,undo:true}:{host,component,release});
+ if(r&&r.error&&btn){btn.disabled=false;btn.textContent=undo?'unskip':'skip '+release;alert(r.error)}}
 function rAlerts(d){
  if(!d)return '<div class=empty>loading…</div>';
  const act=d.active||[],rec=d.recent||[];
@@ -4801,7 +4844,7 @@ function rAlerts(d){
  const rows=act.map(a=>{const t=alertTarget(a);const fp=a.fingerprint||'';const comp=(a.labels||{}).component||'';
   const sil=fp?`<button class=silbtn onclick="event.stopPropagation();silenceAlert('${fp}',60,this)" title="silence this one alert for 1 hour">1h</button><button class=silbtn onclick="event.stopPropagation();silenceAlert('${fp}',1440,this)" title="silence this one alert for 24 hours">24h</button><button class=silbtn onclick="event.stopPropagation();silenceAlert('${fp}',10080,this)" title="silence this one alert for 7 days">7d</button>`:'';
   return `<tr ${goAttr({host:t.host,panel:t.panel,tab:t.tab})} title="open ${esc(t.what||'')}"><td><span class="tag ${a.severity=='critical'?'bad':'warn'}">${esc(a.severity||'')}</span></td>
-  <td>${esc(a.name||'')}${comp?`<div class=mut style="font:10px var(--mono)">${esc(comp)}</div>`:''}</td><td>${esc(a.host||'')}</td><td>${esc(a.summary||'')}${a.triage?`<div style="font:11.5px/1.5 var(--sans);color:var(--fg);margin-top:4px;white-space:normal;border-left:2px solid var(--line);padding-left:8px">${esc(a.triage)}<span class=mut style="font:10px var(--mono)"> — ${esc(a.triage_model||'assistant')}</span></div>`:''}</td><td class=mut>${esc(agoS(a.since))}</td><td class=golnk>${t.what?esc(t.what)+' →':''}</td><td class=nowrap>${sil}</td></tr>`}).join('');
+  <td>${esc(a.name||'')}${comp?`<div class=mut style="font:10px var(--mono)">${esc(comp)}</div>`:''}</td><td>${esc(a.host||'')}</td><td>${esc(a.summary||'')}${a.fix?`<div class=compbtns>${compBtns(a.host,a.fix)}</div>`:''}${a.triage?`<div style="font:11.5px/1.5 var(--sans);color:var(--fg);margin-top:4px;white-space:normal;border-left:2px solid var(--line);padding-left:8px">${esc(a.triage)}<span class=mut style="font:10px var(--mono)"> — ${esc(a.triage_model||'assistant')}</span></div>`:''}</td><td class=mut>${esc(agoS(a.since))}</td><td class=golnk>${t.what?esc(t.what)+' →':''}</td><td class=nowrap>${sil}</td></tr>`}).join('');
  const sl=(d.silenced||[]).map(s=>{const m=(s.matchers||[]).map(x=>esc(x.name)+'='+esc(x.value)).join(' · ');
   const until=s.ends?fmtTs(new Date(s.ends).getTime()/1000):'—';
   return `<tr><td class=mut style="font:10.5px var(--mono)">${m}</td><td class=mut>${esc(until)}</td><td class=mut>${esc(s.by||'')}</td>

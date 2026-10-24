@@ -137,7 +137,7 @@ to upgrade (apt takes what the distro carries, which can lag the upstream releas
 | restic | the head and every Linux node | head: `setup tools --force`; node: `install-agent --host NAME` |
 | rest-server | the head (unless the endpoint is on the NAS) | `setup tools --force` |
 | prometheus | the head | `setup metrics --force` |
-| node_exporter | the head and every Linux node | head: `setup metrics --force`; node: `noctyx tool install-node-metrics --host NAME` |
+| node_exporter | the head and every Linux node | `noctyx tool install-node-metrics --host NAME` (a head whose exporter came from `setup metrics`: `setup metrics --force`) |
 | agent | every Linux node (compared by hash with the agent this Noctyx renders) | `install-agent --host NAME` |
 
 A component is judged by who installed it. One in `/usr/local/bin` was installed by Noctyx and is held to Noctyx's
@@ -146,6 +146,37 @@ upgrade command is that package manager's. States: `✓` current, `↑` a newer 
 `·` newer than the pin (upgraded by hand), `?` the machine did not answer. A Mac head has the head's rows; a Mac that is only monitored runs
 nothing Noctyx installs, so it has none. When `setup tools --force` or `setup metrics --force` replaces a binary, it
 restarts the service that runs it (`rest-server`, `prometheus`, `node-exporter`), so the new binary is the one running.
+
+**node_exporter from apt.** A Linux distro's archive can lag upstream by years (Ubuntu 24.04 carries 1.7.0), so
+`apt-get install --only-upgrade` changes nothing. `noctyx tool install-node-metrics` runs Noctyx's pinned
+node_exporter instead, checked against its SHA-256, in `/usr/local/bin/node_exporter`. The distro's package stays
+installed: the same unit, user and `ARGS`. A drop-in
+(`/etc/systemd/system/prometheus-node-exporter.service.d/noctyx.conf`) points the unit at the pinned binary and keeps
+the two defaults the distro build changes: the systemd collector on, and textfiles read from
+`/var/lib/prometheus/node-exporter`. To go back to the distro's binary, remove the drop-in and run
+`systemctl daemon-reload && systemctl restart prometheus-node-exporter`.
+
+### Acting on a component alert
+
+The console's Alerts panel and each machine's Components table carry the buttons; the CLI does the same:
+
+```bash
+sudo noctyx upgrade --host gpu-01 --component node_exporter     # Noctyx's own upgrade, then checks gpu-01 again
+sudo noctyx versions-skip --host gpu-01 --component node_exporter --release 1.12.1   # stay on what runs
+sudo noctyx versions-skip --host all --component prometheus --release 3.15.1         # every host
+sudo noctyx versions-skip --host gpu-01 --component node_exporter --undo             # alert on it again
+```
+
+- **upgrade** runs the row's Noctyx upgrade (the table above) as a job, then runs `noctyx versions --host` for
+  that machine, so the alert clears when the component is current. It needs an admin. Noctyx only ever
+  installs its own pin, so a row it cannot fix says why in place of the button: Noctyx itself (pip), anything
+  Homebrew manages, a head's Prometheus from apt (2.x to 3.x changes its config and storage), and a release newer
+  than Noctyx's pin, which arrives with the Noctyx release that moves the pin.
+- **skip** marks that release as skipped (`<state>/version-skips.json`) for that host, or for every host with
+  `--host all`. The row reads `skipped`, its alert resolves, and a later release alerts again. It needs an
+  operator, like a silence. Unlike a silence it has no end time, and it is tied to the release, not the alert.
+- The alert's text names the command that works (`noctyx upgrade …`, or why there is none), not a package
+  manager command that would change nothing.
 
 The nightly run refreshes the inventory (`<state>/versions.json`, upstream releases cached in
 `<state>/upstream-releases.json`). The console shows it in each machine's Components table and exports it on

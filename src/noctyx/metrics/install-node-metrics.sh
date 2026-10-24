@@ -8,7 +8,10 @@
 #   2. writes the exporter's TLS + basic-auth web config and ARGS FIRST, then
 #      installs the packages with --force-confold, so the exporter never
 #      listens unprotected (no client runs a firewall; a VPN may reach them too)
-#   3. installs the GPU/Docker textfile collector (15 s timer)
+#   3. installs the GPU/Docker textfile collector (15 s timer), and runs Noctyx's pinned node_exporter
+#      (checked against its SHA-256) in place of the distro's binary: the same unit, user and ARGS, with the
+#      two defaults the distro build changes kept (the systemd collector on, textfiles from
+#      /var/lib/prometheus/node-exporter)
 #   4. proves an authenticated TLS scrape from here
 # and finally (re)writes Prometheus's file_sd target list + scrape job.
 #
@@ -48,12 +51,38 @@ import json, sys
 c = json.load(open(sys.argv[1]))
 for h in c["hosts"]:
     if h.get("enabled", True) is not False and h.get("address") and h.get("os", "linux") == "linux":
-        print(h["name"], h["address"])
+        print(h["name"], h["address"], h.get("arch") or "x86_64")
 EOF
 )
 
+# Noctyx's pinned node_exporter, one download per architecture, checked against its pinned SHA-256
+NE_DIR=$(mktemp -d); trap 'rm -rf "$NE_DIR"' EXIT
+ne_bin() {
+  local f=$NE_DIR/node_exporter.$1
+  if [[ ! -s $f ]]; then
+    "$PY3" - "$1" "$f" >&2 <<'PYEOF'
+import sys
+from noctyx import setup
+open(sys.argv[2], "wb").write(setup._from_tar(setup._fetch("node_exporter", "linux", sys.argv[1]), ["node_exporter"])["node_exporter"])
+PYEOF
+  fi
+  echo "$f"
+}
+NE_DROPIN=$NE_DIR/noctyx.conf
+cat > "$NE_DROPIN" <<'UNITEOF'
+# managed by Noctyx (noctyx tool install-node-metrics): Noctyx's pinned node_exporter in place of the
+# distro's binary, with the two defaults the distro build changes kept
+[Service]
+ExecStart=
+ExecStart=/usr/local/bin/node_exporter $ARGS --collector.systemd --collector.textfile.directory=/var/lib/prometheus/node-exporter
+UNITEOF
+pin_exporter() {   # the pinned binary and the unit's drop-in (the caller restarts the exporter)
+  put 0755 "$(ne_bin "$ARCH")" /usr/local/bin/node_exporter
+  put 0644 "$NE_DROPIN" /etc/systemd/system/prometheus-node-exporter.service.d/noctyx.conf
+}
+
 for row in "${HOSTS[@]}"; do
-  read -r NAME ADDR <<<"$row"
+  read -r NAME ADDR ARCH <<<"$row"
   [[ -n $ONLY && $NAME != "$ONLY" ]] && continue
   E=(ssh -o BatchMode=yes -o ConnectTimeout=8 -o StrictHostKeyChecking=accept-new -i "$SSH_KEY" "$SSH_USER@$ADDR")
   put() { "${E[@]}" "sudo -n install -d '$(dirname "$3")' && sudo -n install -m '$1' -o root -g root /dev/stdin '$3'" < "$2"; }
@@ -65,7 +94,17 @@ for row in "${HOSTS[@]}"; do
 
   if [[ $ADDR == "$HEAD" ]]; then
     "${E[@]}" "sudo -n systemctl daemon-reload && sudo -n systemctl enable --now @TEXTFILE_UNIT@.timer" >/dev/null
-    echo "   head node: textfile collector only (existing exporter + scrape kept)"
+    if "${E[@]}" "systemctl cat prometheus-node-exporter.service" >/dev/null 2>&1; then
+      # the distro's exporter (Noctyx's own, from `setup metrics`, is upgraded there): pinned binary, same scrape
+      pin_exporter
+      "${E[@]}" "sudo -n systemctl daemon-reload && sudo -n systemctl restart prometheus-node-exporter"
+      sleep 2
+      v=$(curl -s http://127.0.0.1:9100/metrics | sed -n 's/^node_exporter_build_info{.*version="\([^"]*\)".*/\1/p')
+      echo "   head node: textfile collector; node_exporter ${v:-?} (existing scrape kept)"
+      [[ -n $v ]] || { echo "   !! the head's exporter does not answer on 127.0.0.1:9100" >&2; exit 1; }
+    else
+      echo "   head node: textfile collector only (existing exporter + scrape kept)"
+    fi
     continue
   fi
 
@@ -89,6 +128,8 @@ for row in "${HOSTS[@]}"; do
   put 0644 "$ARGSF" /etc/default/prometheus-node-exporter
   rm -f "$WEB" "$ARGSF"
 
+  pin_exporter
+
   # 3. packages (keep our /etc/default), then hand the key to the exporter user.
   #    The package starts the exporter before the chown: it fails closed (cannot
   #    read the key) and trips systemd's start limit — hence reset-failed.
@@ -105,8 +146,10 @@ for row in "${HOSTS[@]}"; do
   # 4. prove it: authenticated TLS scrape succeeds, anonymous one is refused
   sleep 2
   code=$(curl -s -o /dev/null -w '%{http_code}' --cacert "$CA_CRT" "https://$ADDR:9100/metrics" || true)
-  n=$(curl -s --cacert "$CA_CRT" -u "prometheus:$(cat "$PASS")" "https://$ADDR:9100/metrics" | grep -c '^node_' || true)
-  echo "   anonymous: HTTP $code (want 401) · authenticated: $n node_* series"
+  body=$(curl -s --cacert "$CA_CRT" -u "prometheus:$(cat "$PASS")" "https://$ADDR:9100/metrics" || true)
+  n=$(grep -c '^node_' <<<"$body" || true)
+  v=$(sed -n 's/^node_exporter_build_info{.*version="\([^"]*\)".*/\1/p' <<<"$body")
+  echo "   anonymous: HTTP $code (want 401) · authenticated: $n node_* series · node_exporter ${v:-?}"
   [[ $code == 401 && $n -gt 100 ]] || { echo "   !! $NAME exporter check FAILED" >&2; exit 1; }
 done
 

@@ -41,7 +41,7 @@ collapse it with ▾. The layout is saved in the browser. **Reset panel layout**
 | Fleet | a card per node: CPU, GPU, temperature and power, network, memory, disk, the model it serves, uptime, its next scheduled backup |
 | Machine Report | the selected node, with tabs **overview, llm, network, storage, gpu, health, backups**, and *backup now* / *verify now* (backed-up hosts only) |
 | Storage Tiers | NAS free and used space, size per repository, growth forecast |
-| Alerts | firing alerts with LLM triage (when an assistant is configured) |
+| Alerts | firing alerts with LLM triage (when an assistant is configured); silence one for a while, and on a component alert *upgrade* it or *skip* that release ([upgrade](upgrade.md#acting-on-a-component-alert)) |
 | Morning Brief | the assistant's summary of the fleet |
 | Hygiene | housekeeping findings per host, the space each fix frees, fixes you can run |
 | Snapshot Browser | browse and search (`*.conf`) any snapshot; operators can download files and directories. Restore to staging or the host |
@@ -67,7 +67,8 @@ A bare `/#gpu-01` selects a host.
   [install](install.md)).
 - **Components:** every critical component Noctyx tracks on that machine (Noctyx itself, restic, rest-server,
   Prometheus, node_exporter, the agent) with the installed version, Noctyx's pin, the latest upstream release, its
-  state, and the command that upgrades it on that machine when it is behind or a newer release is out. The table
+  state, and the buttons that act on it: *upgrade* where Noctyx installs it, *skip* a newer release, *unskip*
+  (see [upgrade](upgrade.md#acting-on-a-component-alert)). The table
   is `noctyx versions`' last run (nightly, or by hand); the line under it says when. See
   [upgrade](upgrade.md#component-versions).
 - **A monitored host** (a Mac, or a host with `"backup": false` or no repository) has no *backup now* / *verify now*

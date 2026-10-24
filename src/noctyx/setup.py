@@ -94,9 +94,9 @@ def _version(binary):
     return None
 
 
-def _fetch(component):
-    """A pinned release for this machine, checked against its pinned SHA-256."""
-    name, url, want = comp.asset(component, hostos.os_name(), hostos.arch())
+def _fetch(component, os_name=None, arch=None):
+    """A pinned release for this machine (or the given one: a node's), checked against its pinned SHA-256."""
+    name, url, want = comp.asset(component, os_name or hostos.os_name(), arch or hostos.arch())
     print(f"  downloading {name}…", flush=True)
     with urllib.request.urlopen(url, timeout=300) as r:
         data = r.read()

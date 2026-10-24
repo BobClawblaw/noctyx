@@ -213,6 +213,56 @@ def inventory(c, probe, cache, want_agent=None, version=None, only=None):
             "hosts": out}
 
 
+# ── acting on a row: Noctyx's own upgrade, or skipping a release ─────────────
+def fix(row, host, is_head):
+    """How Noctyx itself brings this row up to date -> {"argv": [noctyx args], "what": ...}, or {"why": ...} when
+    it cannot (only Noctyx's own pin or agent is ever installed: what is newer upstream than the pin waits for a
+    Noctyx release that moves it). None for a row that needs nothing."""
+    if row.get("state") not in ("upgrade", "behind", "missing"):
+        return None
+    name, inst, src = row["component"], row.get("installed"), row.get("source")
+    linux = host.get("os", "linux") == "linux"
+    if name == "agent":
+        return {"argv": ["install-agent", "--host", host["name"]], "what": f"reinstall the backup agent on {host['name']}"}
+    if name == "noctyx":
+        return {"why": "Noctyx itself is upgraded with pip (see the upgrade guide), not from the console"}
+    pin = PINS.get(name, {}).get("version")
+    if not pin or (inst and not newer(pin, inst)):
+        return {"why": f"Noctyx pins {name} {pin}: {row.get('latest')} comes with a Noctyx release that moves the pin"
+                       if pin else f"Noctyx does not install {name}"}
+    if name == "node_exporter" and linux and src in ("distro", "noctyx"):
+        how = (["setup", "metrics", "--force"] if is_head and src == "noctyx"
+               else ["tool", "install-node-metrics", "--host", host["name"]])
+        return {"argv": how, "what": f"install Noctyx's node_exporter {pin} on {host['name']}"
+                                     + (" in place of the distro's (same unit, same collectors)" if src == "distro" else "")}
+    if name == "restic" and src == "noctyx":
+        return {"argv": ["setup", "tools", "--force"] if is_head else ["install-agent", "--host", host["name"]],
+                "what": f"install restic {pin} on {host['name']}"}
+    if name in ("rest-server", "prometheus") and src == "noctyx" and is_head:
+        return {"argv": ["setup", "tools" if name == "rest-server" else "metrics", "--force"],
+                "what": f"install {name} {pin} on the head"}
+    if name == "prometheus" and src == "distro":
+        return {"why": f"this Prometheus came from apt, not from Noctyx; {inst} → {pin} is a major upgrade (2.x → 3.x "
+                       "changes its config and storage) that Noctyx does not make for you"}
+    return {"why": f"{name} here comes from {'apt' if src == 'distro' else 'Homebrew' if src == 'brew' else src}, which "
+                   "Noctyx does not replace"}
+
+
+def skip_key(host, component):
+    return f"{host}/{component}"
+
+
+def apply_skips(inv, skips):
+    """Rows whose newer release the operator chose to skip read `skipped` (no alert) until a later one appears.
+    skips: {"host/component" or "*/component": {"release", "by", "ts"}}."""
+    for host, rows in (inv.get("hosts") or {}).items():
+        for r in rows:
+            s = skips.get(skip_key(host, r["component"])) or skips.get(skip_key("*", r["component"]))
+            if s and r.get("state") == "upgrade" and norm(r.get("latest")) == norm(s.get("release")):
+                r["state"], r["detail"] = "skipped", f"{s['release']} skipped" + (f" by {s['by']}" if s.get("by") else "")
+    return inv
+
+
 def load(path):
     try:
         return json.loads(pathlib.Path(path).read_text())

@@ -3263,6 +3263,7 @@ def cmd_assistant_set(a):
 
 # ── versions: every critical component on every machine, and what can be upgraded ──
 VERSIONS = STATE_DIR / "versions.json"
+VERSION_SKIPS = STATE_DIR / "version-skips.json"      # releases the operator chose not to take (no alert for them)
 UPSTREAM = STATE_DIR / "upstream-releases.json"
 
 
@@ -3297,14 +3298,88 @@ def versions(c, only=None, refresh=False):
     return inv
 
 
+def versions_view():
+    """The last inventory with the skipped releases marked, each row with how Noctyx would bring it up to date
+    (`fix`): what the console and the metrics read."""
+    from noctyx import components as comp
+    c = cfg()
+    inv = comp.apply_skips(comp.load(VERSIONS), comp.load(VERSION_SKIPS))
+    for name, rows in (inv.get("hosts") or {}).items():
+        h = next((x for x in hosts(c) if x["name"] == name), None) or {"name": name, "local": True}
+        for r in rows:
+            r["fix"] = comp.fix(r, h, h.get("local") or is_head(c, h))
+    return inv
+
+
+def _version_row(c, host, component):
+    row = next((r for r in (versions_view().get("hosts") or {}).get(host, []) if r["component"] == component), None)
+    if not row:
+        sys.exit(f"no {component} on {host} in the last check: noctyx versions --host {host}")
+    return row
+
+
+def cmd_upgrade(a):
+    """noctyx upgrade --host H --component C: bring one component up to Noctyx's pin the way Noctyx installs it
+    (components.fix), then check that host again so its alert clears. What Noctyx does not install is refused
+    with the reason."""
+    c = cfg()
+    row = _version_row(c, a.host, a.component)
+    f = row.get("fix")
+    if not f:
+        print(f"{a.component} on {a.host}: {row['state']} ({row['detail']}), nothing to do")
+        return
+    if "why" in f:
+        sys.exit(f"{a.component} on {a.host}: {f['why']}")
+    print(f"{f['what']}: noctyx {' '.join(f['argv'])}", flush=True)
+    env = {**os.environ, "PYTHONPATH": str(NX_HOME.parent), "NOCTYX_NO_ASSIST": "1"}
+    rc = subprocess.run([sys.executable, "-m", "noctyx.cli", *f["argv"]], env=env).returncode
+    audit("upgrade", host=a.host, component=a.component, installed=row.get("installed"), rc=rc)
+    inv = versions(c, a.host)
+    new = next((r for r in inv["hosts"].get(a.host, []) if r["component"] == a.component), {})
+    print(f"{a.component} on {a.host} now: {new.get('installed') or '—'} ({new.get('state')}: {new.get('detail')})", flush=True)
+    if rc:
+        sys.exit(rc)
+
+
+def cmd_versions_skip(a):
+    """noctyx versions-skip --host H|all --component C [--release V] [--undo]: stop alerting on a release you
+    choose not to take; a later release alerts again."""
+    from noctyx import components as comp
+    c = cfg()
+    if a.host != "all":
+        host_by_name(c, a.host)
+    if a.component not in {x["name"] for x in comp.COMPONENTS}:
+        sys.exit(f"unknown component {a.component}")
+    skips = comp.load(VERSION_SKIPS)
+    key = comp.skip_key("*" if a.host == "all" else a.host, a.component)
+    if a.undo:
+        had = skips.pop(key, None)
+        print(f"{key}: " + ("skip removed" if had else "was not skipped"))
+    else:
+        rel = a.release or next((r["latest"] for rows in (comp.load(VERSIONS).get("hosts") or {}).values()
+                                 for r in rows if r["component"] == a.component and r.get("latest")), None)
+        if not rel or not re.fullmatch(r"\d+(\.\d+){1,3}", comp.norm(rel)):
+            sys.exit("--release: the version to skip, e.g. 1.12.1")
+        skips[key] = {"release": comp.norm(rel), "by": os.environ.get("SUDO_USER"),
+                      "ts": time.time()}
+        print(f"{key}: release {comp.norm(rel)} skipped; a later one alerts again")
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = VERSION_SKIPS.with_suffix(".tmp")
+    tmp.write_text(json.dumps(skips, indent=1))
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, VERSION_SKIPS)
+    audit("versions-skip", key=key, release=None if a.undo else skips[key]["release"], undo=bool(a.undo))
+
+
 def cmd_versions(a):
     """noctyx versions [--host H] [--refresh] [--json]: installed, pinned and latest for every critical
     component on every machine, and the command that upgrades what is behind."""
-    inv = versions(cfg(), a.host, a.refresh)
+    from noctyx import components as comp
+    inv = comp.apply_skips(versions(cfg(), a.host, a.refresh), comp.load(VERSION_SKIPS))
     if a.json:
         print(json.dumps(inv, indent=1))
         return
-    mark = {"ok": "✓", "upgrade": "↑", "behind": "✗", "missing": "✗", "ahead": "·", "unknown": "?"}
+    mark = {"ok": "✓", "upgrade": "↑", "behind": "✗", "missing": "✗", "ahead": "·", "unknown": "?", "skipped": "–"}
     todo = []
     for host, rows in inv["hosts"].items():
         if a.host and host != a.host:
@@ -3590,6 +3665,11 @@ def main():
     ver = sub.add_parser("versions", help="every critical component on every machine: installed, pinned, latest, and how to upgrade")
     ver.add_argument("--host"); ver.add_argument("--refresh", action="store_true", help="ask GitHub again now")
     ver.add_argument("--json", action="store_true")
+    upg = sub.add_parser("upgrade", help="bring one component on one host up to Noctyx's pin, the way Noctyx installs it")
+    upg.add_argument("--host", required=True); upg.add_argument("--component", required=True)
+    vsk = sub.add_parser("versions-skip", help="stop alerting on a newer release you choose not to take (--undo: alert again)")
+    vsk.add_argument("--host", required=True, help="a host, or all"); vsk.add_argument("--component", required=True)
+    vsk.add_argument("--release"); vsk.add_argument("--undo", action="store_true")
     sub.add_parser("nightly", help="maintenance after the backup window (mirror harvest, recipe discovery, weekly prune dry-run + verify)")
     ih = sub.add_parser("install-head", help="render the head node's services for this site: systemd or launchd (--apply installs them)")
     ih.add_argument("--apply", action="store_true")
@@ -3617,7 +3697,8 @@ def main():
                "policy-show": cmd_policy_show, "dumps": cmd_dumps, "hf-harvest": cmd_hf_harvest,
                "recipe-deploy": cmd_recipe_deploy, "recipe-stop": cmd_recipe_stop, "recipe-start": cmd_recipe_start,
                "recipe-rollback": cmd_recipe_rollback, "recipe-status": cmd_recipe_status,
-               "recipe-catalog": cmd_recipe_catalog, "recipe-discover": cmd_recipe_discover, "nightly": cmd_nightly, "install-head": cmd_install_head, "console-set": cmd_console_set, "user": cmd_user, "setup": cmd_setup, "assistant-set": cmd_assistant_set, "versions": cmd_versions}[a.cmd]
+               "recipe-catalog": cmd_recipe_catalog, "recipe-discover": cmd_recipe_discover, "nightly": cmd_nightly, "install-head": cmd_install_head, "console-set": cmd_console_set, "user": cmd_user, "setup": cmd_setup, "assistant-set": cmd_assistant_set, "versions": cmd_versions,
+               "upgrade": cmd_upgrade, "versions-skip": cmd_versions_skip}[a.cmd]
     rc = 0
     try:
         handler(a)
