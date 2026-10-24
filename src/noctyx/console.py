@@ -4423,7 +4423,7 @@ function buildCheck(r){const b=r.headers.get('X-CM-Build');if(!b||b==BUILD)retur
  location.reload()}
 
 async function tick(p){
- if(p.int<=0)return;
+ if(!p||p.int<=0)return;          /* a panel this page does not have (an action refreshes the dashboard's) */
  if(p.id=='schedule'&&EDIT)return;
  if(p.id=='recipes'&&(RCJOB&&!RCJOB.done||document.activeElement&&document.activeElement.closest&&document.activeElement.closest('#b-recipes')&&/INPUT|SELECT/.test(document.activeElement.tagName)))return;
  if(p.id=='config'&&(CFGDIRTY||(CFGJOB&&/running|starting/.test(CFGJOB.text.split('\n')[0]))))return;
