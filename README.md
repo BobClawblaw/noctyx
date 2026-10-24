@@ -97,6 +97,9 @@ Regenerate them with `python3 tools/screenshots.py`.
   you turn it on, upgrades components in a nightly window. A per-hour budget, a freeze after repeated failures,
   and shadow mode keep it safe. Every decision and command is in its log (the Self-repair page), the audit trail,
   the morning brief and Ask Noctyx.
+- Checkpoints: before an upgrade or an apt run, a restic snapshot of the machine (a recent nightly one counts).
+  `noctyx revert` undoes any change still in effect, from its kept copy or that snapshot; the site config keeps
+  its history; `noctyx self-rollback` takes Noctyx itself back to the commit it ran before.
 
 **Run it your way**
 - Pure Python standard library on the head, on Linux (systemd) or macOS (launchd); bash and restic on the nodes.
@@ -121,6 +124,7 @@ Regenerate them with `python3 tools/screenshots.py`.
 | [Hygiene](docs/guide/hygiene.md) | housekeeping reports and fixes |
 | [Accounts](docs/guide/accounts.md) | sign-in, roles, sessions |
 | [Upgrade](docs/guide/upgrade.md) | upgrading, rolling back, moving from an older layout |
+| [Checkpoints](docs/guide/checkpoints.md) | restic checkpoints before upgrades and apt, `noctyx revert`, the site config's history, `noctyx self-rollback` |
 | [Self-repair](docs/guide/self-repair.md) | `noctyx heal`: its playbooks, its safety rules, automatic upgrades, and its log |
 | [Troubleshooting](docs/guide/troubleshooting.md) | what an error means and what to do |
 

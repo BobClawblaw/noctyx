@@ -13,7 +13,8 @@ Related pages: [install](install.md) · [site config](site-config.md#paths) · [
 
 ```bash
 noctyx --version
-sudo cp -a /etc/noctyx/site.json /etc/noctyx/site.json.$(date +%F)    # the CLI rewrites blocks of it in place
+sudo noctyx self-checkpoint --note "before the upgrade"                 # this Noctyx and its site config, to go back to
+sudo cp -a /etc/noctyx/site.json /etc/noctyx/site.json.$(date +%F)    # a hand-made copy too (hand edits are not in its history)
 sudo noctyx tick --dry-run                                              # anything due soon?
 systemctl list-units 'noctyx-*' --state=running                         # Linux: detached jobs in flight
 ls /var/log/noctyx/jobs/*.pid                                           # macOS: a detached job's pid file sits next to its log
@@ -240,12 +241,26 @@ time. This is **off by default**: turn it on in Configure › Self-repair or wit
 [self-repair](self-repair.md#automatic-upgrades) for the window, the wait between machines, major versions and
 what happens after a failure.
 
+**Undoing one later.** Every upgrade waits for a checkpoint of its machine and keeps what it replaced; `noctyx
+changes` lists them and `noctyx revert <change>` undoes the newest one in effect ([checkpoints](checkpoints.md#undoing-a-change)).
+
 **Moving a pin.** The pinned versions and their SHA-256 sums live in
 [`src/noctyx/components.py`](../../src/noctyx/components.py). Change a version and its sums (from the release's own
 sums file) together, in one commit. Setup refuses a download whose sum does not match. Then run the upgrade command
 on each machine.
 
 ## Roll back
+
+`noctyx self-rollback` goes back to the Noctyx a self-checkpoint recorded: its git commit (and a `pip install` for
+an installed Noctyx), the head's units rendered again, the services restarted, and with `--config` its site config
+([checkpoints](checkpoints.md#noctyx-itself)):
+
+```bash
+sudo noctyx self-rollback            # what it would do
+sudo noctyx self-rollback --yes
+```
+
+By hand, the same:
 
 ```bash
 cd /opt/noctyx-src && git checkout <previous tag>

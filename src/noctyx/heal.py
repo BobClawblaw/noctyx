@@ -487,6 +487,9 @@ class DropIn(change.Change):
     def rollback(self):
         self._put(self.snap.get("was"))
 
+    def revert_target(self):
+        return {"ok": True}
+
     def verify_before(self):
         if not (self.snap.get("before") or {}).get("ok"):
             return []

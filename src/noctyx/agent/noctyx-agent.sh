@@ -4,7 +4,10 @@
 # when it installs it.
 # POSIX-ish bash, no third-party deps beyond restic + coreutils.
 #
-#   noctyx-agent backup  --profile system|smoke|dataproxy [--dry-run] [--no-hooks]
+#   noctyx-agent backup  --profile system|smoke|dataproxy [--dry-run] [--no-hooks] [--tag T]...
+#   noctyx-agent checkpoint --reason change|apt|manual [--max-age S] [--timeout S]
+#                                 # a system snapshot from the last S seconds, or a new one tagged checkpoint
+#   noctyx-agent checkpoint-after --reason apt   # marks the end of what the checkpoint was taken for
 #   noctyx-agent fs-meta          # capture boot/disk/AI-stack state only
 #   noctyx-agent list|snapshots   # passthrough
 #   noctyx-agent verify           # restic check + read-data-subset
@@ -210,10 +213,12 @@ fs_meta() {
 # ── backup ────────────────────────────────────────────────────────────
 cmd_backup() {
   local profile="system" dry="" hooks=1 t0 t1 rc meta
+  local -a extra_tags=()
   while [[ $# -gt 0 ]]; do case $1 in
     --profile) profile=$2; shift 2;;
     --dry-run) dry="--dry-run"; shift;;
     --no-hooks) hooks=0; shift;;
+    --tag) [[ $2 =~ ^[a-z0-9-]{1,40}$ ]] || die "bad --tag $2"; extra_tags+=( --tag "$2" ); shift 2;;
     *) die "unknown argument: $1";;
   esac; done
 
@@ -240,7 +245,7 @@ cmd_backup() {
   local common_excl=@NODE_ETC@/exclusions-common.conf
   [[ -r @NODE_ETC@/exclusions-$profile.conf ]] && common_excl=@NODE_ETC@/exclusions-$profile.conf
 
-  local -a tags=( --tag "@SNAPSHOT_TAG@" --tag "profile-$profile" --tag "host-$(hostname -s)" )
+  local -a tags=( --tag "@SNAPSHOT_TAG@" --tag "profile-$profile" --tag "host-$(hostname -s)" "${extra_tags[@]}" )
   local hostname_arg=( --host "$(hostname -s)" )
   local -a opts=()
   # restic — including the pinned 0.19.1 — has NO xattr or POSIX-ACL capture. There
@@ -335,6 +340,52 @@ cmd_verify() {
   log "restic check --read-data-subset=$subset"; "${RESTIC[@]}" check --read-data-subset="$subset" 2>&1 | tail -3 >&2; rc=$(( rc + $? ))
   emit "{\"event\":\"verify\",\"host\":\"$(hostname -s)\",\"repo\":\"$REPO_ID\",\"rc\":$rc,\"ts\":\"$(date -u -Is)\"}"
   return $rc
+}
+
+# ── checkpoints: a known state of this machine before something changes it ──
+# A system snapshot younger than --max-age is the checkpoint as it is (it costs nothing); else a new one
+# is taken, tagged "checkpoint" and "before-<reason>" (a fixed set of tags, so retention, which groups by
+# host and tags, keeps them in one group per reason). Never fails the caller: a checkpoint that cannot be
+# made (the repository away, another job running, the timeout) says why in its result line.
+cmd_checkpoint() {
+  local reason="manual" max_age=21600 tmo=2700 newest age snap rc
+  while [[ $# -gt 0 ]]; do case $1 in
+    --reason) reason=$2; shift 2;;
+    --max-age) max_age=$2; shift 2;;
+    --timeout) tmo=$2; shift 2;;
+    *) die "checkpoint: unknown argument $1";;
+  esac; done
+  [[ $reason =~ ^(change|apt|manual)$ ]] || die "checkpoint: --reason change|apt|manual"
+  [[ $max_age =~ ^[0-9]+$ && $tmo =~ ^[0-9]+$ ]] || die "checkpoint: --max-age and --timeout are seconds"
+  newest=$("${RESTIC[@]}" snapshots --no-lock --host "$(hostname -s)" --tag "profile-system" --json 2>/dev/null \
+           | python3 -c 'import json,sys,re,datetime
+try:
+    at=lambda x: datetime.datetime.fromisoformat(re.sub(r"\.\d+","",x["time"]).replace("Z","+00:00")).timestamp()
+    n=max(json.load(sys.stdin),key=at)
+    print(n["short_id"], int(datetime.datetime.now(datetime.timezone.utc).timestamp()-at(n)))
+except Exception: print("")' 2>/dev/null)
+  snap=""; age=""; [[ $newest == *" "* ]] && { snap=${newest%% *}; age=${newest#* }; }
+  if [[ -n $snap && $age =~ ^[0-9]+$ && $age -lt $max_age ]]; then
+    log "checkpoint: system snapshot $snap is $(( age / 60 )) min old (under $(( max_age / 60 )) min): it is the checkpoint"
+    emit "{\"event\":\"checkpoint\",\"host\":\"$(hostname -s)\",\"reason\":\"$reason\",\"snapshot\":\"$snap\",\"taken\":false,\"age\":$age,\"rc\":0,\"ts\":\"$(date -u -Is)\"}"
+    return 0
+  fi
+  log "checkpoint: newest system snapshot ${snap:-none} is ${age:-?} s old: taking one (at most ${tmo} s)"
+  local out t0; t0=$(date +%s)
+  out=$(timeout --kill-after=60 "$tmo" "$0" backup --profile system --tag checkpoint --tag "before-$reason")
+  rc=$?
+  local got; got=$(printf '%s\n' "$out" | sed -n 's/^@RESULT_TOKEN@ //p' | tail -1 | python3 -c 'import json,sys
+try: print(json.load(sys.stdin).get("snapshot",""))
+except Exception: print("")' 2>/dev/null)
+  # restic exit 3: the snapshot was saved, but some files could not be read (they are named in the log)
+  if [[ ($rc -eq 0 || $rc -eq 3) && -n $got ]]; then
+    local inc=""; [[ $rc -eq 3 ]] && inc='"incomplete":"some files could not be read (last-backup.log)",'
+    emit "{\"event\":\"checkpoint\",\"host\":\"$(hostname -s)\",\"reason\":\"$reason\",\"snapshot\":\"$got\",\"taken\":true,\"age\":0,\"seconds\":$(( $(date +%s) - t0 )),\"rc\":$rc,$inc\"ts\":\"$(date -u -Is)\"}"
+    return 0
+  fi
+  local why="the backup exited $rc"; [[ $rc -eq 124 || $rc -eq 137 ]] && why="no snapshot within ${tmo} s"
+  emit "{\"event\":\"checkpoint\",\"host\":\"$(hostname -s)\",\"reason\":\"$reason\",\"snapshot\":\"${snap}\",\"taken\":false,\"age\":${age:-null},\"rc\":$rc,\"error\":\"$why\",\"ts\":\"$(date -u -Is)\"}"
+  return 0
 }
 
 # ── retention (forget + prune) ─────────────────────────────────────────
@@ -525,6 +576,10 @@ mkdir -p "$STATE"
 case "${1:-backup}" in
   hygiene) shift; take_job_lock; cmd_hygiene "$@";;
   backup) shift; take_job_lock; cmd_backup "$@";;
+  checkpoint) shift; cmd_checkpoint "$@";;          # its backup takes the job lock
+  checkpoint-after)
+    shift; [[ ${1:-} == --reason && ${2:-} =~ ^(change|apt|manual)$ ]] || die "checkpoint-after --reason change|apt|manual"
+    emit "{\"event\":\"checkpoint-after\",\"host\":\"$(hostname -s)\",\"reason\":\"$2\",\"ts\":\"$(date -u -Is)\"}";;
   fs-meta) take_job_lock; fs_meta "$META/$(date -u +%Y%m%dT%H%M%SZ)";;
   verify) shift; take_job_lock; cmd_verify "$@";;
   retention) shift; take_job_lock; cmd_retention "$@";;

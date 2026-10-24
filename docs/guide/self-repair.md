@@ -62,6 +62,10 @@ out. The rules repair is also how a Noctyx upgrade's new or changed alert rules 
   `sglang*`, `ollama*`, `mtplx*`, `llama*`, `glm*`, `qwen*`, `deepseek*`, `nemotron*`), `ssh*`, `systemd-*`,
   `networking*`, `NetworkManager*`, `nvidia*`, `user@*`, and mounts, swaps, slices, scopes and targets.
 
+Every change heal makes to a file (the drop-in, an automatic upgrade) is in the changes ledger and can be undone
+later with `noctyx revert`; an automatic upgrade first waits for a checkpoint of its machine
+([checkpoints](checkpoints.md)).
+
 ## The policy
 
 The site config's `heal` block ([site config](site-config.md#heal)). Set it on the console (**Configure ›

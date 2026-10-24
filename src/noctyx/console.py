@@ -40,6 +40,10 @@ already publishes; POST whitelisted actions, tokened unless NOCTYX_CONSOLE_AUTH=
   GET  /api/v1/versions       every critical component per machine: installed, pinned, latest, upgrade command
   GET  /api/v1/heal           the repair loop: open problems, the last day's repairs, the changes ledger, the policy
   GET  /api/v1/heal/log?n=&host=&check=&all=&q=&run=   its runs, newest first: each check, decision and command
+  GET  /api/v1/changes        every change Noctyx made, what is in effect, its checkpoint, whether it can be undone
+  GET  /api/v1/checkpoints    the checkpoint snapshots per machine (cached 5 min; ?refresh=1)
+  GET  /api/v1/config-history the site config's kept copies (?diff=NAME: what restoring it would change)
+  GET  /api/v1/self-checkpoints  the recorded states of Noctyx itself, and what self-rollback would do
   POST /api/v1/action         whitelisted orchestrator argv
   POST /api/v1/ask            {text, sid?, tunit?, tz?} -> Ask Noctyx: a question to the assistant, which looks things up (copilot.py)
   GET  /api/v1/ask/<sid>?since=<rev>      that conversation since a revision
@@ -152,6 +156,11 @@ ACTIONS = {
     # the repair loop now, not at its next 5-minute turn (noctyx heal)
     "healNow": lambda: [ORCH, "heal", "--trigger", "console"],
     "healUnfreeze": lambda: [ORCH, "heal", "--unfreeze"],
+    # going back: undo a change (checked, itself undoable), a checkpoint now, the policy, a kept site config
+    "revertChange": lambda p: [ORCH, "revert", p["id"], "--yes"] + (["--keep-data"] if p.get("keep_data") else []),
+    "takeCheckpoint": lambda p: [ORCH, "checkpoint", "--host", p["host"]],
+    "setCheckpoints": lambda p: [ORCH, "checkpoint-set", "--json", json.dumps(p["checkpoints"])],
+    "configRestore": lambda p: [ORCH, "config-restore", p["name"], "--yes"],
     "setHeal": lambda p: [ORCH, "heal-set", "--json", json.dumps(p["heal"])],
     "skipRelease": lambda p: [ORCH, "versions-skip", "--host", p["host"], "--component", p["component"]]
                              + (["--undo"] if p.get("undo") else ["--release", p["release"]]),
@@ -167,13 +176,14 @@ VALID_PROFILES = set(CFG.get("profiles", {}).keys())
 # host-REQUIRED actions: their builders index p["host"] directly; missing would KeyError
 HOST_REQUIRED = {"backupHost", "verifyHost", "reboot", "rebootFinish"}
 RECIPE_ACTIONS = {"recipeDeploy", "recipeStop", "recipeStart", "recipeRollback", "recipeCatalog"}
-PARAM_ACTIONS = HOST_REQUIRED | RECIPE_ACTIONS | {"upgradeComponent", "upgradeEverywhere", "skipRelease", "setAssistant", "setHeal", "setConsoleDefaults", "setSchedule", "restore", "hygieneFix", "setPolicy", "dumpsNow"}
+PARAM_ACTIONS = HOST_REQUIRED | RECIPE_ACTIONS | {"upgradeComponent", "upgradeEverywhere", "skipRelease", "setAssistant", "setHeal", "revertChange", "takeCheckpoint", "setCheckpoints", "configRestore", "setConsoleDefaults", "setSchedule", "restore", "hygieneFix", "setPolicy", "dumpsNow"}
 # Only these wait for the one-long-job slot; everything else (status, schedule
 # edits, probes) runs at once instead of queueing silently behind a 3-hour seed.
 LONG_ACTIONS = {"backup", "verify", "copy", "prune", "backupHost", "verifyHost", "restore", "hygieneFix", "upgradeComponent",
-                "upgradeEverywhere"}
+                "upgradeEverywhere", "revertChange", "takeCheckpoint"}
 # how long a job may run before the console stops it (SIGTERM first: a change rolls itself back); default 3 days
-ACTION_TIMEOUT = {"upgradeComponent": 90 * 60, "upgradeEverywhere": 4 * 3600, "healNow": 90 * 60}
+ACTION_TIMEOUT = {"upgradeComponent": 90 * 60, "upgradeEverywhere": 4 * 3600, "healNow": 90 * 60, "revertChange": 2 * 3600,
+                  "takeCheckpoint": 2 * 3600}
 # a failed one of these cancels the queued ones for the same component: they would fail the same way
 CANCEL_ON_FAIL = {"upgradeComponent", "upgradeEverywhere"}
 HYGIENE_FILE = UI_STATE / "hygiene.json"
@@ -195,7 +205,34 @@ def policy_summary():
             "baseline": {"common": CM.common_exclusions(c), "profiles": extra},
             "not_covered": [h["name"] for h in c["hosts"] if h.get("enabled", True) is not False
                             and h.get("address") and h["name"] not in names],
-            "hf": hf_summary(c), "assistant": assistant_summary(), "heal": heal_config(c)}
+            "hf": hf_summary(c), "assistant": assistant_summary(), "heal": heal_config(c),
+            "checkpoints": checkpoint_config(c)}
+
+
+def checkpoint_config(c):
+    from noctyx import checkpoints, selfstate
+    return {"stored": c.get("checkpoints") or {}, "policy": checkpoints.policy(c), "history": selfstate.config_history()}
+
+
+def changes_view():
+    """Every change, newest first, with what is in effect and whether `noctyx revert` would take it now."""
+    from noctyx import change
+    recs = change.ledger(2000)
+    st = change.state_of(recs)
+    top = {v[-1]["id"] for v in change.stacks(recs).values() if v}
+    return {"changes": [{**{k: v for k, v in r.items() if k != "snap"}, "state": st.get(r["id"]),
+                         "revertible": r["id"] in top and not change.undoes(r)} for r in reversed(recs[-200:])]}
+
+
+_CHECKPOINTS = {}
+
+
+def checkpoints_view(refresh=False):
+    """The checkpoint snapshots per machine: an ssh and a restic listing each, so cached 5 minutes."""
+    from noctyx import checkpoints
+    if refresh or time.time() - _CHECKPOINTS.get("ts", 0) > 300:
+        _CHECKPOINTS.update(ts=time.time(), hosts=checkpoints.listing(CM.cfg()))
+    return {"ts": _CHECKPOINTS["ts"], "hosts": _CHECKPOINTS["hosts"]}
 
 
 def heal_errors(blk):
@@ -271,7 +308,8 @@ def console_mode():
 
 
 # what each action needs: everything else that changes something needs "operate"
-ADMIN_ACTIONS = {"setPolicy", "setSchedule", "setAssistant", "setHeal", "setConsoleDefaults", "recipeCatalog", "upgradeComponent",
+ADMIN_ACTIONS = {"setPolicy", "setSchedule", "setAssistant", "setHeal", "revertChange", "setCheckpoints", "configRestore",
+                 "setConsoleDefaults", "recipeCatalog", "upgradeComponent",
                  "upgradeEverywhere",
                  "reboot", "rebootFinish", "nasRest", "policyApply"}
 NEED_RANK = {"view": 0, "operate": 1, "admin": 2}
@@ -375,6 +413,18 @@ def valid_params(name: str, p: dict) -> bool:
             return False
     if name == "setHeal":
         return not heal_errors(p.get("heal"))
+    if name == "revertChange":
+        from noctyx import change
+        return (isinstance(p.get("id"), str) and bool(re.fullmatch(r"[0-9a-f]{8}(-undo)?", p["id"]))
+                and change.revertible(p["id"])[1] is None)
+    if name == "takeCheckpoint":
+        return p.get("host") in {h["name"] for h in CM.backup_hosts(CM.cfg())}
+    if name == "setCheckpoints":
+        from noctyx import checkpoints
+        return not checkpoints.validate(p.get("checkpoints"))[1]
+    if name == "configRestore":
+        from noctyx import selfstate
+        return p.get("name") in {x["name"] for x in selfstate.config_history()}
     if name == "setPolicy":
         pol, errs = CM.validate_policy(p.get("policy"))
         r = p.get("retention")
@@ -3164,7 +3214,7 @@ html[data-style=phosphor] button.act:hover{box-shadow:0 0 calc(14px * var(--gl))
    <div class=menu><button type=button class=menu-title aria-haspopup=true aria-expanded=false>Deploy</button>
     <div class="menu-pop hide" role=menu><a role=menuitem href="/recipes" data-v=recipes>Recipes<kbd>3</kbd></a></div></div>
    <div class=menu><button type=button class=menu-title aria-haspopup=true aria-expanded=false>Configure</button>
-    <div class="menu-pop hide" role=menu><a role=menuitem href="/config#sec-backups" data-v=config>Backups<kbd>4</kbd></a><a role=menuitem href="/config#sec-retention">Retention</a><a role=menuitem href="/config#sec-mirror">Model mirror</a><a role=menuitem href="/config#sec-assistant">Assistant LLM</a><a role=menuitem href="/config#sec-heal">Self-repair</a></div></div>
+    <div class="menu-pop hide" role=menu><a role=menuitem href="/config#sec-backups" data-v=config>Backups<kbd>4</kbd></a><a role=menuitem href="/config#sec-retention">Retention</a><a role=menuitem href="/config#sec-mirror">Model mirror</a><a role=menuitem href="/config#sec-assistant">Assistant LLM</a><a role=menuitem href="/config#sec-heal">Self-repair</a><a role=menuitem href="/config#sec-checkpoints">Checkpoints</a></div></div>
    <a class="menu-title direct" href="/kiosk" title="The wall display">Kiosk<kbd>5</kbd></a>
   </nav>
   <span class=pagename id=hpage></span>
@@ -4731,7 +4781,20 @@ const SRST={repaired:'ok',failed:'bad',partial:'warn',needs_person:'bad',waiting
 const SRWORD={repaired:'repaired',failed:'failed',partial:'did what it could',needs_person:'needs a person',waiting:'waiting',shadow:'shadow',would:'would repair'};
 function srApi(){const q=new URLSearchParams({n:'60'});if(SRF.host)q.set('host',SRF.host);if(SRF.check)q.set('check',SRF.check);
  if(SRF.all)q.set('all','1');if(SRF.q)q.set('q',SRF.q);
- return Promise.all([fetchJSON('/api/v1/heal'),fetchJSON('/api/v1/heal/log?'+q)]).then(([s,l])=>{s._log=l.runs||[];return s})}
+ return Promise.all([fetchJSON('/api/v1/heal'),fetchJSON('/api/v1/heal/log?'+q),fetchJSON('/api/v1/changes').catch(()=>({})),
+  fetchJSON('/api/v1/self-checkpoints').catch(()=>({}))]).then(([s,l,c,sc])=>{s._log=l.runs||[];s._changes=c.changes||[];s._self=sc;return s})}
+/* checkpoints: an ssh and a restic listing per machine, so only on request */
+let SRCP=null;
+async function srCheckpoints(refresh){SRCP={loading:true};srReload();
+ SRCP=await fetchJSON('/api/v1/checkpoints'+(refresh?'?refresh=1':'')).catch(e=>({error:String(e)}));srReload()}
+async function srRevert(id,what,data,btn){
+ const keep=data?!confirm(`Undo change ${id}?\n\n${what}\n\nOK: also put back the data it kept (what was recorded since is moved aside).\nCancel: choose to keep today's data instead.`):false;
+ if(keep&&!confirm(`Undo change ${id}, keeping today's data (the binaries and drop-in go back)?`))return;
+ if(!data&&!confirm(`Undo change ${id}?\n\n${what}\n\nWhat ran before it goes back; it is checked, and put back as it is now if it does not work.`))return;
+ btn.disabled=true;btn.textContent='undoing…';const r=await act('revertChange',{id,keep_data:keep});
+ if(r&&r.error){btn.disabled=false;btn.textContent='undo';alert(r.error)}setTimeout(srReload,4000)}
+async function srCheckpointNow(host,btn){if(!confirm(`Take a checkpoint of ${host} now (a system snapshot)?`))return;
+ btn.disabled=true;btn.textContent='taking…';const r=await act('takeCheckpoint',{host});if(r&&r.error){btn.disabled=false;alert(r.error)}}
 async function srReload(){const p=PANELS.find(x=>x.id=='heal');if(!p)return;const d=await p.api().catch(e=>({error:String(e)}));p._data=d;repaint('heal',d)}
 function srSet(k,v){SRF[k]=v;srReload()}
 function srToggle(id,open){if(open)SRF.open.add(id);else SRF.open.delete(id)}
@@ -4748,6 +4811,30 @@ function srRun(r){const S=r.summary||{},id=r.run;
  return `<details class=srrun${SRF.open.has(id)?' open':''} ontoggle="srToggle('${esc(id)}',this.open)"><summary><b>${esc(fmtTs(r.ts_epoch))}</b><span class=mut>${esc(agoS(r.ts_epoch))}</span><span>${esc(r.trigger||'')}${r.host?' · '+esc(r.host):''}${r.dry?' · dry run':''}</span><span class=mut>${esc(r.seconds??'?')} s</span>${chips}</summary>
   <table class=srsteps>${(r.steps||[]).map((s,i)=>srStep(r,s,i)).join('')||'<tr><td></td><td colspan=3 class=mut>no steps</td></tr>'}
   <tr><td></td><td colspan=3 class=mut>checks: ${Object.entries(r.checks||{}).map(([k,v])=>esc(k)+' '+esc(v)+'s').join(' · ')||'—'}</td></tr></table></details>`}
+const CHST={'in effect':'ok',undone:'mut',rolled_back:'warn',rollback_failed:'bad',refused:'mut','under a newer change':'mut'};
+function srChanges(d){
+ const rows=(d._changes||[]).slice(0,30).map(r=>{const cp=r.checkpoint||{},data=['prometheus','alertmanager'].includes(r.component);
+  const cps=cp.snapshot?`<span title="${esc(cp.taken?'taken for it':'a snapshot from '+Math.round((cp.age||0)/60)+' min before')}">${esc(cp.snapshot)}</span>`:cp.error||cp.skipped?`<span class=mut>${esc(cp.error||cp.skipped)}</span>`:'<span class=mut>—</span>';
+  return `<tr><td class="mut nowrap">${esc(agoS(r.ts_epoch||r.ts))}</td><td class=nowrap><b>${esc(r.host)}</b></td><td>${esc(r.what)}${(r.problems||[]).length?`<div class=mut>${esc(r.problems.join('; '))}</div>`:''}</td>
+   <td><span class="tag ${CHST[r.state]||(String(r.state).startsWith('undid')?'info':'')}">${esc(r.state)}</span></td><td class=nowrap>${cps}</td>
+   <td class=nowrap>${r.revertible?`<button class=silbtn onclick="srRevert('${esc(r.id)}','${esc(String(r.what).replace(/'/g,''))}',${data},this)" title="undo it: what ran before goes back (checked, and put back as it is now if that does not work)">undo</button>`:''}</td></tr>`}).join('');
+ return `<div><h4>Changes</h4><p class="mut" style="margin:0 0 4px">What Noctyx changed on each machine, newest first, with the checkpoint it waited for. <b>undo</b> puts back what ran before the newest change in effect (<code>noctyx revert ID</code>).</p>
+  ${rows?`<table class=srt><tr><th>when</th><th>machine</th><th>change</th><th>state</th><th>checkpoint</th><th></th></tr>${rows}</table>`:'<div class=mut>none recorded yet</div>'}</div>`}
+function srCpSection(d){
+ let body;
+ if(!SRCP)body=`<button class=act onclick="srCheckpoints(false)">show checkpoints</button> <span class=mut>(asks every machine's repository)</span>`;
+ else if(SRCP.loading)body='<div class=mut>asking each machine…</div>';
+ else if(SRCP.error)body=`<div class=bad>${esc(SRCP.error)}</div>`;
+ else body=Object.entries(SRCP.hosts||{}).map(([h,rows])=>`<div style="margin:6px 0"><b>${esc(h)}</b> <button class=silbtn onclick="srCheckpointNow('${esc(h)}',this)">checkpoint now</button>
+   ${Array.isArray(rows)?(rows.length?`<table class=srt>${rows.slice(0,8).map(r=>`<tr><td class=nowrap><code>${esc(r.id)}</code></td><td class="mut nowrap">${esc(fmtTs(r.time))}</td><td>before ${esc((r.reasons||[]).join(', ')||'?')}${(r.changes||[]).length?' · '+r.changes.map(x=>esc(x.id+' '+x.what)).join('; '):''}</td></tr>`).join('')}</table>`:'<span class=mut>none yet</span>'):`<span class=bad>${esc(rows.error)}</span>`}</div>`).join('')
+   +`<div class=mut>listed ${esc(agoS(SRCP.ts))} · <a class=lnk onclick="srCheckpoints(true)">ask again</a> · put a path back: Snapshot Browser, or <code>noctyx restore --host H --snapshot ID --path …</code></div>`;
+ return `<div><h4>Checkpoints</h4><p class=mut style="margin:0 0 4px">Restic snapshots of a machine kept before Noctyx or apt changed it (a scheduled one from the last hours counts).</p>${body}</div>`}
+function srSelf(S){
+ const cur=S.current||{},g=cur.git||{},R=S.rollback||{};
+ const rows=(S.checkpoints||[]).slice(0,6).map(x=>{const i=x.identity||{},gi=i.git||{};return `<tr><td class="mut nowrap">${esc(fmtTs(x.ts))}</td><td>${esc(i.version||'')} <code>${esc((gi.sha||'').slice(0,12))}</code>${gi.dirty?' <span class=warn>dirty</span>':''}</td><td>${esc(x.note||'')}</td></tr>`}).join('');
+ return `<div><h4>Noctyx itself</h4><p class=mut style="margin:0 0 4px">Runs ${esc(cur.version||'?')} ${g.sha?'<code>'+esc(g.sha.slice(0,12))+'</code> on '+esc(g.branch||''):''} (${esc(cur.mode||'?')}). A self-checkpoint is kept when it starts on new code.</p>
+  ${rows?`<table class=srt>${rows}</table>`:'<div class=mut>none yet</div>'}
+  <div class=mut style="margin-top:4px">${R.target?`Going back to ${esc(R.target)}: <code>sudo noctyx self-rollback --yes</code> on the head (it restarts this console, so it is not a button).`:esc((R.problems||[]).join(' '))}</div></div>`}
 function rHeal(d){
  if(!d)return '<div class=empty>loading…</div>';
  if(d.error)return `<div class="empty bad">${esc(d.error)}</div>`;
@@ -4771,6 +4858,9 @@ function rHeal(d){
   <div><h4>Open problems</h4>${probs?`<table class=srt><tr><th>machine</th><th>what</th><th>state</th><th>why</th><th>since</th></tr>${probs}</table>`:'<div class=ok>none: everything Noctyx manages is as expected</div>'}</div>
   <div><h4>Repairs, last 24 h</h4>${reps?`<table class=srt>${reps}</table>`:'<div class=mut>none</div>'}</div>
   <div><h4>Playbooks</h4><div class=srpb>${pbs}</div></div>
+  ${srChanges(d)}
+  ${srCpSection(d)}
+  ${srSelf(d._self||{})}
   <div><h4>Log</h4>${filt}<div class=sr style="gap:6px;margin-top:8px">${log}</div></div></div>`}
 function rConfig(d){
  if(!d)return '<div class=empty>loading…</div>';
@@ -4817,6 +4907,7 @@ function rConfig(d){
  ${hfSection(d.hf||{})}
  ${asSection(d.assistant||{})}
  ${srSection(d.heal||{})}
+ ${cpSection(d.checkpoints||{})}
  <div class=cfgsec><details><summary>baseline exclusions — always applied (exclusions-common.conf; a profile with its own list in the site's etc dir uses that instead)</summary>
   <div class=cfgcols><pre class=cfgpre>${esc(d.baseline&&d.baseline.common||'')}</pre>${Object.entries((d.baseline||{}).profiles||{}).map(([k,v])=>`<pre class=cfgpre><b>${esc(k)}</b>\n${esc(v)}</pre>`).join('')}</div></details></div>
  <pre id=cf-out class="cfgpre${CFGJOB?'':' hide'}">${esc(CFGJOB?CFGJOB.text:'')}</pre>
@@ -4873,6 +4964,22 @@ function srSection(H){
   <div class=setrow><label>Between machines</label><div><input id=sr-soak type=number min=0 max=10080 value="${esc(U.soak_minutes??60)}" oninput="cfgDirty()"> min</div><div class=hint>After one machine's upgrade, the next waits this long.</div></div>
   <div class=setrow><label>Major versions</label><div><input type=checkbox class=sw id=sr-major${U.major?' checked':''} onchange="cfgDirty()"></div><div class=hint>Off: a pin in a new major version (Prometheus 2 → 3) waits for a person.</div></div>
   <div class=setrow><label></label><div class=hfline><button class=act onclick="srSave()">save self-repair</button></div></div></div>`}
+function cpSection(K){
+ const P=K.policy||{};
+ const hist=(K.history||[]).slice(0,15).map(h=>`<tr><td class="mut nowrap">${esc(fmtTs(h.ts))}</td><td>${h.why.startsWith('before')?esc(h.why.replace(/-/g,' ')):`before a <b>${esc(h.why)}</b> change`}</td><td class=nowrap><button class=lnk onclick="cpDiff('${esc(h.name)}')">what restoring changes</button> <button class=silbtn onclick="cpRestore('${esc(h.name)}')">restore</button></td></tr>`).join('');
+ return `<div class=cfgsec id=sec-checkpoints><h4>Checkpoints and history</h4><p class=gnote>A checkpoint is a restic snapshot of a machine kept before something changes it, to go back to (<a class=lnk href="/heal">Self-repair › Changes</a> undoes a change).</p>
+  <div class=setrow><label>Before Noctyx changes</label><div><input type=checkbox class=sw id=cp-ch${P.before_changes!==false?' checked':''} onchange="cfgDirty()"></div><div class=hint>An upgrade or undo waits for a checkpoint of its machine.</div></div>
+  <div class=setrow><label>Before apt</label><div><input type=checkbox class=sw id=cp-apt${P.before_apt!==false?' checked':''} onchange="cfgDirty()"></div><div class=hint>A hook in each node's apt takes one before packages change (a failed one never stops apt), and marks when apt finished.</div></div>
+  <div class=setrow><label>A snapshot counts for</label><div><input id=cp-age type=number min=0 max=168 value="${esc(P.max_age_hours??6)}" oninput="cfgDirty()"> h</div><div class=hint>A system snapshot this recent is the checkpoint as it is; else a new one is taken (an incremental: minutes).</div></div>
+  <div class=setrow><label>Wait at most</label><div><input id=cp-to type=number min=1 max=240 value="${esc(P.timeout_minutes??45)}" oninput="cfgDirty()"> min, apt <input id=cp-ato type=number min=1 max=120 value="${esc(P.apt_timeout_minutes??20)}" oninput="cfgDirty()"> min</div></div>
+  <div class=setrow><label>Required</label><div><input type=checkbox class=sw id=cp-req${P.require?' checked':''} onchange="cfgDirty()"></div><div class=hint>On: a change whose checkpoint cannot be made does not run. Off: it runs and says why there is none.</div></div>
+  <div class=setrow><label></label><div class=hfline><button class=act onclick="cpSave()">save checkpoints</button></div></div>
+  <div class=setrow><label>Site config history</label><div>${hist?`<table class=srt>${hist}</table>`:'<span class=mut>a copy is kept before each rewrite; none yet</span>'}<pre id=cp-diff class="cfgpre hide"></pre></div><div class=hint>The last 50 copies. Restoring keeps the current file first.</div></div></div>`}
+function cpSave(){cfgRun('setCheckpoints',{checkpoints:{before_changes:$('cp-ch').checked,before_apt:$('cp-apt').checked,max_age_hours:Number($('cp-age').value),
+ timeout_minutes:Number($('cp-to').value),apt_timeout_minutes:Number($('cp-ato').value),require:$('cp-req').checked}},'save checkpoints')}
+async function cpDiff(name){const o=$('cp-diff');o.classList.remove('hide');o.textContent='…';
+ const j=await fetchJSON('/api/v1/config-history?diff='+encodeURIComponent(name)).catch(e=>({error:String(e)}));o.textContent=j.error||j.diff||'(the same as now)'}
+function cpRestore(name){if(!confirm(`Put the site config back as it was (${name})? The current one is kept first.`))return;cfgRun('configRestore',{name},'restore the site config')}
 function srVals(){const H=(PANELS.find(x=>x.id=='config')._data||{}).heal||{},pb={};
  Object.keys(H.playbooks||{}).forEach(k=>{const e=$('sr-pb-'+k);if(e)pb[k]=e.value});
  const n=id=>Number($(id).value);
@@ -4948,7 +5055,7 @@ async function cfgRun(action,params,what){
   let s;try{s=await fetchJSON('/api/v1/job/'+j.id)}catch(e){continue}
   CFGJOB.text=`${what}${s.done?(s.rc===0?' — done':' — FAILED (rc='+s.rc+')'):' — running…'}\n${(s.output||'').trim()}`;
   const o=$('cf-out');if(o){o.textContent=CFGJOB.text;o.classList.toggle('bad',s.done&&s.rc!==0)}
-  if(s.done){if(s.rc===0&&(action=='setPolicy'||action=='setAssistant'||action=='setHeal'))CFGDIRTY=false;
+  if(s.done){if(s.rc===0&&(action=='setPolicy'||action=='setAssistant'||action=='setHeal'||action=='setCheckpoints'||action=='configRestore'))CFGDIRTY=false;
    const p=PANELS.find(x=>x.id=='config');const data=await p.api().catch(()=>null);if(data){p._data=data;if(!CFGDIRTY)repaint('config',data)}
    return}}}
 /* ── recipes (/recipes): each GPU slot serves one recipe; deploy builds the next one while the
@@ -5664,6 +5771,29 @@ class H(BaseHTTPRequestHandler):
                                                               for r in change.ledger(30)[::-1]],
                                "policy": heal.policy(c), "hosts": [h["name"] for h in CM.hosts(c)],
                                "playbooks": {k: d for k, (_, d) in heal.PLAYBOOKS.items()}})
+        if p == "/api/v1/changes":
+            return self._json(changes_view())
+        if p == "/api/v1/checkpoints":
+            try:
+                return self._json(checkpoints_view(q.get("refresh") == "1"))
+            except Exception as e:
+                return self._json({"error": str(e)[:200]}, 500)
+        if p == "/api/v1/config-history":
+            from noctyx import selfstate
+            if q.get("diff"):
+                if not self._allowed("admin"):        # the site config's text: admins (it holds no secrets)
+                    return self._deny("admin")
+                try:
+                    return self._json({"diff": selfstate.config_diff(q["diff"])})
+                except ValueError as e:
+                    return self._json({"error": str(e)}, 404)
+            return self._json({"history": selfstate.config_history()})
+        if p == "/api/v1/self-checkpoints":
+            from noctyx import selfstate
+            plan = selfstate.rollback_plan()
+            return self._json({"checkpoints": selfstate.self_checkpoints(), "current": selfstate.identity(),
+                               "rollback": {"target": (plan.get("target") or {}).get("id"), "steps": plan["steps"],
+                                            "problems": plan["problems"]}})
         if p == "/api/v1/heal/log":
             from noctyx import heal
             try:
@@ -5869,6 +5999,11 @@ class H(BaseHTTPRequestHandler):
             errs = heal_errors(params.get("heal"))
             if errs:
                 return self._json({"error": "; ".join(errs)}, 400)
+        if name == "revertChange":
+            from noctyx import change
+            why = change.revertible(str(params.get("id") or ""))[1]
+            if why:
+                return self._json({"error": f"change {params.get('id')}: {why}"}, 400)
         if name == "recipeCatalog" and not params.get("remove"):
             errs = CM.validate_catalog_entry(params.get("name"), params.get("entry"), CM.cfg())
             if errs:
@@ -5929,6 +6064,9 @@ def main():
         os._exit(0)
     for s in (_sig.SIGTERM, _sig.SIGHUP, _sig.SIGINT):
         _sig.signal(s, _bye)
+    if not DEMO:                               # a known state of Noctyx itself, when it starts on new code
+        from noctyx import selfstate
+        threading.Thread(target=selfstate.checkpoint_if_new, daemon=True).start()
     if DEMO:                                   # plain HTTP on loopback: nothing real behind it
         httpd = ThreadingHTTPServer(("127.0.0.1", PORT), H)
         print(f"noctyx demo: http://127.0.0.1:{PORT}", flush=True)

@@ -35,7 +35,8 @@ from noctyx.paths import P
 
 NE_UNIT = "prometheus-node-exporter"
 NE_DROPIN = f"/etc/systemd/system/{NE_UNIT}.service.d/noctyx.conf"
-NE_PREV = f"{P['node_lib']}/prev/node_exporter"
+NE_PREV = f"{P['node_lib']}/prev/node_exporter"   # one directory per change below it (older changes: its files)
+KEEP = 3                      # the copies kept per machine and component, for noctyx revert: the newest changes'
 PROM = "http://127.0.0.1:9090"
 SHADOW_PORT = 20991                 # the trial Prometheus, loopback only, only while a trial runs
 SCRAPE_BUDGET = 5.0                 # a scrape must finish in half Prometheus's 10 s default timeout
@@ -50,6 +51,22 @@ def _sh(c, h, cmd, timeout=60):
     """A root shell snippet on h (locally on the head) -> (rc, output)."""
     r = _cm()._on(c, h, cmd, timeout=timeout)
     return r.returncode, ((r.stdout or "") + (r.stderr or "")).strip()
+
+
+def from_checkpoint(c, h, snap_id, paths, dest):
+    """Put back what restic's checkpoint snapshot snap_id held at `paths` into dest (dest/<path>) on h, for a
+    revert whose own copy is gone. A path the snapshot did not have is simply not there. -> [problem, …]"""
+    if not re.fullmatch(r"[0-9a-f]{8,64}", snap_id or ""):
+        return [f"no checkpoint snapshot to restore from ({snap_id})"]
+    rc, out = _sh(c, h, f"rm -rf {shlex.quote(dest)} && mkdir -p {shlex.quote(dest)}")
+    if rc:
+        return [out[-200:]]
+    for p in paths:
+        rc, out = _sh(c, h, f"{P['agent_bin']} restore --snapshot {snap_id} --path {shlex.quote(p)} "
+                            f"--target {shlex.quote(dest)}", timeout=1800)
+        if rc:
+            return [f"restoring {p} from snapshot {snap_id}: {out[-200:]}"]
+    return []
 
 
 def stream(argv, timeout):
@@ -148,6 +165,7 @@ class NodeExporter(change.Change):
     """Noctyx's pinned node_exporter on one Linux machine (install-node-metrics)."""
     kind = "node_exporter"
     auto_revert = True
+    checkpoint = True
     timeout = 900
 
     def __init__(self, c, host, snap=None):
@@ -162,14 +180,30 @@ class NodeExporter(change.Change):
         self.snap["before"] = scrape_exporter(self.c, self.host)
 
     def snapshot(self):
-        d = NE_PREV
+        d = f"{NE_PREV}/{self.id or 'manual'}"
         rc, out = _sh(self.c, self.host, f"""set -e; d={d}; rm -rf "$d.new"; mkdir -p "$d.new"
 [ -f /usr/local/bin/node_exporter ] && cp -p /usr/local/bin/node_exporter "$d.new/node_exporter" || true
 [ -f {NE_DROPIN} ] && cp -p {NE_DROPIN} "$d.new/noctyx.conf" || true
-rm -rf "$d"; mv "$d.new" "$d"; ls "$d" """)
+rm -rf "$d"; mv "$d.new" "$d"; ls "$d"
+ls -1dt {NE_PREV}/*/ 2>/dev/null | tail -n +{KEEP + 1} | xargs -r rm -rf""")
         if rc:
             raise RuntimeError(f"snapshot on {self.host['name']}: {out[-200:]}")
         self.snap.update(dir=d, had=out.split())
+
+    def revert_target(self):
+        return {"ok": True, "seconds": (self.snap.get("before") or {}).get("seconds") or 0}
+
+    def revert_missing(self):
+        d = self.snap.get("dir") or NE_PREV
+        rc, out = _sh(self.c, self.host, f"[ -d {d} ] && echo kept || echo gone", timeout=20)
+        if rc:
+            return f"cannot reach {self.host['name']}: {out[-160:]}"
+        if out.strip() == "kept":
+            return None
+        if self.checkpoint_snap:
+            self.from_snapshot = True        # restic's checkpoint snapshot has what ran before it
+            return None
+        return f"its copy ({d}) is gone (Noctyx keeps the last {KEEP} per machine) and it has no checkpoint snapshot"
 
     def apply(self):
         self.snap["applied"] = time.time()
@@ -205,6 +239,15 @@ rm -rf "$d"; mv "$d.new" "$d"; ls "$d" """)
 
     def rollback(self):
         d = self.snap.get("dir") or NE_PREV
+        if self.from_snapshot:
+            d = f"{NE_PREV}/restic-{self.checkpoint_snap}"
+            bad = from_checkpoint(self.c, self.host, self.checkpoint_snap, ["/usr/local/bin/node_exporter", NE_DROPIN],
+                                  d + ".r")
+            if bad:
+                raise RuntimeError("; ".join(bad))
+            _sh(self.c, self.host, f"""set -e; rm -rf {d}; mkdir -p {d}
+[ -f {d}.r/usr/local/bin/node_exporter ] && mv {d}.r/usr/local/bin/node_exporter {d}/node_exporter || true
+[ -f {d}.r{NE_DROPIN} ] && mv {d}.r{NE_DROPIN} {d}/noctyx.conf || true; rm -rf {d}.r""")
         rc, out = _sh(self.c, self.host, f"""set -e; d={d}
 if [ -f "$d/node_exporter" ]; then install -m 0755 "$d/node_exporter" /usr/local/bin/node_exporter; else rm -f /usr/local/bin/node_exporter; fi
 if [ -f "$d/noctyx.conf" ]; then install -m 0644 "$d/noctyx.conf" {NE_DROPIN}; else rm -f {NE_DROPIN}; fi
@@ -269,9 +312,12 @@ def _major(v):
 
 
 class HeadService(change.Change):
-    """Noctyx's pinned Prometheus or Alertmanager in the head's distro unit (a drop-in), or a newer pin there."""
+    """Noctyx's pinned Prometheus or Alertmanager in the head's distro unit (a drop-in), or a newer pin there.
+    Its binaries and drop-in are kept per change (the last KEEP); its data once, for the newest change only."""
     auto_revert = False          # a revert loses what was recorded since: a person decides
+    checkpoint = True
     timeout = 600
+    keep_data = False            # a revert that keeps today's data (its copy is another change's, or not wanted)
 
     def __init__(self, c, host, snap=None, name="prometheus", shadow_minutes=30):
         super().__init__(c, host, snap)
@@ -307,14 +353,41 @@ class HeadService(change.Change):
         return am_state(base)
 
     def preflight(self):
+        s = self._inspect()
+        data = self.snap["data"]
+        flags, args = self.snap["flags"], self.snap["args"]
+        self._stage(flags, args, data)
+
+    def prepare_revert(self):
+        self._inspect(strict=False)
+        if not self.keep_data:
+            size = int(_run(["du", "-sb", self.snap["data"]])[1].split()[0] or 0)
+            free = shutil.disk_usage(pathlib.Path(self.snap["data"]).parent).free
+            if free < size * 2 + 2 ** 30:      # today's data kept apart, and the old copy put in its place
+                raise change.Refused(f"not enough room beside {self.snap['data']} for two copies of it "
+                                     f"({size >> 30} GiB each): {free >> 30} GiB free")
+            self.snap["size"] = size
+        else:
+            self.snap["size"] = 0
+
+    def revert_target(self):
+        b = self.snap.get("before") or {}
+        if not b.get("ready"):
+            return {}                    # broken now: answering is what it must do after
+        # the data it goes back to has the silences of that time, not today's
+        return {k: v for k, v in b.items() if k != "silences"} if not self.keep_data else b
+
+    def _inspect(self, strict=True):
+        """What runs now: the unit, its state, flags, ARGS and data directory (self.snap). strict: refuse a unit
+        that is not running and answering (a revert takes a broken one too)."""
         s = self.spec
         if not pathlib.Path("/run/systemd/system").exists():
             raise change.Refused("this head does not run systemd")
         rc, out = _run(["systemctl", "is-active", s["unit"]])
-        if out != "active":
+        if out != "active" and strict:
             raise change.Refused(f"{s['unit']}.service is {out or 'not installed'}: Noctyx takes over a running one only")
         before = self._state()
-        if not before.get("ready"):
+        if not before.get("ready") and strict:
             raise change.Refused(f"{self.kind} does not answer on {s['url']} now: {before.get('error')}")
         self.snap["before"] = before
         self.snap["was"] = before.get("version")
@@ -324,6 +397,10 @@ class HeadService(change.Change):
         self.snap["flags"], self.snap["args"] = flags, args
         data = (flags.get(s["data"]) or re.search(re.escape(s["data"]) + r"=(\S+)", args).group(1)).rstrip("/")
         self.snap["data"] = data
+        return s
+
+    def _stage(self, flags, args, data):
+        s = self.spec
         # the pinned release, checked against its sums, staged beside the audit trail
         try:
             from noctyx import setup
@@ -425,12 +502,17 @@ class HeadService(change.Change):
 
     def snapshot(self):
         s, data = self.spec, self.snap["data"]
-        prev = data + ".noctyx-prev"
+        # a revert keeps today's data apart: the copy at .noctyx-prev is the one its rollback puts back
+        prev = data + (".noctyx-prev-undo" if self.for_revert else ".noctyx-prev")
         self.snap["prev"] = prev
         self.snap["had_dropin"] = pathlib.Path(dropin(self.kind)).exists()
-        bins = pathlib.Path(prev + "-bin")
+        root = pathlib.Path(data + ".noctyx-prev-bin")   # files at its top: the one copy older Noctyx kept
+        bins = root / (self.id or "manual")
+        self.snap["bins"] = str(bins)
         _run(["rm", "-rf", str(bins)])
         bins.mkdir(parents=True)
+        for old in sorted((d for d in root.iterdir() if d.is_dir()), key=lambda d: d.stat().st_mtime)[:-KEEP]:
+            _run(["rm", "-rf", str(old)])
         for b in s["bins"]:
             f = pathlib.Path("/usr/local/bin") / b
             if f.exists():
@@ -438,6 +520,9 @@ class HeadService(change.Change):
         if self.snap["had_dropin"]:
             _run(["cp", "-p", dropin(self.kind), str(bins / "noctyx.conf")])
         self.snap["stopped"] = time.time()
+        if self.keep_data:                       # a revert that keeps the data: the binaries and drop-in only
+            self.snap["data_copy"] = None
+            return
         rc, out = _run(["systemctl", "stop", s["unit"]], timeout=120)
         if rc:
             raise RuntimeError(f"stopping {s['unit']}: {out[-200:]}")
@@ -445,6 +530,8 @@ class HeadService(change.Change):
         rc, out = _run(["cp", "-a", "--reflink=auto", data, prev], timeout=1800)
         if rc:
             raise RuntimeError(f"copying {data} aside: {out[-200:]}")
+        pathlib.Path(prev + ".change").write_text(self.id or "manual")    # whose copy it is
+        self.snap["data_copy"] = self.id or "manual"
         print(f"  {data} copied to {prev} ({self.snap['size'] >> 20} MiB) in {time.time() - self.snap['stopped']:.0f}s",
               flush=True)
 
@@ -494,10 +581,42 @@ class HeadService(change.Change):
             bad += compare_am(self.snap["before"], am_state(self.spec["url"]))
         return bad
 
+    def revert_missing(self):
+        bins = pathlib.Path(self.snap.get("bins") or self.snap.get("data", "") + ".noctyx-prev-bin")
+        if not bins.is_dir():                    # empty is a copy too: nothing of Noctyx's ran there before
+            if not self.checkpoint_snap:
+                return (f"its copy of the binaries ({bins}) is gone (Noctyx keeps the last {KEEP}) and it has no "
+                        "checkpoint snapshot")
+            self.from_snapshot = True        # the binaries and drop-in from restic's checkpoint snapshot
+        if self.keep_data:
+            return None
+        mark = pathlib.Path(self.snap.get("prev", "") + ".change")
+        whose = mark.read_text().strip() if mark.exists() else (None if "data_copy" in self.snap else "legacy")
+        mine = self.snap.get("data_copy", "legacy")
+        if not pathlib.Path(self.snap.get("prev", "")).is_dir() or whose != mine:
+            return (f"the copy of {self.kind}'s data taken before it was replaced by a later change's: undo it with "
+                    "--keep-data (the binaries and drop-in go back, the data written since stays)")
+        return None
+
     def rollback(self):
         s, data, prev = self.spec, self.snap["data"], self.snap.get("prev")
         _run(["systemctl", "stop", s["unit"]], timeout=120)
-        bins = pathlib.Path(prev + "-bin")
+        bins = pathlib.Path(self.snap.get("bins") or data + ".noctyx-prev-bin")
+        if self.from_snapshot:
+            bins = pathlib.Path(data + f".noctyx-prev-bin/restic-{self.checkpoint_snap}")
+            r = pathlib.Path(str(bins) + ".r")
+            bad = from_checkpoint(self.c, self.host, self.checkpoint_snap,
+                                  [f"/usr/local/bin/{b}" for b in s["bins"]] + [dropin(self.kind)], str(r))
+            if bad:
+                raise RuntimeError("; ".join(bad))
+            _run(["rm", "-rf", str(bins)])
+            bins.mkdir(parents=True)
+            for b in s["bins"]:
+                if (r / "usr/local/bin" / b).exists():
+                    shutil.move(str(r / "usr/local/bin" / b), str(bins / b))
+            if (r / dropin(self.kind).lstrip("/")).exists():
+                shutil.move(str(r / dropin(self.kind).lstrip("/")), str(bins / "noctyx.conf"))
+            _run(["rm", "-rf", str(r)])
         for b in s["bins"]:
             f = pathlib.Path("/usr/local/bin") / b
             if (bins / b).exists():
@@ -508,6 +627,12 @@ class HeadService(change.Change):
             _run(["cp", "-p", str(bins / "noctyx.conf"), dropin(self.kind)])
         else:
             pathlib.Path(dropin(self.kind)).unlink(missing_ok=True)
+        if self.keep_data or self.snap.get("data_copy", "legacy") is None:
+            _run(["systemctl", "daemon-reload"])
+            rc, out = _run(["systemctl", "start", s["unit"]], timeout=120)
+            if rc:
+                raise RuntimeError(f"starting {s['unit']} again: {out[-200:]}")
+            return
         failed = data + ".noctyx-failed"
         _run(["rm", "-rf", failed])
         _run(["mv", data, failed])
@@ -652,8 +777,16 @@ def change_for(c, host, row, shadow_minutes=30):
     return None
 
 
-def rebuild(c, rec):
-    """A ledger record -> its change, ready to roll back (noctyx heal)."""
+def rebuild(c, rec, fresh=False):
+    """A ledger record -> its change, ready to roll back (noctyx heal, noctyx revert); fresh: a new change of the
+    same kind on the same machine, with nothing kept yet."""
+    snap = None if fresh else rec.get("snap")
+    if rec["kind"] == "node_exporter-dropin":
+        from noctyx import heal
+        h = next((x for x in _cm().hosts(c) if x["name"] == rec["host"]), None)
+        return heal.DropIn(c, h, snap=snap) if h else None
+    if fresh:
+        rec = {**rec, "snap": None}
     h = next((x for x in _cm().hosts(c) if x["name"] == rec["host"]), None)
     if not h:
         return None if rec["kind"] not in SERVICES else HeadService(c, {"name": rec["host"], "local": True},
@@ -663,3 +796,16 @@ def rebuild(c, rec):
     if rec["kind"] in SERVICES:
         return HeadService(c, h, snap=rec.get("snap"), name=rec["kind"])
     return None
+
+
+def revert(c, rid, keep_data=False):
+    """noctyx revert: the change that undoes ledger record rid, or raise change.Refused(why)."""
+    rec, why = change.revertible(rid)
+    if why:
+        raise change.Refused(f"change {rid}: {why}")
+    old, cur = rebuild(c, rec), rebuild(c, rec, fresh=True)
+    if not old or not cur:
+        raise change.Refused(f"change {rid}: Noctyx cannot undo a {rec['kind']} change")
+    old.keep_data = cur.keep_data = keep_data
+    old.checkpoint_snap = (rec.get("checkpoint") or {}).get("snapshot")
+    return change.Revert(rec, old, cur)

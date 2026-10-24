@@ -13,7 +13,7 @@ Related pages: [accounts](accounts.md) · [site config](site-config.md) · [inst
 ![The header menus](../screenshots/menu.png)
 
 The header has four menus: **Monitor** (Dashboard, Cluster, Self-repair), **Deploy** (Recipes), **Configure**
-(Backups, Retention, Model mirror, Assistant LLM, Self-repair) and **Kiosk**. It also shows the page name, the head and node count, the
+(Backups, Retention, Model mirror, Assistant LLM, Self-repair, Checkpoints) and **Kiosk**. It also shows the page name, the head and node count, the
 clock, status pills (*backups N/N on schedule*, alerts) and your sign-in state. **Ask** opens a drawer where the
 assistant answers questions about the site from its own data (see [Assistant](assistant.md#ask-noctyx)). The gear
 opens the display settings. Click the logo for About.
@@ -102,16 +102,21 @@ Below the cards, **Discover on GitHub** searches for public recipes that fit thi
 
 ## Self-repair (`/heal`)
 
-What `noctyx heal` found, decided and ran:
+What `noctyx heal` found, decided and ran, and the ways back:
 - whether repairs are on and whether they are frozen, with **unfreeze** and **repair now**;
 - the repairs this hour against the budget;
 - the open problems with their state and why;
 - the last day's repairs;
 - each playbook's mode;
 - the log, newest first. Filter it by machine, playbook or text. Open a run for its steps, and a command for its
-  exit code and output.
+  exit code and output;
+- **Changes:** every change Noctyx made to a machine, its state (in effect, undone, rolled back), the checkpoint it
+  waited for, and **undo** on the newest one in effect (admin);
+- **Checkpoints** (on request: it asks every machine's repository): each machine's checkpoint snapshots and the
+  changes each was taken before, with **checkpoint now**;
+- **Noctyx itself:** the self-checkpoints, and the `self-rollback` command (not a button: it restarts the console).
 
-See [self-repair](self-repair.md#the-log).
+See [self-repair](self-repair.md#the-log) and [checkpoints](checkpoints.md).
 
 ## Configuration (`/config`)
 
@@ -126,9 +131,11 @@ has an anchor that the Configure menu links to:
 | `/config#sec-retention` | daily, weekly and monthly snapshots kept |
 | `/config#sec-mirror` | HF mirror status, `HF_ENDPOINT`, nightly harvest, hosts to harvest, bandwidth limit, **harvest now** |
 | `/config#sec-assistant` | assistant endpoint, model, timeout, fallback, API key, **test**, **save assistant** |
+| `/config#sec-checkpoints` | checkpoints before changes and apt, how recent a snapshot counts, the waits, required or not, **save checkpoints**; the site config's history with what restoring each copy changes, and **restore** |
 | `/config#sec-heal` | self-repair: on or report only, repairs per hour, freeze, disk limit, each playbook's mode, units and model servers it may restart, automatic upgrades (off by default), **save self-repair** |
 
-Saving runs the same validated CLI commands (`policy-set`, `assistant-set`, `heal-set`). See
+Saving runs the same validated CLI commands (`policy-set`, `assistant-set`, `heal-set`, `checkpoint-set`,
+`config-restore`). See
 [the site config](site-config.md#backup_policy). Saving needs the `admin` role in accounts mode.
 
 ## Kiosk (`/kiosk`)
@@ -228,6 +235,10 @@ when the system asks for reduced motion.
 | `/api/v1/versions` | every critical component per machine: installed, pinned, latest, state, upgrade command |
 | `/api/v1/heal` | the repair loop: open problems, the last day's repairs, the changes ledger, the policy in effect |
 | `/api/v1/heal/log` | its runs, newest first (`n`, `host`, `check`, `all=1`, `q`, `run`) |
+| `/api/v1/changes` | every change, what is in effect, its checkpoint, whether it can be undone |
+| `/api/v1/checkpoints` | each machine's checkpoint snapshots (cached 5 min; `refresh=1`) |
+| `/api/v1/config-history` | the site config's kept copies; `diff=NAME` (admin): what restoring one would change |
+| `/api/v1/self-checkpoints` | the recorded states of Noctyx itself, and what `self-rollback` would do |
 | `/api/v1/…` | the JSON the panels read. `POST /api/v1/action` runs actions ([accounts](accounts.md#api-token-for-scripts)) |
 
 ## Prometheus `/metrics`

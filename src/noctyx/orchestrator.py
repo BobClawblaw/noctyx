@@ -1580,6 +1580,11 @@ def _write_block(key, value, lines=False):
 def _replace_cfg(new, key, value):
     if json.loads(new).get(key) != value:
         raise RuntimeError(f"{key} rewrite did not round-trip; the site config left untouched")
+    from noctyx import selfstate
+    try:
+        selfstate.save_config(key)                 # the file as it was: noctyx config-history
+    except OSError as e:
+        print(f"  (no copy of the site config kept: {e})", file=sys.stderr)
     st = os.stat(CFG_PATH)
     tmp = f"{CFG_PATH}.tmp"
     with open(tmp, "w") as f:
@@ -3452,6 +3457,197 @@ def cmd_heal_set(a):
           + (f"on, {pol['upgrades']['window']}" if pol["upgrades"]["auto"] else "off"))
 
 
+# ── checkpoints, the changes in effect, and going back ──────────────────────
+def cmd_changes(a):
+    """noctyx changes [--host H] [--component C] [--all] [--json]: what Noctyx changed on each machine, what is in
+    effect, the checkpoint each change waited for, and which one `noctyx revert` would undo."""
+    from noctyx import change
+    recs = change.ledger(100000)
+    st = change.state_of(recs)
+    rows = [r for r in recs if (not a.host or r.get("host") == a.host) and (not a.component or r.get("component") == a.component)]
+    if not a.all:
+        rows = rows[-40:]
+    if a.json:
+        print(json.dumps([{**{k: v for k, v in r.items() if k != "snap"}, "state": st.get(r["id"])} for r in rows], indent=1))
+        return
+    if not rows:
+        print("no changes recorded" + (f" for {a.host}" if a.host else ""))
+        return
+    for r in rows:
+        cp = r.get("checkpoint") or {}
+        cps = (f"checkpoint {cp['snapshot']}" if cp.get("snapshot") else f"no checkpoint ({cp.get('error') or cp.get('skipped')})"
+               if cp else "")
+        mark = "←" if st.get(r["id"]) == "in effect" else " "
+        print(f"{mark} {r['id']:<14} {r['ts'][:16].replace('T', ' ')}  {r['host']:<10} {r.get('component', ''):<20} "
+              f"{st.get(r['id']):<22} {r['what']}" + (f"  · {cps}" if cps else ""))
+    print("\n← in effect: `noctyx revert ID` undoes it (the newest per machine and component first)")
+
+
+def cmd_revert(a):
+    """noctyx revert ID [--keep-data] [--yes]: undo a change that is in effect, as a change of its own (checked,
+    rolled back if the undo fails). Without --yes: what it would do."""
+    from noctyx import change, upgrades
+    c = cfg()
+    try:
+        ch = upgrades.revert(c, a.id, keep_data=a.keep_data)
+        why = ch.old.revert_missing()
+    except change.Refused as e:
+        sys.exit(f"✗ {e}")
+    if why:
+        sys.exit(f"✗ change {a.id}: {why}")
+    rec = change.find(a.id)
+    print(f"{ch.what} on {rec['host']}: puts back what ran before it"
+          + (f", from its checkpoint snapshot {ch.old.checkpoint_snap} (its own copy is gone)" if ch.old.from_snapshot else "")
+          + (" (binaries and drop-in; the data written since stays)" if a.keep_data else
+             f" (with its data as it was then: what was recorded since {rec['ts'][:16].replace('T', ' ')} UTC is moved "
+             f"to {ch.old.snap.get('data')}.noctyx-failed; --keep-data keeps it)" if rec["kind"] in upgrades.SERVICES else "")
+          + f"; checked, and rolled back if it does not work")
+    if not a.yes:
+        print("nothing changed: add --yes to undo it")
+        sys.exit(2)
+    by = os.environ.get("NOCTYX_BY") or os.environ.get("SUDO_USER")
+    res = change.run(ch, by=by)
+    try:
+        versions(c, rec["host"])                  # its component row says what runs now
+    except Exception as e:
+        print(f"  (versions check after it: {e})")
+    sys.exit(0 if res["outcome"] == "ok" else 1)
+
+
+def cmd_checkpoint(a):
+    """noctyx checkpoint --host H|all [--max-age MIN]: a checkpoint of each machine now (a system snapshot from the
+    last MIN minutes, default 0: a new one)."""
+    from noctyx import checkpoints
+    c = cfg()
+    names = [h["name"] for h in backup_hosts(c)] if a.host == "all" else [a.host]
+    bad = 0
+    for n in names:
+        host_by_name(c, n)
+        got = checkpoints.take(c, {"name": n}, "manual", max_age=a.max_age * 60)
+        ok = bool(got.get("snapshot")) and not got.get("error")
+        bad += not ok
+        print(f"{'✓' if ok else '✗'} {n}: " + (f"snapshot {got['snapshot']} " + ("taken" if got.get("taken") else
+              f"from {int(got.get('age') or 0) // 60} min ago") if ok else got.get("error") or got.get("skipped") or "no snapshot")
+              + (f" ({got['seconds']} s)" if got.get("seconds") else "") + (f" · {got['note']}" if got.get("note") else "")
+              + (f" · {got['incomplete']}" if got.get("incomplete") else ""))
+        audit("checkpoint", host=n, **{k: v for k, v in got.items() if k in ("snapshot", "taken", "age", "error", "seconds",
+                                                                             "incomplete")})
+    sys.exit(1 if bad else 0)
+
+
+def cmd_checkpoints(a):
+    """noctyx checkpoints [--host H] [--json]: the snapshots taken as checkpoints, newest first, and the changes
+    each was taken before."""
+    from noctyx import checkpoints
+    got = checkpoints.listing(cfg(), a.host)
+    if a.json:
+        print(json.dumps(got, indent=1))
+        return
+    for host, rows in got.items():
+        if isinstance(rows, dict):
+            print(f"{host}: {rows['error']}")
+            continue
+        print(f"{host}: {len(rows)} checkpoint(s)")
+        for r in rows[:15]:
+            ch = "; ".join(f"{x['id']} {x['what']} ({x['outcome']})" for x in r["changes"])
+            print(f"  {r['id']}  {r['time'][:19].replace('T', ' ')}  before {', '.join(r['reasons']) or '?'}"
+                  + (f"  · {ch}" if ch else ""))
+    print("\nput a path back from one: noctyx restore --host H --snapshot ID --path /etc/…  (the restore guide for a whole machine)")
+
+
+def cmd_checkpoint_set(a):
+    """noctyx checkpoint-set --json '{...}': the site's checkpoint policy (checkpoints.DEFAULTS, merged over the
+    stored keys), then the apt hook put on or taken off every backed-up node."""
+    from noctyx import checkpoints
+    c = cfg()
+    new, errs = checkpoints.validate(json.loads(a.json))
+    if errs:
+        sys.exit("invalid: " + "; ".join(errs))
+    blk = {**(c.get("checkpoints") or {}), **new}
+    _write_block("checkpoints", blk, lines=True)
+    c = cfg()
+    pol = checkpoints.policy(c)
+    audit("checkpoint-set", **pol, by=os.environ.get("NOCTYX_BY") or os.environ.get("SUDO_USER"))
+    print(f"checkpoints: before changes {'on' if pol['before_changes'] else 'off'} · before apt "
+          f"{'on' if pol['before_apt'] else 'off'} · a snapshot from the last {pol['max_age_hours']} h counts · "
+          f"{'required' if pol['require'] else 'not required'}")
+    print("the apt hook:")
+    res = checkpoints.apply_hooks(c, a.host)
+    sys.exit(0 if all(ok for ok, _ in res.values()) else 1)
+
+
+def cmd_config_history(a):
+    """noctyx config-history [--diff NAME]: the site config as it was before each rewrite, and what restoring one
+    would change."""
+    from noctyx import selfstate
+    if a.diff:
+        try:
+            print(selfstate.config_diff(a.diff) or "(the same as now)")
+        except ValueError as e:
+            sys.exit(str(e))
+        return
+    rows = selfstate.config_history()
+    if not rows:
+        print("no copies yet: one is kept before each rewrite of the site config")
+    for r in rows:
+        why = r["why"].replace("-", " ") if r["why"].startswith("before") else f"before a {r['why']} change"
+        print(f"  {r['name']:<48} {r['ts'][:19].replace('T', ' ')}  {why}  {r['bytes']} bytes")
+
+
+def cmd_config_restore(a):
+    """noctyx config-restore NAME [--yes]: put a kept copy of the site config back (the current one is kept first)."""
+    from noctyx import selfstate
+    try:
+        diff = selfstate.config_diff(a.name)
+    except ValueError as e:
+        sys.exit(str(e))
+    print(diff or "(the same as now)")
+    if not a.yes:
+        print("nothing changed: add --yes to put it back")
+        sys.exit(2)
+    kept = selfstate.config_restore(a.name, by=os.environ.get("NOCTYX_BY") or os.environ.get("SUDO_USER"))
+    print(f"✓ the site config is {a.name} again; the one before is kept as {kept}. The console reads it as it goes; "
+          "restart it when the hosts changed.")
+
+
+def cmd_self_checkpoint(a):
+    """noctyx self-checkpoint [--note TEXT] [--list]: record the Noctyx that runs now (version, git commit) with a
+    copy of the site config; --list: the ones kept."""
+    from noctyx import selfstate
+    if a.list:
+        for x in selfstate.self_checkpoints():
+            i = x.get("identity") or {}
+            g = i.get("git") or {}
+            print(f"  {x['id']}  {x['ts'][:19].replace('T', ' ')}  {i.get('version')} {g.get('sha', '')[:12]}"
+                  f"{' (dirty)' if g.get('dirty') else ''} {g.get('branch') or ''}  {x.get('note') or ''}")
+        return
+    cid = selfstate.self_checkpoint(a.note or "", by=os.environ.get("SUDO_USER"))
+    print(f"✓ self-checkpoint {cid}")
+
+
+def cmd_self_rollback(a):
+    """noctyx self-rollback [--to ID] [--config] [--yes] [--no-units] [--no-restart]: Noctyx back to a
+    self-checkpoint (default: the newest one with other code than now)."""
+    from noctyx import selfstate
+    plan = selfstate.rollback_plan(a.to, a.config, not a.no_units, not a.no_restart)
+    t = plan.get("target")
+    if t:
+        i = t.get("identity") or {}
+        print(f"back to {t['id']} ({t['ts'][:19].replace('T', ' ')}): Noctyx {i.get('version')} "
+              f"{(i.get('git') or {}).get('sha', '')[:12]}  {t.get('note') or ''}")
+    for s_ in plan["steps"]:
+        print(f"  · {s_}")
+    for p_ in plan["problems"]:
+        print(f"  ✗ {p_}")
+    if plan["problems"]:
+        sys.exit(2)
+    if not a.yes:
+        print("nothing changed: add --yes to go back")
+        sys.exit(2)
+    sys.exit(selfstate.self_rollback(a.to, a.config, units=not a.no_units, restart=not a.no_restart,
+                                     by=os.environ.get("SUDO_USER")))
+
+
 def cmd_versions_skip(a):
     """noctyx versions-skip --host H|all --component C [--release V] [--undo]: stop alerting on a release you
     choose not to take; a later release alerts again."""
@@ -3787,6 +3983,30 @@ def main():
     hl.add_argument("--host", help="check and repair only this machine (an alert's)")
     hl.add_argument("--trigger", help="why it runs, for the log (timer, alert:NAME, console)")
     hl.add_argument("--unfreeze", action="store_true", help="let repairs run again after too many failed in a row")
+    chg = sub.add_parser("changes", help="what Noctyx changed on each machine, what is in effect, and its checkpoints")
+    chg.add_argument("--host"); chg.add_argument("--component"); chg.add_argument("--all", action="store_true")
+    chg.add_argument("--json", action="store_true")
+    rv = sub.add_parser("revert", help="undo a change that is in effect (checked, and rolled back if the undo fails)")
+    rv.add_argument("id"); rv.add_argument("--keep-data", action="store_true",
+                                           help="Prometheus/Alertmanager: put back the binaries and drop-in, keep the data")
+    rv.add_argument("--yes", action="store_true", help="really do it (without: what it would do)")
+    ck = sub.add_parser("checkpoint", help="a checkpoint (system snapshot) of a machine now")
+    ck.add_argument("--host", required=True, help="a host, or all"); ck.add_argument("--max-age", type=int, default=0,
+                                                                                     help="minutes: a snapshot this recent counts")
+    cks = sub.add_parser("checkpoints", help="the checkpoint snapshots and what each was taken before")
+    cks.add_argument("--host"); cks.add_argument("--json", action="store_true")
+    cps = sub.add_parser("checkpoint-set", help="set the checkpoint policy (JSON) and put the apt hook on the nodes")
+    cps.add_argument("--json", required=True); cps.add_argument("--host", help="the apt hook on this host only")
+    chh = sub.add_parser("config-history", help="the site config as it was before each rewrite")
+    chh.add_argument("--diff", metavar="NAME", help="what restoring that copy would change")
+    chr_ = sub.add_parser("config-restore", help="put a kept copy of the site config back")
+    chr_.add_argument("name"); chr_.add_argument("--yes", action="store_true")
+    sck = sub.add_parser("self-checkpoint", help="record the Noctyx that runs now (version, git commit, site config)")
+    sck.add_argument("--note"); sck.add_argument("--list", action="store_true")
+    srb = sub.add_parser("self-rollback", help="Noctyx back to a self-checkpoint (code, units, optionally its config)")
+    srb.add_argument("--to", metavar="ID"); srb.add_argument("--config", action="store_true", help="also its site config")
+    srb.add_argument("--yes", action="store_true"); srb.add_argument("--no-units", action="store_true")
+    srb.add_argument("--no-restart", action="store_true")
     hs = sub.add_parser("heal-set", help="set the self-repair policy (JSON: auto, budget_per_hour, freeze_after, disk_pct, "
                                          "playbooks, restart_units, restart_slots, upgrades)")
     hs.add_argument("--json", required=True)
@@ -3821,7 +4041,11 @@ def main():
                "recipe-deploy": cmd_recipe_deploy, "recipe-stop": cmd_recipe_stop, "recipe-start": cmd_recipe_start,
                "recipe-rollback": cmd_recipe_rollback, "recipe-status": cmd_recipe_status,
                "recipe-catalog": cmd_recipe_catalog, "recipe-discover": cmd_recipe_discover, "nightly": cmd_nightly, "install-head": cmd_install_head, "console-set": cmd_console_set, "user": cmd_user, "setup": cmd_setup, "assistant-set": cmd_assistant_set, "versions": cmd_versions,
-               "upgrade": cmd_upgrade, "versions-skip": cmd_versions_skip, "heal": cmd_heal, "heal-set": cmd_heal_set}[a.cmd]
+               "upgrade": cmd_upgrade, "versions-skip": cmd_versions_skip, "heal": cmd_heal, "heal-set": cmd_heal_set,
+               "changes": cmd_changes, "revert": cmd_revert, "checkpoint": cmd_checkpoint, "checkpoints": cmd_checkpoints,
+               "checkpoint-set": cmd_checkpoint_set, "config-history": cmd_config_history,
+               "config-restore": cmd_config_restore, "self-checkpoint": cmd_self_checkpoint,
+               "self-rollback": cmd_self_rollback}[a.cmd]
     rc = 0
     try:
         handler(a)

@@ -21,11 +21,13 @@ rewrite *one* top-level block in place and leave the rest of the file byte for b
 | `policy-set` | `backup_policy`, `retention`, `hf_mirror` |
 | `assistant-set` | `assistant` |
 | `heal-set` | `heal` |
+| `checkpoint-set` | `checkpoints` |
 | `console-set` | `console` |
 | `recipe-catalog` | `recipes.catalog` |
 
 A block that is missing is inserted just before `"schedule": {`, or last in the file when there is none. Every
 rewrite is re-parsed before an atomic replace, keeps the file's owner and mode, and is written to the audit log.
+The file as it was is kept first in `<state>/config-history` ([checkpoints](checkpoints.md#the-site-configs-history)).
 
 **Its mode.** `noctyx setup owner` makes the file `0640 root:<repo_owner>`: the directory service runs as the
 repository owner and reads it. The file holds no secrets (keys and logins live in `repo_keys`, `repo_creds` and
@@ -51,6 +53,7 @@ the mode and group a rewrite finds.
 | `hf_mirror` | Hugging Face mirror | see [hf_mirror](#hf_mirror) |
 | `assistant` | the LLM the console asks | off |
 | `heal` | what self-repair may do on its own | see [heal](#heal) |
+| `checkpoints` | checkpoints before changes and apt | see [checkpoints](#checkpoints) |
 | `recipes` | GPU slots and the recipe catalog | none |
 | `console` | display defaults for every browser | `{}` |
 | `restic_version` | restic release put on recovery sticks, shown in About | `"0.19.1"` |
@@ -281,6 +284,24 @@ What `noctyx heal` may repair on its own ([self-repair](self-repair.md)). Every 
 
 ```bash
 sudo noctyx heal-set --json '{"playbooks": {"disk": "shadow"}, "budget_per_hour": 5}'
+```
+
+## checkpoints
+
+When a machine gets a checkpoint (a restic snapshot) before something changes it ([checkpoints](checkpoints.md)).
+Every key is optional.
+
+| Key | Meaning | Default |
+|---|---|---|
+| `before_changes` | a Noctyx change waits for a checkpoint of its machine | `true` |
+| `before_apt` | the apt hook on the nodes takes one before packages change (put on or off by `checkpoint-set`) | `true` |
+| `max_age_hours` | a system snapshot this recent is the checkpoint (0..168) | `6` |
+| `timeout_minutes` | how long a change waits for a new one (1..240) | `45` |
+| `apt_timeout_minutes` | how long apt waits for one (1..120) | `20` |
+| `require` | a change whose checkpoint cannot be made does not run | `false` |
+
+```bash
+sudo noctyx checkpoint-set --json '{"max_age_hours": 2, "require": true}'
 ```
 
 ## recipes
