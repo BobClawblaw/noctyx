@@ -3393,7 +3393,7 @@ function setClose(){$('setwrap').classList.add('hide')}
 
 /* ── Ask Noctyx (copilot.py): a conversation with the site's assistant, which looks things up with the
    console's own data before it answers. The LLM's text is built as text nodes, never HTML. ── */
-const ASK={sid:null,rev:0,busy:false,timer:null};
+const ASK={sid:null,rev:0,busy:false,timer:null,hi:null,draft:''};
 try{ASK.sid=sessionStorage.getItem('nx_ask_sid')}catch(e){}
 const askEl=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e};
 function askInline(t){const f=document.createDocumentFragment();t.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/).forEach(p=>{
@@ -3437,10 +3437,27 @@ async function askSend(text){text=(text||'').trim();if(!text||ASK.busy)return;
  if(!r||!r.ok){if(r&&r.status==409&&/ended/.test(d.error||'')){askNew();return askSend(text)}
   L.append(askEl('div','askmsg err',d.error||'the console did not answer'));return}
  if(d.sid!==ASK.sid){ASK.sid=d.sid;ASK.rev=0;try{sessionStorage.setItem('nx_ask_sid',d.sid)}catch(e){}}
- ASK.busy=true;$('askq').value='';askPoll()}
+ askRemember(text);ASK.busy=true;askSet('');askPoll()}
+/* earlier questions, newest last, kept in this browser: Up/Down step through them like a shell, Enter asks the
+   one shown again, Esc clears the box (Esc on an empty box closes the drawer) */
+const ASK_HIST='nx_ask_hist',ASK_HIST_MAX=50;
+function askHist(){try{const h=JSON.parse(localStorage.getItem(ASK_HIST)||'[]');return Array.isArray(h)?h:[]}catch(e){return []}}
+function askRemember(t){const h=askHist().filter(x=>x!==t);h.push(t);try{localStorage.setItem(ASK_HIST,JSON.stringify(h.slice(-ASK_HIST_MAX)))}catch(e){}
+ ASK.hi=null;ASK.draft=''}
+function askSet(v){const q=$('askq');q.value=v;q.style.height='auto';q.style.height=Math.min(140,q.scrollHeight)+'px';
+ q.setSelectionRange(v.length,v.length)}
+function askStep(dir){const h=askHist();if(!h.length)return false;
+ let i=ASK.hi==null?h.length:ASK.hi;if(ASK.hi==null)ASK.draft=$('askq').value;
+ i=Math.max(0,Math.min(h.length,i+dir));if(i===(ASK.hi==null?h.length:ASK.hi))return false;
+ ASK.hi=i==h.length?null:i;askSet(i==h.length?ASK.draft||'':h[i]);return true}
 $('askform').addEventListener('submit',e=>{e.preventDefault();askSend($('askq').value)});
-$('askq').addEventListener('keydown',e=>{if(e.key=='Enter'&&!e.shiftKey){e.preventDefault();askSend($('askq').value)}});
-$('askq').addEventListener('input',e=>{const t=e.target;t.style.height='auto';t.style.height=Math.min(140,t.scrollHeight)+'px'});
+$('askq').addEventListener('keydown',e=>{const q=e.target;
+ if(e.key=='Enter'&&!e.shiftKey){e.preventDefault();askSend(q.value);return}
+ if(e.key=='Escape'&&q.value){e.preventDefault();e.stopPropagation();ASK.hi=null;ASK.draft='';askSet('');return}
+ const atTop=!q.value.slice(0,q.selectionStart).includes('\n'),atEnd=!q.value.slice(q.selectionEnd).includes('\n');
+ if(e.key=='ArrowUp'&&atTop&&!e.shiftKey&&askStep(-1))e.preventDefault();
+ else if(e.key=='ArrowDown'&&atEnd&&!e.shiftKey&&askStep(1))e.preventDefault()});
+$('askq').addEventListener('input',e=>{const t=e.target;ASK.hi=null;t.style.height='auto';t.style.height=Math.min(140,t.scrollHeight)+'px'});
 const segH=(cur,opts,fn)=>`<div class=seg>${opts.map(([v,l])=>`<button type=button class="${v==cur?'on':''}" onclick="${fn}('${v}')">${l}</button>`).join('')}</div>`;
 function setRender(){
  const P=$('setpanel');if(!P||$('setwrap').classList.contains('hide'))return;
