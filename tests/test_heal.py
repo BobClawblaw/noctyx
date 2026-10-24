@@ -178,7 +178,7 @@ def test_the_policy_defaults_upgrades_off():
     ({"playbooks": {"nope": "on"}}, "playbooks"),
     ({"restart_units": ["*"]}, "matches too much"),
     ({"restart_units": ["docker.service"]}, "never restarts"),
-    ({"restart_units": ["bmcbitcoind.service"]}, "never restarts"),
+    ({"restart_units": ["bitcoind.service"]}, "never restarts"),
     ({"restart_units": ["tensorfold-qwen38.service"]}, "never restarts"),
     ({"restart_units": ["a; rm -rf /"]}, "not a unit name"),
     ({"upgrades": {"window": "3-5"}}, "window"),

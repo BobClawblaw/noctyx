@@ -58,7 +58,7 @@ out. The rules repair is also how a Noctyx upgrade's new or changed alert rules 
 - **What it never touches.** It never stops, restarts or changes a container, a backup or a recipe deployment.
   The only exception is a model server you list in `restart_slots`, which it starts again. It never prunes Docker,
   never removes packages, kernels or models, and never restarts these units, whatever `restart_units` says:
-  `docker*`, `containerd*`, `*bitcoin*`, `bmcbitcoind*`, `blockyard*`, model servers (`tensorfold*`, `vllm*`,
+  `docker*`, `containerd*`, `*bitcoin*`, model servers (`tensorfold*`, `vllm*`,
   `sglang*`, `ollama*`, `mtplx*`, `llama*`, `glm*`, `qwen*`, `deepseek*`, `nemotron*`), `ssh*`, `systemd-*`,
   `networking*`, `NetworkManager*`, `nvidia*`, `user@*`, and mounts, swaps, slices, scopes and targets.
 

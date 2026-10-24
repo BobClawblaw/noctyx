@@ -91,7 +91,7 @@ DEFAULTS = {"auto": True, "budget_per_hour": 10, "freeze_after": 3, "disk_pct": 
             "upgrades": {"auto": False, "window": "03:00-05:00", "components": list(UPGRADABLE), "major": False,
                          "soak_minutes": 60}}
 # never restarted, whatever restart_units says: model servers, containers, the Bitcoin node, the way in
-NEVER_UNITS = ("docker*", "containerd*", "*bitcoin*", "bmcbitcoind*", "blockyard*", "tensorfold*", "vllm*",
+NEVER_UNITS = ("docker*", "containerd*", "*bitcoin*", "tensorfold*", "vllm*",
                "sglang*", "ollama*", "mtplx*", "llama*", "glm*", "qwen*", "deepseek*", "nemotron*", "ssh*",
                "systemd-*", "networking*", "NetworkManager*", "nvidia*", "user@*", "*.mount", "*.swap", "*.slice",
                "*.scope", "*.target")
