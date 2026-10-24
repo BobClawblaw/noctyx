@@ -34,6 +34,7 @@ SHOTS = {
     "phosphor-kiosk": ("/kiosk", ["NXT.save({theme:'phosphor',mode:'dark'})", "location.reload()", "sleep:5"], None),
     **{f"_family-{v}": ("/kiosk", [f"NXT.save({{theme:'{v}',mode:'dark'}})", "location.reload()", "sleep:5"], None)
        for v in FAMILY},
+    "ask": ("/", ["sleep:3", "askOpen()", "sleep:1"], None),
     "about": ("/about", ["sleep:3"], None),
     "login": ("/login", ["sleep:1"], None),
 }

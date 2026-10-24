@@ -47,7 +47,8 @@ Regenerate them with `python3 tools/screenshots.py`.
 | [![Kiosk](docs/screenshots/kiosk.png)](docs/screenshots/kiosk.png) **Kiosk.** A full-screen wall display: fleet tokens/s, GPU watts, backups, alerts, every slot and node. | [![Configuration](docs/screenshots/config.png)](docs/screenshots/config.png) **Configuration.** Backup policy per site and per host, databases found on each machine, retention, the mirror, the assistant. |
 | [![Settings](docs/screenshots/settings.png)](docs/screenshots/settings.png) **Settings drawer.** Fifteen themes plus your own colours, light / dark / system, °F / °C; kept in the browser or in your account. | [![Menus](docs/screenshots/menu.png)](docs/screenshots/menu.png) **Menus.** Monitor, Deploy, Configure, Kiosk; keys 1–5. |
 | [![Cluster](docs/screenshots/cluster.png)](docs/screenshots/cluster.png) **Cluster.** Schedules, snapshots, capacity and hygiene across the fleet. | [![Dashboard, Noctyx theme](docs/screenshots/dashboard.png)](docs/screenshots/dashboard.png) **The Noctyx theme.** The same dashboard in the classic navy and neon cyan. |
-| [![About](docs/screenshots/about.png)](docs/screenshots/about.png) **About.** Version, license, this site, links to the docs. | [![Sign-in](docs/screenshots/login.png)](docs/screenshots/login.png) **Sign-in.** Accounts with viewer, operator and admin roles. |
+| [![Ask Noctyx](docs/screenshots/ask.png)](docs/screenshots/ask.png) **Ask Noctyx.** Questions about the cluster, answered by the site's LLM after it looks at the live data; it only looks, and says what would change things. | [![About](docs/screenshots/about.png)](docs/screenshots/about.png) **About.** Version, license, this site, links to the docs. |
+| [![Sign-in](docs/screenshots/login.png)](docs/screenshots/login.png) **Sign-in.** Accounts with viewer, operator and admin roles. | |
 
 ## Features
 
