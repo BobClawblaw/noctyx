@@ -336,13 +336,26 @@ Steps:
    The scheduler counts a snapshot towards a profile only if the snapshot carries a `profile-<name>` tag. Hosts
    whose old snapshots lack that tag show as "never" until their first Noctyx backup.
 
-5. **Nodes.** The orchestrator reads the agent's result line by `result_token`, and it also accepts the older
-   tokens it knows. Nodes can therefore keep their existing agent until you run `install-agent`, which installs
-   the Noctyx agent at `agent_bin`.
+5. **Nodes.** The orchestrator reads the agent's result line by `result_token` (and Noctyx's own, `NOCTYX_RESULT`).
+   With the old agent's token in the block, nodes keep their existing agent until you run `install-agent`, which
+   installs the Noctyx agent at `agent_bin`.
 
-6. **Move later, one key at a time.** Change a key, move the files it names, then re-run `install-head --apply`
-   (for head paths) or `install-agent` (for node paths). Remove the key from the block once its files sit at the
-   Noctyx default.
+6. **Move to Noctyx's own names later.** Key by key, or all at once in a window with no backups due. The order
+   that keeps every step reversible:
+
+   1. Pause the timers, stop the console, directory, mirror and endpoints, and keep a copy of everything named.
+   2. Head: move the directories the block names to the defaults, write the site config without the block (or
+      with only what differs), rename the repository owner with `usermod -l` and `groupmod -n` (the uid stays,
+      so files on the NAS keep their owner), and rename `<repo_creds>/*.pass` and the users in `<etc>/htpasswd`
+      to the new `repo_dir_prefix`.
+   3. Repositories: rename `repo_root` and each `<repo_dir_prefix><repo>` directory, `noctyx nas-rest deploy` for
+      an endpoint on the NAS, and retag the old snapshots (`restic tag --tag OLD --remove OLD --add noctyx`, on
+      the repository path as its owner: the endpoint is append-only), so retention keeps one group per host.
+   4. `install-head --apply`; remove the old units. Rename Prometheus's job names, rule file, targets file and
+      CA file, then reload it; the metric prefix starts new series.
+   5. Each node: copy `node_etc` and `node_lib` to the defaults, `install-agent` and
+      `noctyx tool install-node-metrics`, then remove the old agent, units and collector file.
+   6. Back up every host once, then delete the old copies and resume the timers.
 
 To test without touching the site config, a `NOCTYX_PATH_<NAME>` environment variable overrides a single key
 (for example `NOCTYX_PATH_UNIT_PREFIX=oldtool noctyx paths`).

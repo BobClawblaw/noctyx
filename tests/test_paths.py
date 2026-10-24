@@ -46,10 +46,10 @@ def test_common_exclusions_take_site_extras():
     assert "/data/**" in text and "/boot" not in [l.strip() for l in text.splitlines()]
 
 
-def test_agent_result_parsing_accepts_old_and_new_tokens():
+def test_agent_result_parsing_reads_the_sites_token_and_noctyxs():
     from noctyx import orchestrator as o
-    out = 'noise\nLEGACY_RESULT {"a": 1}\nNOCTYX_RESULT {"b": 2}\nCLUSTERMAN_RESULT {"c": 3}\n'
-    assert o.result_lines(out) == ['{"a": 1}', '{"b": 2}', '{"c": 3}']
+    out = 'noise\nLEGACY_RESULT {"a": 1}\nNOCTYX_RESULT {"b": 2}\nOTHER_RESULT {"c": 3}\n'
+    assert o.result_lines(out) == ['{"a": 1}', '{"b": 2}']
 
 
 def test_shipped_files_are_not_empty():

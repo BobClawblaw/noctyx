@@ -925,14 +925,14 @@ def runs(n=15):
                 tail = fh.read().decode("utf-8", "replace")
         except Exception:
             tail = ""
-        ex = re.findall(r"^(?:NOCTYX|CLUSTERMAN)_EXIT (-?\d+)$", tail, re.M)
+        ex = re.findall(r"^NOCTYX_EXIT (-?\d+)$", tail, re.M)
         if ex:
             state, rc = ("ok" if ex[-1] == "0" else "failed"), int(ex[-1])
         elif _systemd_prop(unit, "ActiveState") in ("active", "activating", "deactivating"):
             state, rc = "running", None
         else:
             state, rc = "died", None
-        lines = [l for l in tail.splitlines() if l.strip() and not re.match(r"(NOCTYX|CLUSTERMAN)_EXIT", l)]
+        lines = [l for l in tail.splitlines() if l.strip() and not re.match(r"NOCTYX_EXIT", l)]
         started = None
         if m:
             started = datetime.datetime.strptime(m.group(3), "%Y%m%dT%H%M%SZ") \
@@ -3332,7 +3332,7 @@ function alertTarget(a){const n=a.name||'',h=a.host||null;
  if(n=='BackupJobFailed'||n=='JobDied')return {host:h,panel:'runs',what:'Runs'};
  if(n=='TickTimerInactive')return {panel:'schedule',what:'Schedule'};
  if(/^Nas|^RepoUnreadable/.test(n))return {panel:'storage',what:'Storage'};
- if(n=='RestEndpointDown'||n=='NoctyxMetricsDown'||n=='ClusterManMetricsDown')return {panel:'actions',what:'Console'};
+ if(n=='RestEndpointDown'||n=='NoctyxMetricsDown')return {panel:'actions',what:'Console'};
  if(/^Host(HygieneWarning|SystemdUnitFailed|RootFilesystemFull)$/.test(n))return {host:h,panel:'hygiene',what:'Hygiene'};
  if(n=='NodeExporterDown')return {host:h,panel:'detail',tab:'health',what:'Machine Report › health'};
  if(/^LLM|Tensorfold|Mtplx/.test(n))return {host:h,panel:'detail',tab:'llm',what:'Machine Report › llm'};

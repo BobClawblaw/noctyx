@@ -31,11 +31,11 @@ JOB_LOG_DIR = pathlib.Path(P["job_logs"])
 UNIT = P["unit_prefix"]                              # systemd unit prefix for jobs and timers
 AGENT = P["agent_bin"]
 RESULT = re.escape(P["result_token"])
-_RESULT_RX = re.compile(rf"^(?:{RESULT}|NOCTYX_RESULT|CLUSTERMAN_RESULT) (.*)$", re.M)
+_RESULT_RX = re.compile(rf"^(?:{RESULT}|NOCTYX_RESULT) (.*)$", re.M)
 
 
 def result_lines(out):
-    """The agent's machine-readable lines (its RESULT token; older agents' tokens too)."""
+    """The agent's machine-readable lines (the site's RESULT token, and Noctyx's default)."""
     return _RESULT_RX.findall(out or "")
 
 
@@ -481,7 +481,7 @@ def _run_backup(c, h, profile, dry, force_low_net, _unlocked=False):
             return _run_backup(c, h, profile, dry, force_low_net, _unlocked=True)
         # agent-level "one job per host" flock busy: a skip, not a failure —
         # the manual run that raced this one is doing the work
-        if rc != 0 and ("another noctyx job" in (err or "") or "another clusterman job" in (err or "")):
+        if rc != 0 and "another noctyx job" in (err or ""):
             print(f"  SKIP {h['name']}: a backup is already running on that host "
                   f"(started elsewhere); counted as busy, not broken")
             audit("backup-skipped-running", host=h["name"])
@@ -1336,7 +1336,7 @@ def follow(unit, log, poll=2.0):
         if not running:
             break
         time.sleep(poll)
-    m = re.findall(r"^(?:NOCTYX|CLUSTERMAN)_EXIT (-?\d+)$", tail, re.M)
+    m = re.findall(r"^NOCTYX_EXIT (-?\d+)$", tail, re.M)
     if m:
         return int(m[-1])
     print(f"follow: {unit} ended without an exit record (killed?) — see {log}")
