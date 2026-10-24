@@ -29,7 +29,7 @@ monitored (Time Machine backs it up).
 | **Deploy** | Build the next recipe while the current one serves; switch under the GPU lock; roll back automatically. Discover public recipes for your hardware, ranked by measured speed |
 | **Cache** | One copy of every Hugging Face model on the cluster, served back as `HF_ENDPOINT`; keeps working when the Hub does not |
 | **Protect** | Nightly snapshots of every Linux node, Docker volumes, consistent database dumps, bare-metal restore |
-| **Watch** | Live fleet console: temperatures, power, tokens/s per model, alerts with LLM triage, a morning brief, and Ask Noctyx: questions answered from the cluster's own data |
+| **Watch** | Live fleet console: every machine on one page (Machines), temperatures, power, tokens/s per model, alerts with LLM triage, a morning brief, and Ask Noctyx: questions answered from the cluster's own data |
 | **Heal** | Every upgrade checks itself and rolls back when it fails; a repair loop puts back what drifts and restarts what stops, and tells you what it did |
 
 <p align="center"><img src="docs/screenshots/phosphor-dashboard.png" alt="The Noctyx dashboard in the Phosphor theme: fleet throughput, GPU power, per-node LLM, CPU, memory and network, storage tiers" width="100%"></p>

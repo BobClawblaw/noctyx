@@ -12,7 +12,7 @@ Related pages: [accounts](accounts.md) · [site config](site-config.md) · [inst
 
 ![The header menus](../screenshots/menu.png)
 
-The header has four menus: **Monitor** (Dashboard, Cluster, Self-repair), **Deploy** (Recipes), **Configure**
+The header has four menus: **Monitor** (Dashboard, Machines, Cluster, Self-repair), **Deploy** (Recipes), **Configure**
 (Backups, Retention, Model mirror, Assistant LLM, Self-repair, Checkpoints) and **Kiosk**. It also shows the page name, the head and node count, the
 clock, status pills (*backups N/N on schedule*, alerts) and your sign-in state. **Ask** opens a drawer where the
 assistant answers questions about the site from its own data (see [Assistant](assistant.md#ask-noctyx)). The gear
@@ -25,6 +25,7 @@ opens the display settings. Click the logo for About.
 | `3` | Recipes `/recipes` |
 | `4` | Configuration `/config` |
 | `5` | Kiosk `/kiosk` |
+| `6` | Machines `/machines` |
 | `Esc` | closes menus and the settings drawer (and the Ask drawer while you type in it) |
 
 Number keys do nothing while you type in a field or hold Ctrl, Alt or Cmd.
@@ -77,6 +78,29 @@ A bare `/#gpu-01` selects a host.
   **Time Machine** card (the last finished backup, the destination, *backing up now* while one runs; amber when
   the last one is more than two days old) and a Backups line saying Time Machine backs it up. Noctyx never backs
   a Mac up.
+
+## Machines (`/machines`)
+
+Every machine on one page, so nothing needs digging for. A strip on top counts the machines up, the ones that need a
+look, backups on schedule, active alerts, tokens per second and the day's self-repairs. Below, one card per
+machine, the ones that need a look first, each with:
+
+- **why it needs a look**, in words (red: a backup stale or never made, a machine not answering, a hung or failing
+  NFS mount, a critical alert, a problem self-repair left to a person; amber: a late or failed backup, a disk over
+  85 % or filling within two weeks, a reboot required, components behind, failed units, hygiene warnings, a new
+  ssh source address, fabric link errors, a warning alert), or "all good";
+- its **role** (head node, a recipe slot, a pair's head or worker) and system (OS, architecture, uptime,
+  containers, updates);
+- **vitals** (CPU, load, memory, temperatures) and its **GPU**;
+- what it **serves** (model, tokens per second, requests running and waiting, KV cache), or which pair it is the
+  worker of;
+- **storage**: the root disk, its growth over the last week and when it would be full, and the other disks;
+- **backups** per profile, with when the last one ran;
+- the **RoCE fabric** (ports up, speed, traffic, errors, retransmits), its **NFS mounts** (the probe's speeds),
+  and **ssh** in the last 24 hours ([early warnings](signals.md));
+- what **self-repair** left open and the machine's **alerts**.
+
+Click a machine's name for its Machine Report. The page refreshes every 20 seconds (`GET /api/v1/machines`).
 
 ## Cluster (`/cluster`)
 
@@ -228,13 +252,14 @@ when the system asks for reduced motion.
 | URL | What |
 |---|---|
 | `/` | Dashboard (`#host=…&panel=…&tab=…` to focus) |
-| `/cluster`, `/recipes`, `/heal`, `/config`, `/kiosk`, `/about` | the views above |
+| `/machines`, `/cluster`, `/recipes`, `/heal`, `/config`, `/kiosk`, `/about` | the views above |
 | `/#settings` | Dashboard with the settings drawer open |
 | `/login` | sign-in (`?next=/path`) |
 | `/metrics` | Prometheus exposition, no sign-in |
 | `/api/v1/versions` | every critical component per machine: installed, pinned, latest, state, upgrade command |
 | `/api/v1/heal` | the repair loop: open problems, the last day's repairs, the changes ledger, the policy in effect |
 | `/api/v1/heal/log` | its runs, newest first (`n`, `host`, `check`, `all=1`, `q`, `run`) |
+| `/api/v1/machines` | every machine's summary: status and why, vitals, what it serves, storage, backups, signals, alerts |
 | `/api/v1/changes` | every change, what is in effect, its checkpoint, whether it can be undone |
 | `/api/v1/checkpoints` | each machine's checkpoint snapshots (cached 5 min; `refresh=1`) |
 | `/api/v1/config-history` | the site config's kept copies; `diff=NAME` (admin): what restoring one would change |

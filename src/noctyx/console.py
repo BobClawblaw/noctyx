@@ -40,6 +40,7 @@ already publishes; POST whitelisted actions, tokened unless NOCTYX_CONSOLE_AUTH=
   GET  /api/v1/versions       every critical component per machine: installed, pinned, latest, upgrade command
   GET  /api/v1/heal           the repair loop: open problems, the last day's repairs, the changes ledger, the policy
   GET  /api/v1/heal/log?n=&host=&check=&all=&q=&run=   its runs, newest first: each check, decision and command
+  GET  /api/v1/machines       every machine on one page: health and why, vitals, what it serves, storage, backups, signals
   GET  /api/v1/changes        every change Noctyx made, what is in effect, its checkpoint, whether it can be undone
   GET  /api/v1/checkpoints    the checkpoint snapshots per machine (cached 5 min; ?refresh=1)
   GET  /api/v1/config-history the site config's kept copies (?diff=NAME: what restoring it would change)
@@ -2312,6 +2313,183 @@ def overview():
             "auth_required": auth_on()}
 
 
+_MACHINES = {"ts": 0, "data": None}
+
+
+def _by_host(q, key=None):
+    """{host: value} (or {host: [(labels, value)]} with key) of a fleet-wide query."""
+    out = {}
+    for r in _pq(q):
+        h = r["metric"].get("host")
+        if not h:
+            continue
+        v = _num(r["value"][1])
+        if key:
+            out.setdefault(h, []).append(({k: r["metric"].get(k) for k in key}, v))
+        else:
+            out[h] = v
+    return out
+
+
+def _signals():
+    """The early warnings' numbers for every machine at once (one query each, grouped by host)."""
+    fs = 'fstype=~"ext4|xfs|btrfs|zfs|apfs",mountpoint="/"'
+    return {
+        "ssh_failed": _by_host("sum by (host) (increase(noctyx_ssh_failed_logins_total[1d]) + increase(noctyx_ssh_invalid_user_attempts_total[1d]))"),
+        "ssh_ok": _by_host("sum by (host) (increase(noctyx_ssh_accepted_logins_total[1d]))"),
+        "ssh_new": _by_host("noctyx_ssh_new_source_login_timestamp_seconds", key=("addr", "user")),
+        "fab_state": _by_host("node_infiniband_state_id", key=("device",)),
+        "fab_rate": _by_host("node_infiniband_rate_bytes_per_second", key=("device",)),
+        "fab_err": _by_host("sum by (host) (increase(node_infiniband_link_downed_total[1h]) + increase(node_infiniband_symbol_error_total[1h]) + increase(node_infiniband_port_errors_received_total[1h]) + increase(node_infiniband_link_error_recovery_total[1h]))"),
+        "fab_retrans": _by_host("sum by (host) (rate(node_infiniband_roce_adp_retransmits_total[10m]) + rate(node_infiniband_local_ack_timeout_errors_total[10m]) + rate(node_infiniband_out_of_sequence_packets_received_total[10m]))"),
+        "nfs_ok": _by_host("noctyx_nfs_probe_ok", key=("mountpoint",)),
+        "nfs_w": _by_host("noctyx_nfs_probe_write_bytes_per_second", key=("mountpoint",)),
+        "nfs_r": _by_host("noctyx_nfs_probe_read_bytes_per_second", key=("mountpoint",)),
+        "nfs_hung": _by_host("noctyx_nfs_probe_running_seconds"),
+        "root_free": _by_host(f"node_filesystem_avail_bytes{{{fs}}}"),
+        "root_size": _by_host(f"node_filesystem_size_bytes{{{fs}}}"),
+        "root_use_per_day": _by_host(f"-deriv(node_filesystem_avail_bytes{{{fs}}}[7d]) * 86400"),
+        "failed_units": _by_host('count by (host) (node_systemd_unit_state{state="failed"} == 1)'),
+    }
+
+
+def machines_view():
+    """/machines: everything about every machine on one page, worst first, each with why it needs a look."""
+    if _MACHINES["data"] and time.time() - _MACHINES["ts"] < 15:
+        return _MACHINES["data"]
+    from noctyx import heal
+    ov, fm = overview(), fleet_metrics()
+    al = alerts_view().get("active") or []
+    problems = heal.summary().get("problems") or []
+    try:
+        sig = _signals()
+    except Exception:
+        sig = {}
+    c = CM.cfg()
+    slots = CM.recipes_cfg(c)["slots"]
+    rank = {"bad": 0, "warn": 1, "ok": 2}
+    out = []
+    for h in ov["hosts"]:
+        n = h["name"]
+        M = (fm.get("hosts") or {}).get(n) or {}
+        F = (ov.get("facts") or {}).get(n) or {}
+        why_bad, why_warn = [], []
+        up = M.get("up")
+        if up == 0:
+            why_bad.append("no metrics: the exporter does not answer")
+        hcfg = next((x for x in CFG["hosts"] if x["name"] == n), {})
+        role = ["head node"] if CM.is_head(c, hcfg) else []
+        role += [f"{s} pair head" if v.get("worker") else f"{s} slot" for s, v in slots.items() if v["head"] == n]
+        role += [f"{s} pair worker (with {v['head']})" for s, v in slots.items() if v.get("worker") == n]
+        if h.get("monitored_only"):
+            role.append("monitored only (no backup)")
+        L = M.get("llm") or {}
+        serves = [{"model": x.get("model"), "tps": x.get("gen_tps"), "running": x.get("running"), "waiting": x.get("waiting"),
+                   "kv_pct": x.get("kv_pct")} for x in (L.get("servers") or [])]
+        if not serves and L.get("worker_for"):
+            serves = [{"model": L.get("worker_model"), "worker_for": L.get("worker_for")}]
+        if not serves:
+            serves = [{"model": t.get("model"), "unscraped": True} for t in L.get("topology") or [] if t.get("role") == "serving"]
+        # backups
+        rows = [r for r in (ov.get("schedule") or {}).get("rows") or [] if r["host"] == n and r.get("enabled")]
+        for r in rows:
+            if r.get("failed_at"):
+                why_warn.append(f"{r['profile']} backup failed last time")
+            if r.get("health") in ("stale", "never"):
+                why_bad.append(f"{r['profile']} backup {r['health']}")
+            elif r.get("health") == "late":
+                why_warn.append(f"{r['profile']} backup late")
+        # storage
+        free, size, per_day = (sig.get("root_free") or {}).get(n), (sig.get("root_size") or {}).get(n), (sig.get("root_use_per_day") or {}).get(n)
+        days = free / per_day if free and per_day and per_day > 0 else None
+        pct = M.get("root_pct")
+        if pct is not None and pct >= 92:
+            why_bad.append(f"root disk {pct:.0f}% full")
+        elif pct is not None and pct >= 85:
+            why_warn.append(f"root disk {pct:.0f}% full")
+        if days is not None and days < 14:
+            why_warn.append(f"root disk full in ~{days:.0f} days at this week's rate")
+        disks = [d for d in F.get("disks") or [] if (d.get("size_gb") or 0) >= 5 and not str(d.get("mnt", "")).startswith(("/boot", "/sys", "/System/Volumes", "/private"))]
+        # versions, hygiene, units
+        vrows = ((ov.get("versions") or {}).get("hosts") or {}).get(n) or []
+        behind = [f"{r['component']} {r.get('installed') or '—'} → {r.get('pinned') or r.get('latest')}" for r in vrows if r.get("state") in ("behind", "missing")]
+        newer = [f"{r['component']} {r.get('latest')}" for r in vrows if r.get("state") == "upgrade"]
+        if behind:
+            why_warn.append("behind: " + ", ".join(behind))
+        hy = M.get("hygiene") or {}
+        if hy.get("warnings"):
+            why_warn.append(f"{hy['warnings']} hygiene warning(s)")
+        if M.get("reboot"):
+            why_warn.append("reboot required")
+        fu = int((sig.get("failed_units") or {}).get(n) or 0)
+        if fu:
+            why_warn.append(f"{fu} failed unit(s)")
+        # signals
+        ssh_new = [{"addr": l["addr"], "user": l["user"], "ts": v} for l, v in (sig.get("ssh_new") or {}).get(n, [])]
+        if ssh_new:
+            why_warn.append("ssh login from a new address")
+        ssh = {"ok_24h": (sig.get("ssh_ok") or {}).get(n), "failed_24h": (sig.get("ssh_failed") or {}).get(n), "new": ssh_new}
+        rate = {l["device"]: v for l, v in (sig.get("fab_rate") or {}).get(n, [])}
+        ports = [{"device": l["device"], "up": v == 4, "rate": rate.get(l["device"])} for l, v in (sig.get("fab_state") or {}).get(n, [])]
+        fabric = None
+        if ports:
+            fabric = {"active": [p for p in ports if p["up"]], "ports": len(ports),
+                      "errors_1h": (sig.get("fab_err") or {}).get(n), "retrans": (sig.get("fab_retrans") or {}).get(n)}
+            if (fabric["errors_1h"] or 0) > 0:
+                why_warn.append(f"fabric: {fabric['errors_1h']:.0f} link errors in the last hour")
+        w = {l["mountpoint"]: v for l, v in (sig.get("nfs_w") or {}).get(n, [])}
+        r_ = {l["mountpoint"]: v for l, v in (sig.get("nfs_r") or {}).get(n, [])}
+        nfs = [{"mount": l["mountpoint"], "ok": v == 1, "write": w.get(l["mountpoint"]), "read": r_.get(l["mountpoint"])}
+               for l, v in (sig.get("nfs_ok") or {}).get(n, [])]
+        for x in nfs:
+            if not x["ok"]:
+                why_bad.append(f"NFS {x['mount']}: the probe fails")
+        hung = (sig.get("nfs_hung") or {}).get(n)
+        if hung and hung > 180:
+            why_bad.append(f"an NFS mount hangs ({hung / 60:.0f} min)")
+        # self-repair and alerts
+        mine = [p for p in problems if p.get("host") == n]
+        for p in mine:
+            if p.get("needs_person"):
+                why_bad.append("needs a person: " + p["what"])
+        alerts = [{"name": a["name"], "severity": a.get("severity"), "summary": a.get("summary"), "since": a.get("since")}
+                  for a in al if a.get("host") == n and a.get("severity") != "info"]
+        for a in alerts:
+            (why_bad if a["severity"] == "critical" else why_warn).append(f"alert {a['name']}")
+        status = "bad" if why_bad else "warn" if why_warn else "ok"
+        out.append({
+            "name": n, "status": status, "role": role,
+            "why": [{"text": t, "level": "bad"} for t in why_bad] + [{"text": t, "level": "warn"} for t in why_warn], "os": h.get("os"), "arch": h.get("arch"),
+            "os_line": (F.get("os_lines") or [None])[0], "kernel": ((F.get("os_lines") or [None, None]) + [None])[1],
+            "uptime": (F.get("uptime_lines") or [None])[0], "boot": ((F.get("uptime_lines") or [None, None]) + [None])[1],
+            "ip": F.get("ip"), "cores": (F.get("cpu") or [None])[0], "gpu_name": ((F.get("gpu") or [""])[0] or "").split(",")[0] or None,
+            "up": up, "cpu": M.get("cpu"), "load": M.get("load1"), "mem_used": M.get("mem_used"), "mem_total": M.get("mem_total"),
+            "gpu_util": M.get("gpu_util"), "gpu_temp": M.get("gpu_temp"), "gpu_power": M.get("gpu_power"),
+            "sys_temp": M.get("sys_temp"), "nvme_temp": M.get("nvme_temp"), "containers": M.get("containers"),
+            "net_rx": M.get("net_rx"), "net_tx": M.get("net_tx"), "fabric_rx": M.get("fabric_rx"), "fabric_tx": M.get("fabric_tx"),
+            "serves": serves, "root_pct": pct, "root_free": free, "root_size": size, "root_use_per_day": per_day,
+            "root_full_days": days, "disks": disks,
+            "backups": [{"profile": r["profile"], "health": r.get("health"), "last_ts": r.get("last_ts"),
+                         "failed_at": r.get("failed_at"), "next_ts": r.get("next_ts")} for r in rows],
+            "snapshots": (((ov.get("snapshots") or {}).get("hosts") or {}).get(n) or {}).get("count"),
+            "behind": behind, "newer": newer, "hygiene": hy, "reboot": M.get("reboot"), "failed_units": fu,
+            "ssh": ssh, "fabric": fabric, "nfs": nfs, "nfs_hung_s": hung,
+            "repairs": [{"what": p["what"], "state": p.get("state"), "why": p.get("why")} for p in mine],
+            "alerts": alerts})
+    order = [x["name"] for x in ov["hosts"]]
+    out.sort(key=lambda m: (rank[m["status"]], order.index(m["name"])))
+    I = (fm.get("fleet") or {}).get("infra") or {}
+    tps = sum((x.get("tps") or 0) for m in out for x in m["serves"])
+    data = {"ts": time.time(), "machines": out,
+            "fleet": {"machines": len(out), "up": sum(1 for m in out if m["up"] == 1),
+                      "bad": sum(1 for m in out if m["status"] == "bad"), "warn": sum(1 for m in out if m["status"] == "warn"),
+                      "alerts": sum(1 for a in al if a.get("severity") != "info"), "tps": tps,
+                      "backups_ok": I.get("backups_ok"), "backups_total": I.get("backups_total"),
+                      "repairs_24h": len(heal.summary().get("repairs") or [])}}
+    _MACHINES.update(ts=time.time(), data=data)
+    return data
+
+
 # Favicon + brand mark: the watching eye (assets/favicon.svg, the source of truth), inlined so the
 # page stays one file.
 FAVICON = 'data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%20%3Cdefs%3E%20%3ClinearGradient%20id%3D%22tile%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%220%22%20y2%3D%221%22%3E%20%3Cstop%20offset%3D%220%22%20stop-color%3D%22%23151b3d%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%2305060d%22%2F%3E%20%3C%2FlinearGradient%3E%20%3ClinearGradient%20id%3D%22neon%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%20%3Cstop%20offset%3D%220%22%20stop-color%3D%22%233ff0ff%22%2F%3E%3Cstop%20offset%3D%22.55%22%20stop-color%3D%22%235b8cff%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%23b45cff%22%2F%3E%20%3C%2FlinearGradient%3E%20%3CradialGradient%20id%3D%22iris%22%20cx%3D%22.5%22%20cy%3D%22.42%22%20r%3D%22.62%22%3E%20%3Cstop%20offset%3D%220%22%20stop-color%3D%22%23f0feff%22%2F%3E%3Cstop%20offset%3D%22.3%22%20stop-color%3D%22%235ff3ff%22%2F%3E%3Cstop%20offset%3D%22.78%22%20stop-color%3D%22%235b6cff%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%237a3cff%22%2F%3E%20%3C%2FradialGradient%3E%20%3Cfilter%20id%3D%22glow%22%20x%3D%22-30%25%22%20y%3D%22-30%25%22%20width%3D%22160%25%22%20height%3D%22160%25%22%3E%20%3CfeGaussianBlur%20stdDeviation%3D%222%22%20result%3D%22b%22%2F%3E%3CfeMerge%3E%3CfeMergeNode%20in%3D%22b%22%2F%3E%3CfeMergeNode%20in%3D%22SourceGraphic%22%2F%3E%3C%2FfeMerge%3E%20%3C%2Ffilter%3E%20%3C%2Fdefs%3E%20%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2215%22%20fill%3D%22url%28%23tile%29%22%2F%3E%20%3Crect%20x%3D%22.75%22%20y%3D%22.75%22%20width%3D%2262.5%22%20height%3D%2262.5%22%20rx%3D%2214.25%22%20fill%3D%22none%22%20stroke%3D%22%233ff0ff%22%20stroke-opacity%3D%22.25%22%20stroke-width%3D%221.5%22%2F%3E%20%3Cg%20fill%3D%22%23d6ecff%22%3E%3Ccircle%20cx%3D%2212%22%20cy%3D%2212.5%22%20r%3D%221.1%22%2F%3E%3Ccircle%20cx%3D%2251.5%22%20cy%3D%2210%22%20r%3D%22.8%22%2F%3E%3Ccircle%20cx%3D%2254%22%20cy%3D%2252.5%22%20r%3D%221%22%2F%3E%3Ccircle%20cx%3D%229.5%22%20cy%3D%2250%22%20r%3D%22.7%22%2F%3E%3C%2Fg%3E%20%3Cg%20filter%3D%22url%28%23glow%29%22%3E%20%3Cpath%20d%3D%22M6.5%2032%20Q32%207%2057.5%2032%20Q32%2057%206.5%2032%20Z%22%20fill%3D%22none%22%20stroke%3D%22url%28%23neon%29%22%20stroke-width%3D%223.8%22%20stroke-linejoin%3D%22round%22%2F%3E%20%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2210.8%22%20fill%3D%22url%28%23iris%29%22%2F%3E%20%3C%2Fg%3E%20%3Cpath%20d%3D%22M32%2021.8%20Q35.6%2032%2032%2042.2%20Q28.4%2032%2032%2021.8%20Z%22%20fill%3D%22%2305060d%22%2F%3E%20%3Ccircle%20cx%3D%2228.2%22%20cy%3D%2227.9%22%20r%3D%222.1%22%20fill%3D%22%23fff%22%20fill-opacity%3D%22.92%22%2F%3E%20%3C%2Fsvg%3E'
@@ -2826,6 +3004,22 @@ a.tag{text-decoration:none}
 tr.go:hover td{background:color-mix(in srgb,var(--accent) 9%,transparent)}
 tr.hl td{background:color-mix(in srgb,var(--warn) 13%,transparent)}
 .golnk{color:var(--info);cursor:pointer;font:11px var(--mono);white-space:nowrap}
+/* /machines: every machine on one page */
+.mx{display:flex;flex-direction:column;gap:12px}
+.mxbar{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:baseline;font:12px var(--mono)}
+.mxbar b{font-size:15px}
+.mxgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(440px,1fr));gap:12px}
+.mxc{background:var(--bg-1);border:1px solid var(--line-soft);border-left:4px solid var(--ok);border-radius:var(--radius);padding:10px 12px;display:flex;flex-direction:column;gap:8px;min-width:0}
+.mxc.warn{border-left-color:var(--warn)} .mxc.bad{border-left-color:var(--bad)}
+.mxh{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px}
+.mxh b{font:700 16px var(--mono)} .mxh .mut{font-size:11.5px}
+.mxwhy{font:12px/1.5 var(--sans)} .mxwhy span{display:inline-block;margin-right:10px}
+.mxs{display:grid;grid-template-columns:7.5em 1fr;gap:3px 10px;font:12px/1.45 var(--sans)}
+.mxs>span:nth-child(odd){color:var(--fg-dim);font:600 10.5px var(--mono);text-transform:uppercase;letter-spacing:.04em;padding-top:2px}
+.mxs>span{min-width:0;overflow-wrap:anywhere}
+.mxbarm{display:inline-block;width:70px;height:6px;border-radius:3px;background:var(--line-soft);vertical-align:middle;margin-right:6px;overflow:hidden}
+.mxbarm i{display:block;height:100%;background:var(--accent)} .mxbarm.warn i{background:var(--warn)} .mxbarm.bad i{background:var(--bad)}
+@media (max-width:640px){.mxgrid{grid-template-columns:1fr}.mxs{grid-template-columns:6.5em 1fr}}
 /* /heal: the self-repair page */
 .sr{display:flex;flex-direction:column;gap:12px}
 .srbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;font:12px var(--mono)}
@@ -3240,7 +3434,7 @@ html[data-style=phosphor] button.act:hover{box-shadow:0 0 calc(14px * var(--gl))
   <a class=brand href="/about" title="About Noctyx"><span class=mark></span><span class=wordmark>Noct<b>yx</b></span></a>
   <nav class=pages id=nav aria-label="Pages">
    <div class=menu><button type=button class=menu-title aria-haspopup=true aria-expanded=false>Monitor</button>
-    <div class="menu-pop hide" role=menu><a role=menuitem href="/" data-v=main>Dashboard<kbd>1</kbd></a><a role=menuitem href="/cluster" data-v=cluster>Cluster<kbd>2</kbd></a><a role=menuitem href="/heal" data-v=heal>Self-repair</a></div></div>
+    <div class="menu-pop hide" role=menu><a role=menuitem href="/" data-v=main>Dashboard<kbd>1</kbd></a><a role=menuitem href="/machines" data-v=machines>Machines<kbd>6</kbd></a><a role=menuitem href="/cluster" data-v=cluster>Cluster<kbd>2</kbd></a><a role=menuitem href="/heal" data-v=heal>Self-repair</a></div></div>
    <div class=menu><button type=button class=menu-title aria-haspopup=true aria-expanded=false>Deploy</button>
     <div class="menu-pop hide" role=menu><a role=menuitem href="/recipes" data-v=recipes>Recipes<kbd>3</kbd></a></div></div>
    <div class=menu><button type=button class=menu-title aria-haspopup=true aria-expanded=false>Configure</button>
@@ -3493,6 +3687,10 @@ if(VIEW=='recipes'){
   {id:'recipes',title:'Recipes',sp:12,h:0,int:20,render:rRecipes,api:()=>fetchJSON('/api/v1/recipes')});
  document.getElementById('desk').classList.add('stack');
 }
+if(VIEW=='machines'){
+ PANELS.splice(0,PANELS.length,{id:'machines',title:'Machines',sp:12,h:0,int:20,render:rMachines,api:()=>fetchJSON('/api/v1/machines')});
+ document.getElementById('desk').classList.add('stack');
+}
 if(VIEW=='heal'){
  PANELS.splice(0,PANELS.length,{id:'heal',title:'Self-repair',sp:12,h:0,int:20,render:rHeal,api:srApi});
  document.getElementById('desk').classList.add('stack');
@@ -3525,7 +3723,7 @@ if(VIEW=='cluster'){
  document.getElementById('desk').classList.add('stack');
 }
 /* ── navigation: menus in the header, the page name, 1–4 to jump ── */
-const PAGES={main:['/','Dashboard'],cluster:['/cluster','Cluster'],recipes:['/recipes','Recipes'],config:['/config','Configuration'],heal:['/heal','Self-repair'],about:['/about','About'],kiosk:['/kiosk','Kiosk']};
+const PAGES={main:['/','Dashboard'],cluster:['/cluster','Cluster'],recipes:['/recipes','Recipes'],config:['/config','Configuration'],heal:['/heal','Self-repair'],machines:['/machines','Machines'],about:['/about','About'],kiosk:['/kiosk','Kiosk']};
 (function nav(){
  const name=(PAGES[VIEW]||PAGES.main)[1];const pn=$('hpage');if(pn)pn.textContent=name;document.title=`Noctyx · ${name}`;
  document.querySelectorAll('#nav .menu').forEach(m=>{
@@ -3539,7 +3737,7 @@ const PAGES={main:['/','Dashboard'],cluster:['/cluster','Cluster'],recipes:['/re
  document.addEventListener('keydown',e=>{
   if(e.key=='Escape'){closeMenus();setClose();if(document.activeElement&&document.activeElement.id=='askq')askClose();return}
   if(e.ctrlKey||e.metaKey||e.altKey||/INPUT|TEXTAREA|SELECT/.test((document.activeElement||{}).tagName||''))return;
-  const go={'1':'/','2':'/cluster','3':'/recipes','4':'/config','5':'/kiosk'}[e.key];if(go&&location.pathname!=go)location.href=go});
+  const go={'1':'/','2':'/cluster','3':'/recipes','4':'/config','5':'/kiosk','6':'/machines'}[e.key];if(go&&location.pathname!=go)location.href=go});
  if(VIEW=='config'&&location.hash)setTimeout(()=>{const el=document.getElementById(location.hash.slice(1));if(el)el.scrollIntoView({behavior:'smooth',block:'start'})},900);
 })();
 function closeMenus(){document.querySelectorAll('#nav .menu.open').forEach(m=>{m.classList.remove('open');m.querySelector('.menu-pop').classList.add('hide');m.querySelector('.menu-title').setAttribute('aria-expanded','false')})}
@@ -3732,7 +3930,7 @@ function rAbout(d){
     <div class=arow><span>backup target</span><b>${esc(S.nas)}</b></div>
     <div class=arow><span>console build</span><b>${esc(d.build)}</b></div>
     <h3 style="margin-top:14px">Keys</h3>
-    <div class=akeys><kbd>1</kbd> dashboard <kbd>2</kbd> cluster <kbd>3</kbd> recipes <kbd>4</kbd> configuration <kbd>5</kbd> kiosk <kbd>Esc</kbd> close menus and the drawer · settings: the gear, or <code>/#settings</code></div></div>
+    <div class=akeys><kbd>1</kbd> dashboard <kbd>2</kbd> cluster <kbd>3</kbd> recipes <kbd>4</kbd> configuration <kbd>5</kbd> kiosk <kbd>6</kbd> machines <kbd>Esc</kbd> close menus and the drawer · settings: the gear, or <code>/#settings</code></div></div>
    <div class=acard><h3>Documentation</h3>
     <div class=alinks><a href="${R}#readme" target=_blank rel=noopener>README and screenshots</a><a href="${R}/tree/main/docs/guide" target=_blank rel=noopener>Operator's guide</a>
      <a href="${R}/blob/main/docs/guide/install.md" target=_blank rel=noopener>Install a head node and agents</a><a href="${R}/blob/main/docs/guide/restore.md" target=_blank rel=noopener>Restore a file, a node, the head</a>
@@ -4814,6 +5012,47 @@ function cfgDirty(){CFGDIRTY=true;const b=$('cf-state');if(b){b.textContent='uns
 function triSel(id,val,eff){const v=val===true?'on':val===false?'off':'';
  return `<div class=seg id="${id}" data-v="${v}">${[['',`default (${eff?'on':'off'})`],['on','on'],['off','off']].map(([k,l])=>`<button type=button class="${k==v?'on':''}" onclick="segPick(this,'${k}')">${l}</button>`).join('')}</div>`}
 function segPick(btn,v){const s=btn.parentElement;s.dataset.v=v;s.querySelectorAll('button').forEach(b=>b.classList.toggle('on',b===btn));cfgDirty()}
+/* ── /machines: every machine on one page — worst first, each saying why it needs a look, with what
+   it serves, its vitals, storage (and when it fills), backups, the early warnings, updates and alerts. ── */
+function mxBar(pct,warn=85,bad=92){const c=pct>=bad?'bad':pct>=warn?'warn':'';return `<span class="mxbarm ${c}"><i style="width:${Math.max(0,Math.min(100,pct||0))}%"></i></span>`}
+function mxCard(m){
+ const st={ok:'ok',warn:'warn',bad:'bad'}[m.status],dot=`<span class="dot ${st=='ok'?'ok':st=='warn'?'warn':'bad'}"></span>`;
+ const go=`goMx('${esc(m.name)}')`;
+ const why=m.why.length?`<div class=mxwhy>${m.why.map(w=>`<span class="${w.level}">${esc(w.text)}</span>`).join('')}</div>`
+  :'<div class="mxwhy ok">✓ all good</div>';
+ const mem=m.mem_total?m.mem_used/m.mem_total*100:null;
+ const rows=[];
+ rows.push(['vitals',m.up===0?'<span class=bad>no metrics</span>':`CPU ${m.cpu!=null?Math.round(m.cpu)+'%':'—'}${m.load!=null?' · load '+m.load.toFixed(1):''} · mem ${mxBar(mem,90,97)}${m.mem_total?esc(fmtBytes(m.mem_used))+' / '+esc(fmtBytes(m.mem_total)):'—'}${m.sys_temp!=null?' · '+esc(fmtT(m.sys_temp)):''}${m.nvme_temp!=null?' · NVMe '+esc(fmtT(m.nvme_temp)):''}`]);
+ if(m.gpu_util!=null||m.gpu_name)rows.push(['gpu',`${esc(m.gpu_name||'GPU')} · ${m.gpu_util!=null?Math.round(m.gpu_util)+'%':'—'}${m.gpu_temp!=null?' · '+esc(fmtT(m.gpu_temp)):''}${m.gpu_power!=null?' · '+Math.round(m.gpu_power)+' W':''}`]);
+ rows.push(['serves',m.serves.length?m.serves.map(x=>x.worker_for?`${esc(x.model||'?')} <span class=mut>(worker for ${esc(x.worker_for)})</span>`:x.unscraped?`${esc(x.model||'?')} <span class=mut>(no metrics)</span>`:`<b>${esc(x.model||'?')}</b> · ${x.tps!=null?x.tps.toFixed(1)+' tok/s':'—'} · ${Math.round(x.running||0)} running${x.waiting?` · <span class=warn>${Math.round(x.waiting)} waiting</span>`:''}${x.kv_pct!=null?' · KV '+Math.round(x.kv_pct*100)+'%':''}`).join('<br>'):'<span class=mut>no model</span>']);
+ const grow=m.root_use_per_day>0?` · +${esc(fmtBytes(m.root_use_per_day))}/day${m.root_full_days!=null?(m.root_full_days>365?' · not filling up soon':` → full in <span class="${m.root_full_days<14?'warn':''}">${m.root_full_days<1?'<1':Math.round(m.root_full_days)} d</span>`):''}`:m.root_use_per_day<0?' · shrinking':'';
+ const other=(m.disks||[]).filter(d=>d.mnt!='/').map(d=>`${esc(d.mnt)} ${esc(d.pct)}`).join(' · ');
+ rows.push(['storage',`/ ${mxBar(m.root_pct)}${m.root_pct!=null?Math.round(m.root_pct)+'%':'—'}${m.root_free!=null?' · '+esc(fmtBytes(m.root_free))+' free':''}${grow}${other?`<br><span class=mut>${other}</span>`:''}`]);
+ rows.push(['backups',m.backups.length?m.backups.map(b=>`<span class="${b.health=='ok'&&!b.failed_at?'ok':b.health=='late'||b.failed_at?'warn':'bad'}">${esc(b.profile)} ${esc(b.health)}</span> ${b.last_ts?esc(agoS(b.last_ts)):'never'}${b.failed_at?' · <span class=warn>last attempt failed</span>':''}`).join(' · ')+(m.snapshots!=null?` <span class=mut>· ${m.snapshots} snapshots</span>`:''):'<span class=mut>not backed up (monitored only)</span>']);
+ const F=m.fabric;
+ if(F)rows.push(['fabric',`${F.active.length?F.active.map(p=>esc(fmtBytes(p.rate*8).replace('B','b'))+'/s').join(' + ')+' up':'<span class=warn>no port up</span>'} <span class=mut>(${F.active.length}/${F.ports} ports)</span> · ${m.fabric_rx!=null?'in '+esc(fmtBytes(m.fabric_rx))+'/s · ':''}<span class="${F.errors_1h>0?'warn':''}">${F.errors_1h!=null?Math.round(F.errors_1h):'—'} errors/h</span>${F.retrans>1?` · <span class=warn>${F.retrans.toFixed(1)} retrans/s</span>`:''}`]);
+ if((m.nfs||[]).length||m.nfs_hung_s)rows.push(['nfs',(m.nfs_hung_s?`<span class=bad>a mount hangs (${esc(fmtDur(m.nfs_hung_s))})</span> `:'')+(m.nfs||[]).map(x=>x.ok?`${esc(x.mount)} · write ${esc(fmtBytes(x.write))}/s · read ${esc(fmtBytes(x.read))}/s`:`<span class=bad>${esc(x.mount)}: probe fails</span>`).join('<br>')]);
+ const S=m.ssh||{};
+ if(S.ok_24h!=null||S.failed_24h!=null)rows.push(['ssh 24 h',`${Math.round(S.ok_24h||0)} logins · <span class="${(S.failed_24h||0)>20?'warn':''}">${Math.round(S.failed_24h||0)} failed</span>${(S.new||[]).length?` · <span class=warn>new: ${S.new.map(x=>esc(x.user+' from '+x.addr)).join(', ')}</span>`:''}`]);
+ const upd=[...(m.behind||[]).map(x=>`<span class=warn>${esc(x)}</span>`),...(m.newer||[]).map(x=>`<span class=mut>${esc(x)} out</span>`)];
+ const hy=m.hygiene||{};
+ rows.push(['system',`${esc(m.os_line||m.os||'')} · ${esc(m.arch||'')}${m.uptime?' · '+esc(m.uptime.replace(/^up /,'up ')):''}${m.reboot?' · <span class=warn>reboot required</span>':''}${m.failed_units?` · <span class=warn>${m.failed_units} failed unit(s)</span>`:''}${m.containers!=null?' · '+Math.round(m.containers)+(Math.round(m.containers)==1?' container':' containers'):''}${hy.items?` · ${hy.items} hygiene item(s)`:''}${upd.length?'<br>'+upd.join(' · '):''}`]);
+ if((m.repairs||[]).length)rows.push(['self-repair',m.repairs.map(r=>`<span class="${r.state=='needs_person'?'bad':'warn'}">${esc(r.what)}</span> <span class=mut>${esc(r.why||'')}</span>`).join('<br>')]);
+ if((m.alerts||[]).length)rows.push(['alerts',m.alerts.map(a=>`<span class="${a.severity=='critical'?'bad':'warn'}">${esc(a.name)}</span> ${esc(a.summary||'')}`).join('<br>')]);
+ return `<div class="mxc ${st}"><div class=mxh>${dot}<b class=go onclick="${go}" title="open its Machine Report">${esc(m.name)}</b><span class=mut>${esc((m.role||[]).join(' · '))}</span><span class=hspacer></span><a class=lnk onclick="${go}">report →</a></div>
+  ${why}<div class=mxs>${rows.map(([k,v])=>`<span>${esc(k)}</span><span>${v}</span>`).join('')}</div></div>`}
+function goMx(n){location.href='/#host='+encodeURIComponent(n)+'&panel=detail&tab=overview'}
+function rMachines(d){
+ if(!d)return '<div class=empty>loading…</div>';
+ if(d.error)return `<div class="empty bad">${esc(d.error)}</div>`;
+ const F=d.fleet||{};
+ const bar=`<div class=mxbar><span><b>${F.up}</b>/${F.machines} up</span>
+  <span class="${F.bad?'bad':F.warn?'warn':'ok'}"><b>${F.bad+F.warn}</b> need${F.bad+F.warn==1?'s':''} a look</span>
+  <span><b>${F.backups_ok??'—'}</b>/${F.backups_total??'—'} backups on schedule</span>
+  <span class="${F.alerts?'warn':''}"><b>${F.alerts}</b> alert${F.alerts==1?'':'s'}</span>
+  <span><b>${(F.tps||0).toFixed(0)}</b> tok/s now</span>
+  <span><b>${F.repairs_24h??0}</b> self-repairs in 24 h</span><span class=hspacer></span><span class=mut>updated ${esc(agoS(d.ts))}</span></div>`;
+ return `<div class=mx>${bar}<div class=mxgrid>${(d.machines||[]).map(mxCard).join('')}</div></div>`}
 /* ── /heal: the self-repair loop (heal.py). What it found, each decision and why, every command it ran
    with its output: heal-log.jsonl, newest run first. ── */
 const SRF={host:'',check:'',all:false,q:'',open:new Set()};
@@ -5668,7 +5907,7 @@ class H(BaseHTTPRequestHandler):
         if p in ("/", "/index.html"):
             return self._send(page(), "text/html; charset=utf-8")
         if p in ("/cluster", "/cluster/", "/config", "/config/", "/recipes", "/recipes/", "/about", "/about/",
-                 "/kiosk", "/kiosk/", "/heal", "/heal/"):
+                 "/kiosk", "/kiosk/", "/heal", "/heal/", "/machines", "/machines/"):
             # systems-only / config views: same page, different panel set (see VIEW in the JS)
             return self._send(page(p.strip("/")), "text/html; charset=utf-8")
         if p in ("/favicon.ico", "/favicon.svg"):
@@ -5811,6 +6050,11 @@ class H(BaseHTTPRequestHandler):
                                                               for r in change.ledger(30)[::-1]],
                                "policy": heal.policy(c), "hosts": [h["name"] for h in CM.hosts(c)],
                                "playbooks": {k: d for k, (_, d) in heal.PLAYBOOKS.items()}})
+        if p == "/api/v1/machines":
+            try:
+                return self._json(machines_view())
+            except Exception as e:
+                return self._json({"error": f"{type(e).__name__}: {str(e)[:200]}"}, 500)
         if p == "/api/v1/changes":
             return self._json(changes_view())
         if p == "/api/v1/checkpoints":
