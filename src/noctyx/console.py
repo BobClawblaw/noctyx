@@ -2362,8 +2362,11 @@ header.top{display:flex;align-items:center;gap:14px;flex-wrap:nowrap;white-space
   padding:3px 9px;border-radius:999px;border:1px solid var(--line);color:var(--fg-dim);flex:0 0 auto}
 .hpill.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,var(--line))}
 .hspacer{flex:1}
-/* the left side gives way first: pills and stats truncate so the buttons on the right never go off-screen */
-header.top .hstat,header.top .hpill{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+/* nothing in the header is cut off: when it does not fit, fitHeader() drops the least useful items whole, one
+   step at a time (f1 the clock, f2 the access-mode pill the user menu repeats, f3 "on schedule", f4 the server,
+   f5 the page name); the alert and backup counts and the buttons always stay */
+header.top .hstat,header.top .hpill{flex:0 0 auto}
+header.top.f1 #hclock,header.top.f2 #hauth,header.top.f3 .hlong,header.top.f4 #hsrv,header.top.f5 #hpage{display:none}
 header.top .brand{flex:0 0 auto}
 @media (max-width:1250px){header.top{gap:9px} .hbtn{padding:5px 8px;letter-spacing:.03em} #hclock{display:none}}
 @media (max-width:980px){header.top .hstat{display:none}}
@@ -2382,7 +2385,7 @@ a.menu-title{text-decoration:none;display:inline-flex;align-items:center;gap:6px
 .menu-pop a{display:flex;align-items:center;gap:12px;padding:7px 10px;border-radius:var(--radius-sm);color:var(--fg);text-decoration:none;font:12.5px var(--sans)}
 .menu-pop a:hover,.menu-pop a.cur{background:var(--bg-3)} .menu-pop a.cur{color:var(--accent)}
 .menu-pop kbd{margin-left:auto;font:10.5px var(--mono);color:var(--fg-faint);border:1px solid var(--line);border-radius:4px;padding:0 5px}
-.pagename{font:600 12px var(--sans);color:var(--fg);padding-left:10px;border-left:1px solid var(--line);flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.pagename{font:600 12px var(--sans);color:var(--fg);padding-left:10px;border-left:1px solid var(--line);flex:0 0 auto}
 .hbtn.gear{display:inline-flex;align-items:center;padding:5px 8px}
 .huser{display:inline-flex;align-items:center;gap:8px;font:12px var(--sans);color:var(--fg-dim);flex:0 0 auto}
 .huser b{color:var(--fg)} .huser .role{font:10.5px var(--mono);border:1px solid var(--line);border-radius:999px;padding:1px 7px}
@@ -4198,7 +4201,7 @@ function rFleet(s){
  $('hauth').textContent=s.demo?'demo · sample data':s.auth_required?'auth on':'dev mode';
  $('hauth').className='hpill'+(s.auth_required?'':' warn');
  const rows=((s.schedule&&s.schedule.rows)||[]).filter(r=>r.enabled),good=rows.filter(r=>r.health=='ok').length;
- $('hrpo').textContent=rows.length?`backups ${good}/${rows.length} on schedule`:'no schedule';
+ $('hrpo').innerHTML=rows.length?`backups ${good}/${rows.length}<span class=hlong> on schedule</span>`:'no schedule';
  $('hrpo').className='hpill go '+(rows.length&&good==rows.length?'ok':good<rows.length/2?'bad':'warn');
  return `<div class=tiles>`+s.hosts.map(h=>{
   const f=(s.facts&&s.facts[h.name])||{},sn=(s.snapshots&&s.snapshots.hosts||{})[h.name]||{};
@@ -5151,6 +5154,14 @@ adoptRunning();
 if(VIEW=='main'&&H0.panel)setTimeout(()=>goTo(H0),250);      /* a link from /cluster or an alert: land on the panel */
 addEventListener('hashchange',()=>goTo(parseHash(location.hash)));
 addEventListener('resize',()=>saveLayout());
+/* the header drops whole items until it fits (see header.top.f1…f5); re-fit when its text or the window changes */
+const FIT_STEPS=5;
+function fitHeader(){const h=document.querySelector('header.top');if(!h)return;
+ for(let i=1;i<=FIT_STEPS;i++)h.classList.remove('f'+i);
+ for(let i=1;i<=FIT_STEPS&&h.scrollWidth>h.clientWidth+1;i++)h.classList.add('f'+i)}
+addEventListener('resize',fitHeader);
+new MutationObserver(fitHeader).observe(document.querySelector('header.top'),{childList:true,characterData:true,subtree:true});
+fitHeader();
 </script></body></html>"""
 
 
