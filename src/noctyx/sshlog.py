@@ -205,12 +205,12 @@ def cmd(a):
     if not ev:
         print("  no logins to show")
         return
-    print(f"  {'when (UTC)':19}  {'result':9} {'user':16} {'from':40} how")
+    print(f"  {'when (UTC)':19}  {'result':9} {'user':24} {'from':40} how")
     for e in reversed(ev[-(len(ev) if a.limit == 0 else a.limit):]):
         when = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(e["ts"]))
         key = e.get("key_name") or (e["key"].split(" ")[-1][:20] + "…" if e.get("key") else "")
         how = e["method"] + (f" {key}" if key else "") + (" (head's key)" if e.get("head_key") else "")
         user = e["user"] + (" (no such user)" if e.get("invalid_user") or e["result"] == "invalid" else "")
-        print(f"  {when}  {e['result']:9} {user[:16]:16} {e['addr'] + ':' + str(e['port']):40} {how}")
+        print(f"  {when}  {e['result']:9} {user[:24]:24} {e['addr'] + ':' + str(e['port']):40} {how}")
     if a.limit and len(ev) > a.limit:
         print(f"  … {len(ev) - a.limit} older (--limit 0 shows all)")
