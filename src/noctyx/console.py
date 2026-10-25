@@ -42,6 +42,7 @@ already publishes; POST whitelisted actions, tokened unless NOCTYX_CONSOLE_AUTH=
   GET  /api/v1/heal/log?n=&host=&check=&all=&q=&run=   its runs, newest first: each check, decision and command
   GET  /api/v1/machine/<h>    one machine, everything: summary and why, every report tab, backups, components,
                               hygiene, alerts, self-repair, changes (the /machine page)
+  GET  /api/v1/hf-mirror/tree  what the model mirror holds: kind › owner › repo › revision › files, sizes, gaps
   GET  /api/v1/ssh-log/<h>    SSH logins there, read from its log: ?days=1|7|30, head=1 adds the head key's, refresh=1
   GET  /api/v1/machines       every machine on one page: health and why, vitals, what it serves, storage, backups, signals
   GET  /api/v1/changes        every change Noctyx made, what is in effect, its checkpoint, whether it can be undone
@@ -3104,6 +3105,21 @@ tr.hl td{background:color-mix(in srgb,var(--warn) 13%,transparent)}
 .m1sec table td{white-space:normal;overflow-wrap:anywhere}
 .m1job{font:12px var(--mono)}
 .m1wide{display:block}
+.hftbox{margin:4px 0 8px}
+.hftbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:6px}
+.hftbar #hft-bar{display:contents}
+.hftq{min-width:200px;flex:0 1 280px}
+.hftwrap{max-height:70vh;overflow:auto;border:1px solid var(--line-soft);border-radius:var(--radius-sm)}
+.hfttab{width:100%;font:12px var(--mono);border-collapse:collapse}
+.hfttab th{position:sticky;top:0;background:var(--bg-2);z-index:1;text-align:left}
+.hfttab td{padding:3px 8px;white-space:nowrap;vertical-align:middle;border-top:1px solid var(--line-soft)}
+.hfttab td.num,.hfttab th.num{text-align:right}
+.hfttab td.hftm{white-space:normal;color:var(--fg-dim)}
+.hfttab tr.hftk td{background:var(--bg-2)}
+.hfttab tr.hftr td.hftn{font-weight:600}
+.hftc{display:inline-block;width:14px;color:var(--fg-dim)}
+.hftbarv{display:inline-block;width:90px;height:6px;background:var(--bg-3);border-radius:3px;overflow:hidden;vertical-align:middle}
+.hftbarv i{display:block;height:100%;background:var(--accent)}
 .sshctl{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:4px 0 8px}
 .sshctl label{display:inline-flex;gap:5px;align-items:center;font-size:12px}
 .sshq{min-width:220px;flex:0 1 300px}
@@ -5463,10 +5479,84 @@ function hfSection(F){
  return `<div class=cfgsec id=sec-mirror><h4>Hugging Face model mirror</h4><p class=gnote>One copy of every model on the cluster, on __NAS__. Hosts download from it instead of huggingface.co; anything it lacks passes through, and when huggingface.co is unreachable the stored copy is served.</p>
   <div class=setrow><label>Status</label><div class=hfline>server <b class="${F.service=='active'?'ok':'bad'}">${esc(F.service||'?')}</b> · store <b>${T.repos??0}</b> repos, <b>${T.blobs??0}</b> files, <b>${esc(fmtBytes(T.bytes||0))}</b>${S.ts?` · harvested ${esc(agoS(S.ts))}`:''}${F.harvesting?' · <span class=warn>harvest running</span>':''}
    <button class=act onclick="cfgRun('hfHarvest',{},'harvest')" title="copy new model files from the hosts now (yields to backups)">harvest now</button></div></div>
+  <div class=hftbox><div class=hftbar><input class=hftq type=search placeholder="filter: repo, owner…" value="${esc(HFT.q)}" oninput="HFT.q=this.value;hftPaint()"><span id=hft-bar>${hftBar()}</span></div>
+   <div id=hft>${hftBody()}</div></div>
   <div class=setrow><label>Endpoint</label><div><code>HF_ENDPOINT=${esc(F.endpoint||'')}</code></div><div class=hint>Per process: <code>export HF_ENDPOINT=…</code>; a container: <code>-e HF_ENDPOINT=…</code>. Recipe deploys use it by themselves.</div></div>
   <div class=setrow><label>Nightly harvest</label><div><input type=checkbox class=sw id=cf-hf${F.harvest?' checked':''} onchange="cfgDirty()"></div><div class=hint>After the backups: copies only files the store lacks, checks each against its hash, pauses in the backup window.</div></div>
   <div class=setrow><label>Harvest from</label><div class=dbs>${hosts}</div><div class=hint>Untick a host to leave its caches out.</div></div>
   <div class=setrow><label>Bandwidth limit</label><div><input id=cf-hfbw type=number min=0 max=10000 value="${esc(F.bwlimit_mb??0)}" oninput="cfgDirty()"> MB/s</div><div class=hint>Per copy; 0 = no limit.</div></div></div>`}
+/* What the mirror holds, as a tree (cache/tree.py): kind › owner › repo › revision › folders › files, sizes at
+   every level. Its own state and its own box: a toggle repaints only #hft, never the settings form around it. */
+const HFT={d:null,busy:false,err:null,open:new Set(),q:'',sort:'size',only:'all',asked:false};
+async function hftLoad(refresh){HFT.busy=HFT.asked=true;hftPaint();
+ try{const r=await fetch('/api/v1/hf-mirror/tree'+(refresh?'?refresh=1':''),{headers:{Accept:'application/json'}});
+  const d=await r.json().catch(()=>({error:'HTTP '+r.status}));if(r.ok&&!d.error){HFT.d=d;HFT.err=null}else HFT.err=d.error||('HTTP '+r.status)}
+ catch(e){HFT.err=String(e)}
+ HFT.busy=false;hftPaint()}
+function hftPaint(){const b=$('hft'),t=$('hft-bar');if(b)b.innerHTML=hftBody();if(t)t.innerHTML=hftBar()}
+function hftTog(k,also){if(HFT.open.has(k)){HFT.open.delete(k)}else{HFT.open.add(k);if(also)HFT.open.add(also)}hftPaint()}
+function hftAll(on){HFT.open.clear();if(on&&HFT.d)for(const r of HFT.d.repos){HFT.open.add('k:'+r.kind);HFT.open.add('o:'+r.kind+'/'+r.owner)}hftPaint()}
+function hftRepos(){const q=HFT.q.trim().toLowerCase();
+ return ((HFT.d||{}).repos||[]).filter(r=>(HFT.only=='all'||r.state!='complete')&&(!q||r.id.toLowerCase().includes(q)))}
+function hftBar(){const d=HFT.d;if(!d)return '';const bad=d.repos.filter(r=>r.state!='complete').length,b=(k,v,l)=>`<button class="${HFT[k]==v?'on':''}" onclick="hftSet('${k}','${v}')">${l}</button>`;
+ return `<span class=seg>${b('sort','size','largest')}${b('sort','name','name')}${b('sort','updated','newest')}</span>
+  <span class=seg>${b('only','all','all '+d.repos.length)}${b('only','gaps',`incomplete ${bad}`)}</span>
+  <button class=lnk onclick="hftAll(1)">open all</button><button class=lnk onclick="hftAll(0)">close all</button>
+  <span class=mut>${esc(fmtBytes(d.bytes))} in ${d.blobs} files · scanned ${esc(agoS(d.ts))} (${d.seconds}s)</span>
+  <button class=act onclick="hftLoad(1)" ${HFT.busy?'disabled':''}>${HFT.busy?'scanning…':'rescan'}</button>`}
+function hftSet(k,v){HFT[k]=v;hftPaint()}
+function hftCmp(a,b){return HFT.sort=='name'?a.name.localeCompare(b.name,undefined,{numeric:true,sensitivity:'base'})
+ :HFT.sort=='updated'?(b.updated||0)-(a.updated||0):(b.bytes-a.bytes)}
+function hftBody(){
+ if(!HFT.asked)setTimeout(()=>hftLoad(),0);
+ if(HFT.err)return `<div class="empty bad">${esc(HFT.err)}</div>`;
+ if(!HFT.d)return `<div class=empty>reading the store…</div>`;
+ const repos=hftRepos(),filt=!!HFT.q.trim()||HFT.only!='all',out=[];
+ if(!repos.length)return `<div class=empty>${filt?'no repo matches':'the store is empty'}</div>`;
+ const kinds={};for(const r of repos){const k=kinds[r.kind]||(kinds[r.kind]={name:r.kind,bytes:0,updated:0,owners:{}});
+  const o=k.owners[r.owner]||(k.owners[r.owner]={name:r.owner||'(no owner)',key:r.owner,bytes:0,updated:0,repos:[]});
+  o.repos.push(r);o.bytes+=r.bytes;k.bytes+=r.bytes;o.updated=Math.max(o.updated,r.updated);k.updated=Math.max(k.updated,r.updated)}
+ const bar=(v,max)=>`<span class=hftbarv><i style="width:${max?Math.max(1,Math.round(100*v/max)):0}%"></i></span>`;
+ const row=(depth,key,label,bytes,max,meta,cls,also)=>out.push(`<tr class="${cls||''}"><td style="padding-left:${6+depth*18}px" class=hftn>${key?`<span class="hftc go" onclick="hftTog('${esc(key)}'${also?`,'${esc(also)}'`:''})">${HFT.open.has(key)||(filt&&/^[ko]:/.test(key))?'▾':'▸'}</span>`:'<span class=hftc></span>'}${label}</td><td class=num>${bytes==null?'':esc(fmtBytes(bytes))}</td><td>${max!=null?bar(bytes||0,max):''}</td><td class=hftm>${meta||''}</td></tr>`);
+ const isOpen=k=>HFT.open.has(k)||(filt&&/^[ko]:/.test(k));
+ const KIND={models:'Models',datasets:'Datasets',spaces:'Spaces'};
+ const ks=Object.values(kinds).sort(hftCmp),kmax=Math.max(...ks.map(k=>k.bytes));
+ for(const k of ks){const kk='k:'+k.name,os=Object.values(k.owners).sort(hftCmp),n=os.reduce((a,o)=>a+o.repos.length,0);
+  row(0,kk,`<b>${esc(KIND[k.name]||k.name)}</b>`,k.bytes,kmax,`${n} repo${n==1?'':'s'} · ${os.length} owner${os.length==1?'':'s'}`,'hftk');
+  if(!isOpen(kk))continue;const omax=Math.max(...os.map(o=>o.bytes));
+  for(const o of os){const ok='o:'+k.name+'/'+o.key;
+   row(1,ok,`<b>${esc(o.name)}</b>`,o.bytes,omax,`${o.repos.length} repo${o.repos.length==1?'':'s'}${o.repos.some(r=>r.state!='complete')?' · <span class=warn>has gaps</span>':''}`);
+   if(!isOpen(ok))continue;const rs=o.repos.slice().sort(hftCmp),rmax=Math.max(...rs.map(r=>r.bytes));
+   for(const r of rs){const rk='r:'+r.dir,one=r.snapshots.length==1?'s:'+r.dir+'/'+r.snapshots[0].commit:null;
+    const gap=r.snapshots.reduce((a,s)=>a+s.missing.length,0),exp=r.snapshots.reduce((a,s)=>a+s.expected,0);
+    const hosts=Object.keys(r.seen_on||{}).length?Object.entries(r.seen_on).map(([h,t])=>`<span class=tag title="seen there ${esc(agoS(t))}">${esc(h)}</span>`).join(' '):(r.from||[]).map(h=>`<span class=tag title="its refs came from there">${esc(h)}</span>`).join(' ');
+    const refs=Object.entries(r.refs||{}).map(([n,c])=>`${esc(n)} → <code>${esc(c.slice(0,7))}</code>`).join(', ');
+    row(2,rk,`<a class=lnk href="https://huggingface.co/${r.kind=='models'?'':r.kind+'/'}${esc(r.id)}" target=_blank rel=noopener title="on huggingface.co">${esc(r.name)}</a>`,r.bytes,rmax,
+     `${r.state=='complete'?'<span class=ok>✓ complete</span>':r.state=='empty'?'<span class=mut>no files</span>':`<span class=warn title="the mirror passes these through to huggingface.co">missing ${gap} of ${exp} weight files</span>`}
+      · ${r.blobs} file${r.blobs==1?'':'s'}${r.snapshots.length>1?` · ${r.snapshots.length} revisions`:''}${refs?' · '+refs:''}${hosts?' · '+hosts:''}${r.updated?` · <span class=mut>${esc(agoS(r.updated))}</span>`:''}`,'hftr',one);
+    if(!isOpen(rk))continue;
+    for(const s of r.snapshots){const sk='s:'+r.dir+'/'+s.commit;
+     row(3,sk,`<code>${esc(s.commit.slice(0,12))}</code>${s.refs.length?' '+s.refs.map(x=>`<span class=tag>${esc(x)}</span>`).join(' '):''}`,s.bytes,null,
+      `${s.files.length} file${s.files.length==1?'':'s'}${s.missing.length?` · <span class=warn>${s.missing.length} not on the NAS</span>`:''}`);
+     if(!isOpen(sk))continue;hftFiles(out,row,sk,s,4)}}}}
+ return `<div class=hftwrap><table class=hfttab><tr><th>name</th><th class=num>size</th><th></th><th></th></tr>${out.join('')}</table></div>`}
+function hftFiles(out,row,sk,s,depth){
+ // a revision's files as folders: each folder's size is what it holds; files the revision should have but the
+ // store lacks are listed in their folder, marked
+ const root={dirs:{},files:[],bytes:0};
+ const put=(rel,size,missing)=>{const parts=rel.split('/');let n=root;n.bytes+=size||0;
+  for(const p of parts.slice(0,-1)){n=n.dirs[p]||(n.dirs[p]={dirs:{},files:[],bytes:0});n.bytes+=size||0}
+  n.files.push({name:parts[parts.length-1],size,missing})};
+ for(const [rel,size] of s.files)put(rel,size,false);for(const rel of s.missing)put(rel,null,true);
+ const nat=(a,b)=>a.localeCompare(b,undefined,{numeric:true});
+ const walk=(n,path,d)=>{
+  for(const [name,c] of Object.entries(n.dirs).sort((a,b)=>nat(a[0],b[0]))){const k='f:'+sk.slice(2)+'/'+path+name;
+   const cnt=(function all(x){return x.files.length+Object.values(x.dirs).reduce((t,y)=>t+all(y),0)})(c);
+   row(d,k,`📁 ${esc(name)}/`,c.bytes,null,`<span class=mut>${cnt} file${cnt==1?'':'s'}${Object.keys(c.dirs).length?` · ${Object.keys(c.dirs).length} folder${Object.keys(c.dirs).length==1?'':'s'}`:''}</span>`);
+   if(HFT.open.has(k))walk(c,path+name+'/',d+1)}
+  for(const f of n.files.sort((a,b)=>nat(a.name,b.name)))row(d,null,f.missing?`<span class=warn>${esc(f.name)}</span>`:esc(f.name),f.missing?null:f.size,null,
+   f.missing?'<span class=warn title="the mirror fetches it from huggingface.co when asked; offline, it is not there">not on the NAS</span>':'',f.missing?'hftmiss':'')};
+ walk(root,'',depth)}
 function asSection(A){
  const eps=(A.endpoints||[]).map((e,i)=>`<option value="${i}">${esc(e.host)} · ${esc(e.model||'?')} · ${esc(e.engine||'')} — ${esc(e.url)}</option>`).join('');
  return `<div class=cfgsec id=sec-assistant><h4>Assistant LLM</h4><p class=gnote>The model Noctyx asks to explain findings, triage alerts and write the morning brief. Text only: it never runs anything.</p>
@@ -6245,6 +6335,13 @@ class H(BaseHTTPRequestHandler):
                 return self._json(machine_view(name))
             except Exception as e:
                 return self._json({"error": f"{type(e).__name__}: {str(e)[:200]}"}, 500)
+        if p == "/api/v1/hf-mirror/tree":
+            from noctyx.cache import tree as hftree
+            try:
+                v = hftree.cached(CM.hf_cfg(CM.cfg())["store"], UI_STATE / "hf-tree.json", max_age=0 if q.get("refresh") else 600)
+            except Exception as e:
+                return self._json({"error": f"{type(e).__name__}: {str(e)[:200]}"}, 502)
+            return self._json(v)
         if p.startswith("/api/v1/ssh-log/"):
             name = p.rsplit("/", 1)[-1]
             h = next((x for x in CFG["hosts"] if x["name"] == name), None)

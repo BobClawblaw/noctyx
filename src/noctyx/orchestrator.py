@@ -2133,13 +2133,23 @@ def hf_harvest_host(c, h, a, hub):
             for rel, b in files.items():
                 if b in have and ".." not in rel.split("/"):
                     _hf_link(hr, commit, rel, b)
-        # refs: newest wins across hosts (a host that pulled later saw a later main)
-        mf = hr / ".cm-refs.json"
+        # which hosts hold it, and when each was last seen with it (the console's mirror tree)
+        sf_ = hr / ".nx-seen.json"
         try:
-            meta = json.loads(mf.read_text())
+            seen = json.loads(sf_.read_text())
+        except Exception:
+            seen = {}
+        seen[h["name"]] = round(time.time())
+        if hr.is_dir():
+            sf_.write_text(json.dumps(seen))
+        # refs: newest wins across hosts (a host that pulled later saw a later main). Kept in .nx-refs.json;
+        # a store written before the rename has .cm-refs.json, read once and replaced
+        mf, old = hr / ".nx-refs.json", hr / ".cm-refs.json"
+        try:
+            meta = json.loads((mf if mf.exists() else old).read_text())
         except Exception:
             meta = {}
-        changed = False
+        changed = old.exists() and not mf.exists()
         for name, (commit, mtime) in d["refs"].items():
             if not (hr / "snapshots" / commit).is_dir() or ".." in name.split("/"):
                 continue
@@ -2150,6 +2160,7 @@ def hf_harvest_host(c, h, a, hub):
                 changed = True
         if changed:
             mf.write_text(json.dumps(meta))
+            old.unlink(missing_ok=True)
     return st
 
 
