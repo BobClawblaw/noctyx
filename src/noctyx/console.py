@@ -42,6 +42,7 @@ already publishes; POST whitelisted actions, tokened unless NOCTYX_CONSOLE_AUTH=
   GET  /api/v1/heal/log?n=&host=&check=&all=&q=&run=   its runs, newest first: each check, decision and command
   GET  /api/v1/machine/<h>    one machine, everything: summary and why, every report tab, backups, components,
                               hygiene, alerts, self-repair, changes (the /machine page)
+  GET  /api/v1/ssh-log/<h>    SSH logins there, read from its log: ?days=1|7|30, head=1 adds the head key's, refresh=1
   GET  /api/v1/machines       every machine on one page: health and why, vitals, what it serves, storage, backups, signals
   GET  /api/v1/changes        every change Noctyx made, what is in effect, its checkpoint, whether it can be undone
   GET  /api/v1/checkpoints    the checkpoint snapshots per machine (cached 5 min; ?refresh=1)
@@ -55,7 +56,7 @@ Control model: fixed argv whitelist, host/profile validated
 against the site config, audit every trigger, one job at a time + orchestrator locks.
 """
 from __future__ import annotations
-import base64, hmac, json, os, re, secrets, signal, ssl, subprocess, sys, threading, time
+import base64, hmac, json, os, re, secrets, signal, socket, ssl, subprocess, sys, threading, time
 import datetime, pathlib, urllib.parse, urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -66,6 +67,7 @@ from noctyx import orchestrator as CM                # noqa: E402  the console n
 from noctyx.paths import P, CONFIG                   # noqa: E402
 from noctyx import accounts as AC                    # noqa: E402
 from noctyx import hostos                            # noqa: E402
+from noctyx import sshlog as SSHLOG                  # noqa: E402
 from noctyx import copilot as COP                    # noqa: E402
 
 NX_HOME = pathlib.Path(__file__).resolve().parent
@@ -3101,6 +3103,16 @@ tr.hl td{background:color-mix(in srgb,var(--warn) 13%,transparent)}
 .m1sec>h3:first-child{margin-top:2px}
 .m1sec table td{white-space:normal;overflow-wrap:anywhere}
 .m1job{font:12px var(--mono)}
+.m1wide{display:block}
+.sshctl{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:4px 0 8px}
+.sshctl label{display:inline-flex;gap:5px;align-items:center;font-size:12px}
+.sshq{min-width:220px;flex:0 1 300px}
+.sshwrap{max-height:70vh;overflow:auto;border:1px solid var(--line-soft);border-radius:var(--radius-sm);margin:6px 0}
+.sshtab{width:100%;font:12px var(--mono)}
+.m1sec .sshtab td{white-space:nowrap;overflow-wrap:normal}
+.sshtab th{position:sticky;top:0;background:var(--bg-2);z-index:1;text-align:left}
+.sshtab th.sortable{cursor:pointer;user-select:none}.sshtab th.sortable:hover{color:var(--fg)}
+.sshtab tr.go{cursor:pointer}.sshtab tr.go:hover td{background:var(--bg-3)}
 @media (max-width:640px){.m1grid{column-width:auto;column-count:1}.m1head .big{font-size:20px}}
 /* /heal: the self-repair page */
 .sr{display:flex;flex-direction:column;gap:12px}
@@ -5237,7 +5249,62 @@ function rMachine(d){
   mxSec('changes','Changes Noctyx made',ch?`<table>${ch}</table>`:'<div class=mut>none recorded</div>'),
   mxSec('system','System',sys)];
  setTimeout(mxJobPaint,0);
- return `<div class=m1>${nav}${head}<div class=m1grid>${secs.join('')}</div></div>`}
+ return `<div class=m1>${nav}${head}<div class=m1grid>${secs.join('')}</div>${sshlSec(n)}</div>`}
+/* SSH logins: the machine's own log (sshlog.py), read when its page opens, as one table. Its state lives here,
+   not in the page's data, so the 15 s refresh keeps the filters, the sort and the rows shown. */
+const SSHL={host:null,days:7,head:false,res:'all',q:'',sort:'ts',dir:-1,n:100,view:'events',d:null,busy:false,err:null};
+const SSHRES={accepted:'ok',failed:'bad','gave up':'warn',invalid:'bad','too many':'bad'};
+function sshlPaint(){const p=PANELS.find(x=>x.id=='machine');if(p&&p._data)repaint('machine',p._data)}
+async function sshlLoad(refresh){const h=SSHL.host;SSHL.busy=true;sshlPaint();
+ try{const r=await fetch(`/api/v1/ssh-log/${encodeURIComponent(h)}?days=${SSHL.days}${SSHL.head?'&head=1':''}${refresh?'&refresh=1':''}`,{headers:{Accept:'application/json'}});
+  const d=await r.json().catch(()=>({error:'HTTP '+r.status}));
+  if(SSHL.host==h){if(r.ok&&!d.error){SSHL.d=d;SSHL.err=null}else SSHL.err=d.error||('HTTP '+r.status)}}
+ catch(e){if(SSHL.host==h)SSHL.err=String(e)}
+ if(SSHL.host==h){SSHL.busy=false;sshlPaint()}}
+function sshlSet(k,v){SSHL[k]=v;if(k=='days'||k=='head'){sshlLoad()}else{if(k!='n')SSHL.n=100;sshlPaint()}}
+function sshlSort(k){SSHL.dir=SSHL.sort==k?-SSHL.dir:(['ts','refused','accepted'].includes(k)?-1:1);SSHL.sort=k;sshlPaint()}
+const sshTs=t=>new Date(t*1000).toISOString().slice(0,19).replace('T',' ')+'Z';
+function sshlRows(){const d=SSHL.d,q=SSHL.q.trim().toLowerCase();
+ return (d.events||[]).filter(e=>(SSHL.res=='all'||(SSHL.res=='accepted')==(e.result=='accepted'))
+  &&(!q||[e.user,e.addr,(d.names||{})[e.addr],e.method,e.result,e.key,e.key_name].join(' ').toLowerCase().includes(q)))}
+function sshlTh(k,l){const on=SSHL.sort==k;return `<th class=sortable onclick="sshlSort('${k}')">${esc(l)}${on?(SSHL.dir<0?' ▾':' ▴'):''}</th>`}
+function sshlSorted(rows,key){const k=SSHL.sort,dir=SSHL.dir;
+ return rows.slice().sort((a,b)=>{const x=key(a,k),y=key(b,k);return (x<y?-1:x>y?1:0)*dir||(b.ts||b.last)-(a.ts||a.last)})}
+function sshlSec(n){
+ if(SSHL.host!=n){Object.assign(SSHL,{host:n,d:null,err:null,n:100,q:''});setTimeout(()=>sshlLoad(),0)}
+ const d=SSHL.d,b=(k,v,l)=>`<button class="${SSHL[k]==v?'on':''}" onclick="sshlSet('${k}',${typeof v=='string'?`'${v}'`:v})">${l}</button>`;
+ const ctl=`<div class=sshctl><span class=seg>${b('days',1,'24 h')}${b('days',7,'7 days')}${b('days',30,'30 days')}</span>
+  <span class=seg>${b('res','all','all')}${b('res','accepted','accepted')}${b('res','refused','refused')}</span>
+  <span class=seg>${b('view','events','each login')}${b('view','sources','by address')}</span>
+  <label class=mut title="Noctyx's checks, backups and sessions from the head all log in with the head's key"><input type=checkbox ${SSHL.head?'checked':''} onchange="sshlSet('head',this.checked)"> the head's key too</label>
+  <input class=sshq type=search placeholder="filter: user, address, key…" value="${esc(SSHL.q)}" oninput="sshlSet('q',this.value)">
+  <span class=hspacer></span><button class=act onclick="sshlLoad(1)" ${SSHL.busy?'disabled':''}>${SSHL.busy?'reading the log…':'read again'}</button></div>`;
+ let body;
+ if(SSHL.err)body=`<div class="empty bad">${esc(SSHL.err)}</div>`;
+ else if(!d)body=`<div class=empty>reading ${esc(n)}'s log…</div>`;
+ else{const S=d.summary||{},rows=sshlRows(),nm=a=>(d.names||{})[a],ok=rows.filter(e=>e.result=='accepted').length;
+  const line=`<div class=sline><b class=ok>${ok}</b> accepted · <b class="${rows.length-ok?'bad':''}">${rows.length-ok}</b> refused${SSHL.q||SSHL.res!='all'?' (filtered)':''}
+   ${S.head_key?` · <span class=mut>${S.head_key} by the head's key ${SSHL.head?'included':'not shown'}</span>`:''}
+   <span class=mut> · last ${d.days==1?'24 h':d.days+' days'}, read ${esc(agoS(d.ts))} in ${d.seconds}s${d.truncated?' · <span class=warn>only the newest lines were read</span>':''}${d.matching>d.shown?` · <span class=warn>newest ${d.shown} of ${d.matching}</span>`:''}</span></div>`;
+  const who=a=>`${esc(a)}${nm(a)?` <span class=tag>${esc(nm(a))}</span>`:''}`;
+  if(SSHL.view=='sources'){const m={};
+   for(const e of rows){const s=m[e.addr]||(m[e.addr]={addr:e.addr,accepted:0,refused:0,first:e.ts,last:e.ts,users:{},keys:{}});
+    s[e.result=='accepted'?'accepted':'refused']++;s.first=Math.min(s.first,e.ts);s.last=Math.max(s.last,e.ts);
+    s.users[e.user]=1;if(e.key_name||e.key)s.keys[e.key_name||e.key.split(' ').pop().slice(0,16)+'…']=1}
+   const key=(s,k)=>k=='ts'?s.last:k=='addr'?s.addr:k=='user'?Object.keys(s.users).join():k=='key'?Object.keys(s.keys).join():s[k]??'';
+   const all=sshlSorted(Object.values(m),key);
+   body=line+`<div class=sshwrap><table class=sshtab><tr>${sshlTh('addr','from')}${sshlTh('accepted','accepted')}${sshlTh('refused','refused')}${sshlTh('user','users')}${sshlTh('key','keys')}<th>first</th>${sshlTh('ts','last')}</tr>
+    ${all.slice(0,SSHL.n).map(s=>`<tr class=go onclick="sshlSet('view','events');sshlSet('q','${esc(s.addr)}')" title="its logins"><td class=nowrap>${who(s.addr)}</td><td class=ok>${s.accepted||''}</td><td class="${s.refused?'bad':''}">${s.refused||''}</td>
+     <td>${esc(Object.keys(s.users).join(', '))}</td><td>${esc(Object.keys(s.keys).join(', '))}</td><td class=nowrap>${esc(sshTs(s.first))}</td><td class=nowrap>${esc(sshTs(s.last))}</td></tr>`).join('')
+     ||'<tr><td colspan=7 class=mut>no logins</td></tr>'}</table></div>${all.length>SSHL.n?`<button class=act onclick="sshlSet('n',${SSHL.n+200})">${all.length-SSHL.n} more</button>`:''}`}
+  else{const key=(e,k)=>k=='key'?(e.key_name||e.key||''):k=='addr'?e.addr:(e[k]??'');
+   const all=sshlSorted(rows,key);
+   body=line+`<div class=sshwrap><table class=sshtab><tr>${sshlTh('ts','when (UTC)')}${sshlTh('result','result')}${sshlTh('user','user')}${sshlTh('addr','from')}${sshlTh('method','how')}${sshlTh('key','key')}</tr>
+    ${all.slice(0,SSHL.n).map(e=>`<tr><td class=nowrap>${esc(sshTs(e.ts))}</td><td class=nowrap><span class="tag ${SSHRES[e.result]||''}">${esc(e.result)}</span></td>
+     <td>${esc(e.user)}${e.invalid_user||e.result=='invalid'?' <span class="tag bad">no such user</span>':''}</td><td class=nowrap>${who(e.addr)}<span class=mut>:${e.port}</span></td>
+     <td>${esc(e.method)}</td><td title="${esc(e.key||'')}">${e.key_name?esc(e.key_name):e.key?`<code>${esc(e.key.split(' ').pop().slice(0,20))}…</code>`:''}${e.head_key?' <span class=tag>head</span>':''}</td></tr>`).join('')
+     ||`<tr><td colspan=6 class=mut>no logins${SSHL.q||SSHL.res!='all'?' match':''}</td></tr>`}</table></div>${all.length>SSHL.n?`<button class=act onclick="sshlSet('n',${SSHL.n+200})">${Math.min(200,all.length-SSHL.n)} more (${all.length-SSHL.n} left)</button>`:''}`}}
+ return `<div class="m1sec m1wide" id="mx-sshlog"><h3>SSH logins</h3>${ctl}${body}</div>`}
 function goMx(n){location.href='/machine?host='+encodeURIComponent(n)}
 function rMachines(d){
  if(!d)return '<div class=empty>loading…</div>';
@@ -6178,6 +6245,35 @@ class H(BaseHTTPRequestHandler):
                 return self._json(machine_view(name))
             except Exception as e:
                 return self._json({"error": f"{type(e).__name__}: {str(e)[:200]}"}, 500)
+        if p.startswith("/api/v1/ssh-log/"):
+            name = p.rsplit("/", 1)[-1]
+            h = next((x for x in CFG["hosts"] if x["name"] == name), None)
+            if name not in VALID_HOSTS or not h:
+                return self._json({"error": "unknown host"}, 404)
+            try:
+                days = int(q.get("days", "7"))
+                v = SSHLOG.cached(CM.cfg(), h, days, max_age=0 if q.get("refresh") else 120)
+            except ValueError as e:
+                return self._json({"error": str(e)}, 400)
+            except Exception as e:
+                return self._json({"error": f"{type(e).__name__}: {str(e)[:200]}"}, 502)
+            if "error" in v:
+                return self._json(v, 502)
+            # the head's own key logs in every few seconds: its rows come only when asked for
+            ev = v["events"] if q.get("head") == "1" else [e for e in v["events"] if not e.get("head_key")]
+            cap = 5000
+            c = CM.cfg()
+            names = {}
+            for x in c["hosts"]:
+                if x.get("address"):
+                    names[CM.addr(x)] = x["name"]
+                    try:                                    # a name (m5ultra.local): its addresses too
+                        for ai in socket.getaddrinfo(CM.addr(x), None, proto=socket.IPPROTO_TCP):
+                            names.setdefault(ai[4][0], x["name"])
+                    except OSError:
+                        pass
+            names[c["server"]["address"]] = c["server"].get("hostname") or "head"
+            return self._json({**v, "events": ev[-cap:], "shown": min(len(ev), cap), "matching": len(ev), "names": names})
         if p.startswith("/api/v1/metrics/"):
             name = p.rsplit("/", 1)[-1]
             if name not in VALID_HOSTS:

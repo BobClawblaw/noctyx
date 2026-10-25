@@ -4061,6 +4061,12 @@ def main():
     cks.add_argument("--host"); cks.add_argument("--json", action="store_true")
     cps = sub.add_parser("checkpoint-set", help="set the checkpoint policy (JSON) and put the apt hook on the nodes")
     cps.add_argument("--json", required=True); cps.add_argument("--host", help="the apt hook on this host only")
+    sl = sub.add_parser("ssh-log", help="SSH logins on a machine, accepted and refused, read from its own log")
+    sl.add_argument("--host", required=True); sl.add_argument("--days", type=int, default=7, choices=(1, 7, 30))
+    sl.add_argument("--refused", action="store_true", help="only the attempts that did not get in")
+    sl.add_argument("--all", action="store_true", help="include the head's own key's logins (Noctyx's)")
+    sl.add_argument("--limit", type=int, default=50, help="rows to print, newest first (0: all)")
+    sl.add_argument("--json", action="store_true")
     sgs = sub.add_parser("signals-set", help="the thresholds of the fleet's early warnings (JSON: noctyx.signals)")
     sgs.add_argument("--json", required=True)
     chh = sub.add_parser("config-history", help="the site config as it was before each rewrite")
@@ -4108,7 +4114,7 @@ def main():
                "recipe-rollback": cmd_recipe_rollback, "recipe-status": cmd_recipe_status,
                "recipe-catalog": cmd_recipe_catalog, "recipe-discover": cmd_recipe_discover, "nightly": cmd_nightly, "install-head": cmd_install_head, "console-set": cmd_console_set, "user": cmd_user, "setup": cmd_setup, "assistant-set": cmd_assistant_set, "versions": cmd_versions,
                "upgrade": cmd_upgrade, "versions-skip": cmd_versions_skip, "heal": cmd_heal, "heal-set": cmd_heal_set,
-               "changes": cmd_changes, "revert": cmd_revert, "checkpoint": cmd_checkpoint, "checkpoints": cmd_checkpoints,
+               "changes": cmd_changes, "ssh-log": lambda a: __import__("noctyx.sshlog").sshlog.cmd(a), "revert": cmd_revert, "checkpoint": cmd_checkpoint, "checkpoints": cmd_checkpoints,
                "checkpoint-set": cmd_checkpoint_set, "config-history": cmd_config_history, "signals-set": cmd_signals_set,
                "config-restore": cmd_config_restore, "self-checkpoint": cmd_self_checkpoint,
                "self-rollback": cmd_self_rollback}[a.cmd]
