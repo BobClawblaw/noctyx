@@ -6364,7 +6364,7 @@ class H(BaseHTTPRequestHandler):
             for x in c["hosts"]:
                 if x.get("address"):
                     names[CM.addr(x)] = x["name"]
-                    try:                                    # a name (m5ultra.local): its addresses too
+                    try:                                    # a name (gpu-01.local): its addresses too
                         for ai in socket.getaddrinfo(CM.addr(x), None, proto=socket.IPPROTO_TCP):
                             names.setdefault(ai[4][0], x["name"])
                     except OSError:
