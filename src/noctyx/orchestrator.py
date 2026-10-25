@@ -2098,7 +2098,7 @@ def hf_harvest_host(c, h, a, hub):
             inc = hub.parent / ".incoming" / h["name"] / d["repo"]
             inc.mkdir(parents=True, exist_ok=True)
             src = f"{d['root']}/{d['repo']}/blobs/"
-            cmd = ["rsync", "-t", "--partial", "--files-from=-"]
+            cmd = ["rsync", "-t", "--copy-links", "--partial", "--files-from=-"]   # a blob may link to a shared store
             if hc["bwlimit_mb"]:
                 cmd.append(f"--bwlimit={int(hc['bwlimit_mb'] * 1000)}")
             if is_head(c, h):

@@ -2,6 +2,8 @@
 """Runs ON a cluster host (piped over ssh by `noctyx hf-harvest`): finds every
 Hugging Face hub cache (any directory holding models--* / datasets--* repos) and
 prints one JSON document describing it. Read-only. Python 3.8+, Linux and macOS.
+A repo's blob may be a link into the hub's shared-blob store; its size is the file's, and the harvest's
+rsync copies what the link points to.
 
   [{"root": "/root/.cache/huggingface/hub", "repo": "models--org--name",
     "refs": {"main": ["<commit>", <mtime>]},
@@ -53,9 +55,15 @@ def describe(root, repo):
     rd = os.path.join(root, repo)
     out = {"root": root, "repo": repo, "refs": {}, "files": {}, "blobs": {}}
     bd = os.path.join(rd, "blobs")
+    top = os.path.realpath(root) + os.sep
     try:
         for e in os.scandir(bd):
-            if e.is_file(follow_symlinks=False) and not e.name.endswith(".incomplete"):
+            if e.name.endswith(".incomplete"):
+                continue
+            # a blob is a file, or (huggingface_hub's shared-blob store, hub/blobs/<xx>/<hash>) a link to one
+            # inside the same hub cache; a link out of it is not followed
+            if e.is_file(follow_symlinks=False) or (e.is_symlink() and e.is_file()
+                                                    and os.path.realpath(e.path).startswith(top)):
                 out["blobs"][e.name] = e.stat().st_size
     except OSError:
         pass

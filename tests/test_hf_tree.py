@@ -3,6 +3,7 @@
 hosts holding each repo, with its refs file moved to the Noctyx name."""
 import json
 import os
+import pathlib
 import subprocess
 import types
 
@@ -80,3 +81,23 @@ def test_the_harvest_records_hosts_and_moves_the_refs_file(tmp_path, monkeypatch
     assert set(json.loads((rd / ".nx-seen.json").read_text())) == {"gpu-02"}
     r = tree.scan(tmp_path)["repos"][0]
     assert r["from"] == ["gpu-01"] and list(r["seen_on"]) == ["gpu-02"]
+
+
+def test_the_lister_follows_a_shared_blob_store_but_not_out_of_the_cache(tmp_path):
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("lister", pathlib.Path(tree.__file__).with_name("lister.py"))
+    lister = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(lister)
+    hub = tmp_path / "hub"
+    rd = _repo(hub, "models--org--a", {C1: {"config.json": b"{}"}})
+    shared = hub / "blobs" / "ab" / ("ab" + "0" * 62)                 # huggingface_hub's shared-blob store
+    shared.parent.mkdir(parents=True)
+    shared.write_bytes(b"w" * 7)
+    outside = tmp_path / "secret"
+    outside.write_bytes(b"s" * 3)
+    for blob, tgt in (("e" * 64, shared), ("f" * 64, outside)):
+        os.symlink(os.path.relpath(tgt, rd / "blobs"), rd / "blobs" / blob)
+        os.symlink(f"../../blobs/{blob}", rd / "snapshots" / C1 / f"{blob[0]}.safetensors")
+    d = lister.describe(str(hub), "models--org--a")
+    assert d["blobs"]["e" * 64] == 7 and "f" * 64 not in d["blobs"]
+    assert set(d["files"][C1]) == {"config.json", "e.safetensors"}
