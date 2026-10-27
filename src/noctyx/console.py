@@ -1191,6 +1191,34 @@ def _series(res, key="host"):
     return {r["metric"].get(key, "?"): [[int(float(t)), _num(v)] for t, v in r["values"]] for r in res}
 
 
+_NETFS = ("nfs", "nfs4", "smbfs", "cifs", "afpfs", "9p", "davfs")
+_SYSMNT = ("/boot", "/private/", "/System/Volumes/", "/Volumes/Recovery", "/Volumes/.timemachine", "/snap/", "/var/lib/")
+
+
+def fleet_disks():
+    """{host: [{mount, size, avail}]}: each host's own disks for the kiosk, one per device
+    (a bind mount counts once), / first then by size. Network shares, boot and system
+    volumes, and anything under 5 GB are left out; on macOS the data volume is "/"."""
+    size = _pq(f'node_filesystem_size_bytes{{{_FS},host!=""}}')
+    avail = {(r["metric"].get("host"), r["metric"].get("mountpoint")): _num(r["value"][1])
+             for r in _pq(f'node_filesystem_avail_bytes{{{_FS},host!=""}}')}
+    out = {}
+    for r in sorted(size, key=lambda r: (len(r["metric"].get("mountpoint", "")), r["metric"].get("mountpoint", ""))):
+        m = r["metric"]
+        host, mnt, sz = m.get("host", "?"), m.get("mountpoint", ""), _num(r["value"][1])
+        if mnt == "/System/Volumes/Data":
+            mnt = "/"
+        elif mnt.startswith(_SYSMNT) or (mnt == "/" and m.get("fstype") == "apfs"):
+            continue
+        if m.get("fstype") in _NETFS or not sz or sz < 5e9:
+            continue
+        seen = out.setdefault(host, {})
+        if m.get("device") in seen:
+            continue
+        seen[m.get("device")] = {"mount": mnt, "size": sz, "avail": avail.get((host, m.get("mountpoint")))}
+    return {h: sorted(d.values(), key=lambda x: (x["mount"] != "/", -x["size"])) for h, d in out.items()}
+
+
 _FLEET_CACHE = {"ts": 0, "data": None}
 
 
@@ -1211,6 +1239,11 @@ def fleet_metrics():
                 hosts.setdefault(h, {}).setdefault("spark", {})[k] = pts
         except Exception as e:
             errors.append(f"spark {k}: {str(e)[:120]}")
+    try:
+        for h, d in fleet_disks().items():
+            hosts.setdefault(h, {})["disks"] = d
+    except Exception as e:
+        errors.append(f"disks: {str(e)[:120]}")
     llm, lerr = llm_metrics()
     errors += lerr
     for h, d in llm.items():
@@ -3362,6 +3395,10 @@ td.acts{white-space:nowrap} td.acts a,td.acts button.lnk{margin-right:6px}
 /* ── shared by every theme: the kiosk's per-node meters ── */
 .kmeters{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:7px 10px;align-items:center;margin-top:12px;font:700 9.5px var(--sans);letter-spacing:.1em;color:var(--fg-faint)}
 .kmeters .bar{min-width:0}
+.kdisks{display:grid;grid-template-columns:minmax(0,auto) 1fr auto;gap:calc(5px*var(--kf-h,1)) calc(10px*var(--kf-h,1));align-items:center;margin-top:calc(10px*var(--kf-h,1));font:calc(11px*var(--kf-h,1)) var(--mono)}
+.kdisks>span{color:var(--fg-dim);max-width:10em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kdisks>b{font:700 calc(13px*var(--kf-h,1)) var(--mono);white-space:nowrap;text-align:right} .kdisks small{font:calc(10px*var(--kf-h,1)) var(--sans);color:var(--fg-dim)}
+.kdisks .bar{min-width:0}
 .kclock b small{font:600 14px var(--sans);margin-left:6px;color:var(--fg-dim);letter-spacing:.04em}
 
 /* ── Phosphor: an instrument panel. Every subsystem has one colour everywhere (data-k on the meter);
@@ -3481,7 +3518,7 @@ html[data-style=phosphor] .kclock b{color:var(--accent)}
 html[data-style=phosphor] .kbig span,html[data-style=phosphor] .kclock span{font-family:var(--display);font-size:calc(9px*var(--kf-h,1));letter-spacing:.18em;margin-top:calc(6px*var(--kf-h,1))}
 html[data-style=phosphor] .kpair .kbig>span{letter-spacing:.12em;margin-top:0}
 html[data-style=phosphor] .kpair [data-ghost]::before{right:0;text-align:center}
-html[data-style=phosphor] .kmeters .bar{height:calc(13px*var(--kf-h,1))}
+html[data-style=phosphor] .kmeters .bar,html[data-style=phosphor] .kdisks .bar{height:calc(13px*var(--kf-h,1))}
 
 /* kiosk cards and the CRT */
 html[data-style=phosphor] .kslot,html[data-style=phosphor] .knode{background:linear-gradient(180deg,color-mix(in srgb,var(--bg-1) 94%,var(--fg)),var(--bg-1) calc(44px*var(--kf-h,1)));
@@ -4205,6 +4242,10 @@ function kioskNode(n,h){const srvs=((h.llm||{}).servers||[]).filter(s=>s.model||
  const tr=(sp.gpu_util&&sp.gpu_util.length>1)?`<div class=ktrace><svg class=kspark viewBox="0 0 300 100" preserveAspectRatio="none" aria-hidden="true" data-win="${sp.gpu_util[0][0]}|${sp.gpu_util.at(-1)[0]}|pt${ptspk.length}">
    <line class="grid" x1="0" y1="48.3" x2="300" y2="48.3"/><line class="grid" x1="0" y1="2.3" x2="300" y2="2.3"/>${_lines([{pts:sp.gpu_util,cls:'a'},{pts:sp.cpu,cls:'g'},...genspk.map(p=>({pts:p,cls:'t'}))],300,96,100)}${ptspk.length?_lines(ptspk.map(p=>({pts:p,cls:'p'})),300,96,Math.max(...ptspk.flat().map(p=>p[1]))||1):''}</svg>
   <i class=a style="top:calc(2px + .3em)">GPU</i><i class=g style="bottom:2px">CPU</i>${genspk.length?'<i class=t style="bottom:calc(2px + 1.4em)">GEN TOK/S</i>':''}${ptspk.length?'<i class=p style="top:calc(2px + 1.4em)">PROMPT TOK/S</i>':''}</div>`:'';
+ /* space left on each of the node's own disks (user, 2026-10-27): one row per device, / first */
+ const dk=(h.disks||[]).map(d=>{const p=d.size?100*(1-(d.avail||0)/d.size):null;
+  return `<span title="${esc(d.mount)}">${esc(d.mount.replace(/^\/Volumes\//,''))}</span>${bar(p,false,'disk')}<b class="${p>90?'bad':p>75?'warn':''}">${fmtBytes(d.avail)}<small> free</small></b>`}).join('');
+ const disks=dk?`<div class=kdisks data-k=disk>${dk}</div>`:'';
  return `<div class="knode ${up?'':'down'}"><div class=kh><span class="dot ${up?'ok':'bad'}"></span><b>${esc(n)}</b>
    ${h.load1!=null?`<span class=kload>load ${(+h.load1).toFixed(1)}</span>`:''}</div>
   <div class=kgrid><span>GPU</span><b>${h.gpu_util!=null?Math.round(h.gpu_util)+'%':'—'}</b><span>GPU temp</span>${t(h.gpu_temp,85)}
@@ -4213,7 +4254,7 @@ function kioskNode(n,h){const srvs=((h.llm||{}).servers||[]).filter(s=>s.model||
   ${tr}
   <div class=kmeters><span>GPU</span>${bar(h.gpu_util,true,'gpu')}<span>CPU</span>${bar(h.cpu,true,'cpu')}
    <span>MEM</span>${bar(mem,true,'mem')}<span>TEMP</span>${bar(h.gpu_temp!=null?h.gpu_temp/95*100:0,false,'temp')}</div>
-  ${tpsLine}${pfLine}</div>`}
+  ${disks}${tpsLine}${pfLine}</div>`}
 /* the alerts page (alerts: 2): name + host + since + summary + the LLM triage, newest-severity first */
 function kioskAlerts(a){const L=(a.active||[]).slice().sort((x,y)=>({critical:0,warning:1,info:2})[x.severity]-({critical:0,warning:1,info:2})[y.severity]);
  if(!L.length)return '<div class=kdetail><div class="kticker kempty"><b class=ok>✓</b><span class=mut>no active alerts</span></div></div>';

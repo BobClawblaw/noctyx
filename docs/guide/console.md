@@ -191,7 +191,8 @@ display and stays on it — a site setting can never make it alternate views. Ev
 What the kiosk shows is a site setting (settings › **Kiosk**, saved with *save as site default*, or
 `noctyx console-set`). The nodes page never shows alerts; **Alerts** / **Backups** at *Detail* make
 `?page=1` / `?page=2` worth visiting (alert summaries with their LLM triage; per-host backup last run / next due / window). Each node tile lists every model it serves with its own
-tok/s, plus its 30-minute GPU and CPU traces. **Fit** chooses the layout: `scroll` (the default) keeps the type
+tok/s, its 30-minute GPU and CPU traces, and the space left on each of its own disks (one row per device, `/` first;
+on a Mac `/` is the data volume; network shares, boot and system volumes and anything under 5 GB are left out). **Fit** chooses the layout: `scroll` (the default) keeps the type
 full-size and the node grid scrolls inside its own area; `shrink` sizes everything to exactly one screen, down to
 scaling the whole view on very small displays.
 
