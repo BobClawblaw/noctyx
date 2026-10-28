@@ -1192,7 +1192,7 @@ def _series(res, key="host"):
 
 
 _NETFS = ("nfs", "nfs4", "smbfs", "cifs", "afpfs", "9p", "davfs")
-_SYSMNT = ("/boot", "/private/", "/System/Volumes/", "/Volumes/Recovery", "/Volumes/.timemachine", "/snap/", "/var/lib/")
+_SYSMNT = ("/boot", "/private/", "/System/Volumes/", "/Volumes/Recovery", "/Volumes/.timemachine", "/Volumes/com.apple.", "/snap/", "/var/lib/")
 
 
 def fleet_disks():
