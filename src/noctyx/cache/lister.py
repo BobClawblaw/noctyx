@@ -9,6 +9,11 @@ rsync copies what the link points to.
     "refs": {"main": ["<commit>", <mtime>]},
     "files": {"<commit>": {"path/in/repo": "<blob>"}},
     "blobs": {"<blob>": <size>}}, ...]
+
+It also finds downloads made with `--local-dir`: a directory holding .cache/huggingface/download/, where
+huggingface_hub keeps each file's commit and etag. Those print as {"root": "<dir>", "local": true,
+"name": "<dir's name>", "files": ..., "blobs": ..., "paths": {"<blob>": "path/in/repo"}}; the metadata does
+not name the repo, so the harvest works that out on the head.
 """
 import json
 import os
@@ -22,7 +27,8 @@ PREFIXES = ("models--", "datasets--", "spaces--")
 
 
 def roots(starts):
-    found = set()
+    """The hub caches under starts, and the --local-dir download directories."""
+    found, local = set(), set()
     for s in starts:
         try:
             dev = os.stat(s).st_dev
@@ -42,13 +48,15 @@ def roots(starts):
                     if e.name.startswith(PREFIXES):
                         found.add(d)
                         continue
+                    if e.name == ".cache" and os.path.isdir(os.path.join(e.path, "huggingface", "download")):
+                        local.add(d)
                     p = e.path
                     if p in SKIP or e.name in SKIPNAMES or depth + 1 >= MAXDEPTH or e.stat(follow_symlinks=False).st_dev != dev:
                         continue
                     stack.append((p, depth + 1))
                 except OSError:
                     continue
-    return sorted(found)
+    return sorted(found), sorted(local)
 
 
 def describe(root, repo):
@@ -95,6 +103,36 @@ def describe(root, repo):
     return out
 
 
+def describe_local(root):
+    """A --local-dir download: each file huggingface_hub wrote a metadata file for (commit, etag, time) and
+    has not been changed since (its own rule: mtime at most a second past the recorded time). The etag is the
+    blob's name, the same hash a hub cache names it by; any other etag is left out, as it cannot be checked."""
+    md = os.path.join(root, ".cache", "huggingface", "download")
+    out = {"root": root, "local": True, "name": os.path.basename(root), "refs": {}, "files": {}, "blobs": {},
+           "paths": {}}
+    for dp, _, fns in os.walk(md):
+        for f in fns:
+            if not f.endswith(".metadata"):
+                continue
+            rel = os.path.relpath(os.path.join(dp, f[:-len(".metadata")]), md)
+            try:
+                with open(os.path.join(dp, f)) as fh:
+                    commit, etag, ts = (fh.read().split("\n") + ["", "", ""])[:3]
+                st = os.stat(os.path.join(root, rel), follow_symlinks=False)
+                ts = float(ts)
+            except (OSError, ValueError):
+                continue
+            hexes = set("0123456789abcdef")
+            if (len(commit) != 40 or not set(commit) <= hexes or len(etag) not in (40, 64) or not set(etag) <= hexes
+                    or not os.path.isfile(os.path.join(root, rel)) or os.path.islink(os.path.join(root, rel))
+                    or st.st_mtime - 1 > ts):
+                continue
+            out["files"].setdefault(commit, {})[rel] = etag
+            out["blobs"][etag] = st.st_size
+            out["paths"].setdefault(etag, rel)
+    return out
+
+
 def main():
     # --skip=PATH: never descend there (the NAS mount, so the mirror does not scan its own store)
     for a in sys.argv[1:]:
@@ -102,12 +140,17 @@ def main():
             SKIP.add(a[7:].rstrip("/") or "/")
     starts = [a for a in sys.argv[1:] if not a.startswith("--skip=")] or ["/"]
     res = []
-    for r in roots(starts):
+    hubs, local = roots(starts)
+    for r in hubs:
         for e in sorted(os.listdir(r)):
             if e.startswith(PREFIXES) and os.path.isdir(os.path.join(r, e)):
                 d = describe(r, e)
                 if d["files"]:
                     res.append(d)
+    for r in local:
+        d = describe_local(r)
+        if d["files"]:
+            res.append(d)
     json.dump(res, sys.stdout)
 
 

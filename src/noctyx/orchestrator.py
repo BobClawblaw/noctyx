@@ -1988,12 +1988,15 @@ def cmd_dumps(a):
 # ── HF mirror: one deduplicated Hugging Face cache on the NAS, fed from the hosts ──
 # `hf-harvest` copies model files the store does not have yet out of every host's HF
 # caches (found by cache/lister.py), checks each against its content hash, and
-# merges snapshots/refs. cache/mirror.py serves the store as an HF_ENDPOINT.
+# merges snapshots/refs. A `--local-dir` download is harvested too, under the repo its
+# commit belongs to (see _hf_local_repo). cache/mirror.py serves the store as an HF_ENDPOINT.
 # The store is a plain HF hub cache: models--org--name/{blobs,snapshots,refs}, so it
 # also works read-only as HF_HUB_CACHE. Blobs are content-addressed (sha256 for LFS
 # files, git sha1 otherwise), so the same model on five hosts is stored once.
 HF_DEFAULTS = {"store": "/srv/noctyx/hf-mirror", "port": 20995, "harvest": True, "scan_roots": ["/"],
                "exclude_hosts": [], "bwlimit_mb": 0}
+HF_UPSTREAM = "https://huggingface.co"
+HF_LOCAL_TRIES = 8               # search results asked for a --local-dir download's commit
 
 
 def hf_cfg(c):
@@ -2070,6 +2073,44 @@ def _hf_link(hub_repo, commit, rel, blob):
     return True
 
 
+def _hf_api(path):
+    with urllib.request.urlopen(HF_UPSTREAM + path, timeout=20) as r:
+        return json.load(r)
+
+
+def _hf_local_repo(hub, d, memo):
+    """The store's name (models--org--name) for the repo a --local-dir download came from, or None.
+    huggingface_hub's metadata there records each file's commit but not the repo; a commit names one
+    history, so the repo is one that has it: a store repo holding that snapshot (the one named like the
+    directory, if several are), else one of the Hub's top search results for the directory's name (models,
+    then datasets; an exact name first) that answers for that commit. A directory renamed past what the
+    search finds, or a private repo, stays unresolved."""
+    commit = max(d["files"], key=lambda k: len(d["files"][k]))
+    name = d["name"].lower()
+    if (commit, name) in memo:
+        return memo[(commit, name)]
+    have = sorted(p.parent.parent.name for p in hub.glob(f"*/snapshots/{commit}"))
+    pick = [r for r in have if r.lower().endswith("--" + name)] or have
+    repo = pick[0] if pick else None
+    for kind in ("models", "datasets") if repo is None else ():
+        try:
+            found = _hf_api(f"/api/{kind}?search={urllib.parse.quote(d['name'])}&limit=100")
+        except Exception:
+            break                                            # offline: try again next time
+        ids = [m.get("id", "") for m in found]
+        for rid in sorted(ids, key=lambda i: i.split("/")[-1].lower() != name)[:HF_LOCAL_TRIES]:
+            try:
+                _hf_api(f"/api/{kind}/{rid}/revision/{commit}")
+            except Exception:
+                continue
+            repo = f"{kind}--{rid.replace('/', '--')}"
+            break
+        if repo:
+            break
+    memo[(commit, name)] = repo
+    return repo
+
+
 def hf_harvest_host(c, h, a, hub):
     hc = hf_cfg(c)
     starts = "~" if h.get("os") == "macos" else " ".join(shlex.quote(r) for r in hf_cfg(c)["scan_roots"])
@@ -2080,16 +2121,25 @@ def hf_harvest_host(c, h, a, hub):
         repos = json.loads(r.stdout)
     except Exception:
         raise RuntimeError(f"lister failed: {(r.stderr or r.stdout).strip()[:200]}")
-    st = {"repos": 0, "new_blobs": 0, "new_bytes": 0, "bad_hash": 0, "unverified": 0, "skipped": []}
+    st = {"repos": 0, "new_blobs": 0, "new_bytes": 0, "bad_hash": 0, "unverified": 0, "skipped": [],
+          "unresolved": []}
     s_ = c["server"]["ssh"]
+    memo = {}
     for d in repos:
+        if d.get("local"):
+            d["repo"] = _hf_local_repo(hub, d, memo)
+            if not d["repo"]:
+                st["unresolved"].append(d["root"])
+                continue
         if a.repo and a.repo not in d["repo"]:
             continue
         st["repos"] += 1
         hr = hub / d["repo"]
         want = {b for files in d["files"].values() for b in files.values()}
         have = {p.name for p in (hr / "blobs").glob("*")} if (hr / "blobs").is_dir() else set()
-        need = sorted(want - have)
+        # a --local-dir file is copied by its path and stored under its blob name
+        rel = {b: d["paths"][b] if d.get("local") else b for b in want}
+        need = sorted(b for b in want - have if ".." not in rel[b].split("/"))
         if need:
             if any(ch in d["root"] for ch in " '\"\\$`"):
                 st["skipped"].append(d["root"])
@@ -2097,7 +2147,7 @@ def hf_harvest_host(c, h, a, hub):
             _hf_wait(c, a)
             inc = hub.parent / ".incoming" / h["name"] / d["repo"]
             inc.mkdir(parents=True, exist_ok=True)
-            src = f"{d['root']}/{d['repo']}/blobs/"
+            src = f"{d['root']}/" if d.get("local") else f"{d['root']}/{d['repo']}/blobs/"
             cmd = ["rsync", "-t", "--copy-links", "--partial", "--files-from=-"]   # a blob may link to a shared store
             if hc["bwlimit_mb"]:
                 cmd.append(f"--bwlimit={int(hc['bwlimit_mb'] * 1000)}")
@@ -2109,12 +2159,12 @@ def hf_harvest_host(c, h, a, hub):
                         "--rsync-path=sudo -n rsync", f"{h.get('ssh_user') or s_['user']}@{addr(h)}:{src}", str(inc) + "/"]
             gb = sum(d["blobs"][b] for b in need) / 1e9
             print(f"  {h['name']}: {d['repo']} — {len(need)} file(s), {gb:.1f} GB", flush=True)
-            rr = subprocess.run(cmd, input="\n".join(need) + "\n", capture_output=True, text=True)
+            rr = subprocess.run(cmd, input="\n".join(rel[b] for b in need) + "\n", capture_output=True, text=True)
             if rr.returncode not in (0, 23, 24):     # 23/24: some files vanished/partial — checked below
                 print(f"    rsync rc={rr.returncode}: {rr.stderr.strip()[-200:]}", flush=True)
             (hr / "blobs").mkdir(parents=True, exist_ok=True)
             for b in need:
-                f = inc / b
+                f = inc / rel[b]
                 if not f.is_file() or f.stat().st_size != d["blobs"][b]:
                     continue
                 ok = _hf_hash_ok(f, b)
@@ -2201,7 +2251,8 @@ def cmd_hf_harvest(a):
                     st.update(ts=time.time(), seconds=round(time.time() - t0))
                     print(f"{h['name']}: {st['repos']} repos, {st['new_blobs']} new files "
                           f"({st['new_bytes'] / 1e9:.1f} GB){', ' + str(st['bad_hash']) + ' bad hash' if st['bad_hash'] else ''}"
-                          f"{', skipped roots ' + ', '.join(st['skipped']) if st['skipped'] else ''}", flush=True)
+                          f"{', skipped roots ' + ', '.join(st['skipped']) if st['skipped'] else ''}"
+                          f"{', repo not found for ' + ', '.join(st['unresolved']) if st['unresolved'] else ''}", flush=True)
                 except Exception as e:
                     bad += 1
                     st = {"ts": time.time(), "error": str(e)[:300]}

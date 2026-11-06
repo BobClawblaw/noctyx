@@ -1,10 +1,12 @@
 """The model mirror's tree: sizes per repo and revision, the weight files a revision lacks (an index's weight map,
 1-based model shards, 0-based dataset shards, a link whose blob is gone), and the harvest's record of the
-hosts holding each repo, with its refs file moved to the Noctyx name."""
+hosts holding each repo, with its refs file moved to the Noctyx name, and --local-dir downloads harvested under
+the repo their commit belongs to."""
 import json
 import os
 import pathlib
 import subprocess
+import time
 import types
 
 from noctyx.cache import tree
@@ -84,10 +86,7 @@ def test_the_harvest_records_hosts_and_moves_the_refs_file(tmp_path, monkeypatch
 
 
 def test_the_lister_follows_a_shared_blob_store_but_not_out_of_the_cache(tmp_path):
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("lister", pathlib.Path(tree.__file__).with_name("lister.py"))
-    lister = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(lister)
+    lister = _lister()
     hub = tmp_path / "hub"
     rd = _repo(hub, "models--org--a", {C1: {"config.json": b"{}"}})
     shared = hub / "blobs" / "ab" / ("ab" + "0" * 62)                 # huggingface_hub's shared-blob store
@@ -101,3 +100,73 @@ def test_the_lister_follows_a_shared_blob_store_but_not_out_of_the_cache(tmp_pat
     d = lister.describe(str(hub), "models--org--a")
     assert d["blobs"]["e" * 64] == 7 and "f" * 64 not in d["blobs"]
     assert set(d["files"][C1]) == {"config.json", "e.safetensors"}
+
+
+def _lister():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("lister", pathlib.Path(tree.__file__).with_name("lister.py"))
+    lister = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(lister)
+    return lister
+
+
+def _local_dir(d, files, commit=C1):
+    """A --local-dir download: files {path: bytes}, each with huggingface_hub's metadata (commit, etag, time),
+    the etag being the git blob id the Hub gives a small file."""
+    import hashlib
+    md = d / ".cache" / "huggingface" / "download"
+    for rel, data in files.items():
+        (d / rel).parent.mkdir(parents=True, exist_ok=True)
+        (d / rel).write_bytes(data)
+        etag = hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+        (md / rel).parent.mkdir(parents=True, exist_ok=True)
+        (md / f"{rel}.metadata").write_text(f"{commit}\n{etag}\n{os.path.getmtime(d / rel) + 0.5}\n")
+    return d
+
+
+def test_the_lister_finds_local_dir_downloads_and_leaves_out_changed_files(tmp_path):
+    lister = _lister()
+    d = _local_dir(tmp_path / "models" / "a", {"config.json": b"{}", "sub/w.safetensors": b"w" * 9,
+                                                "edited.json": b"1", "odd.json": b"2"})
+    os.utime(d / "edited.json", (time.time() + 60, time.time() + 60))        # changed after the download
+    md = d / ".cache" / "huggingface" / "download"
+    (md / "odd.json.metadata").write_text(f"{C1}\n\"not-a-hash\"\n{time.time() + 60}\n")
+    (md / "gone.json.metadata").write_text(f"{C1}\n{'0' * 40}\n1\n")           # file deleted since
+    hubs, local = lister.roots([str(tmp_path)])
+    assert hubs == [] and local == [str(d)]
+    x = lister.describe_local(str(d))
+    assert x["local"] and x["name"] == "a" and set(x["files"][C1]) == {"config.json", "sub/w.safetensors"}
+    assert {x["paths"][b]: n for b, n in x["blobs"].items()} == {"config.json": 2, "sub/w.safetensors": 9}
+
+
+def test_the_harvest_stores_a_local_dir_under_its_repo(tmp_path, monkeypatch):
+    from noctyx import orchestrator as o
+    lister = _lister()
+    hub = tmp_path / "hub"
+    hub.mkdir()
+    a = lister.describe_local(str(_local_dir(tmp_path / "a", {"config.json": b"{}", "w.safetensors": b"w" * 9})))
+    b = lister.describe_local(str(_local_dir(tmp_path / "renamed", {"config.json": b"[]"}, commit="2" * 40)))
+    calls = []
+
+    def api(path):                                       # huggingface.co: org/A has C1; nothing has commit 2
+        calls.append(path)
+        if path.startswith("/api/models?search="):
+            return [{"id": "other/a-instruct"}, {"id": "org/A"}]
+        if path == f"/api/models/org/A/revision/{C1}":
+            return {}
+        if path.startswith("/api/datasets?search="):
+            return []
+        raise OSError(404)
+    monkeypatch.setattr(o, "_hf_api", api)
+    monkeypatch.setattr(o, "_run_on", lambda *x, **k: subprocess.CompletedProcess(x, 0, json.dumps([a, b]), ""))
+    c = {"server": {"ssh": {"user": "ops", "key": "/k"}, "address": "192.0.2.10"}, "hosts": []}
+    st = o.hf_harvest_host(c, {"name": "head", "address": "192.0.2.10"},
+                           types.SimpleNamespace(repo=None, ignore_window=True), hub)
+    rd = hub / "models--org--A"
+    assert st["new_blobs"] == 2 and st["bad_hash"] == 0 and st["unresolved"] == [str(tmp_path / "renamed")]
+    assert (rd / "snapshots" / C1 / "w.safetensors").read_bytes() == b"w" * 9
+    assert (rd / "snapshots" / C1 / "config.json").is_symlink() and not (hub.parent / ".incoming" / "head" / rd.name).exists()
+    calls.clear()                                        # a second host: the store already names the commit
+    st = o.hf_harvest_host(c, {"name": "head", "address": "192.0.2.10"},
+                           types.SimpleNamespace(repo=None, ignore_window=True), hub)
+    assert st["new_blobs"] == 0 and st["repos"] == 1 and not any(C1 in p for p in calls)
