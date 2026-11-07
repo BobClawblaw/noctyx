@@ -13,7 +13,7 @@ What a cron of `restic backup` lines cannot do:
      days and miss every later window.
 """
 from __future__ import annotations
-import argparse, base64, json, os, re, shlex, shutil, subprocess, sys, time, fcntl, datetime, pathlib, threading, urllib.parse, urllib.request
+import argparse, base64, json, os, re, shlex, shutil, subprocess, sys, time, fcntl, datetime, pathlib, threading, urllib.error, urllib.parse, urllib.request
 
 if __package__ in (None, ""):                       # run as a file (detached jobs, the console's actions)
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
@@ -1996,7 +1996,9 @@ def cmd_dumps(a):
 HF_DEFAULTS = {"store": "/srv/noctyx/hf-mirror", "port": 20995, "harvest": True, "scan_roots": ["/"],
                "exclude_hosts": [], "bwlimit_mb": 0}
 HF_UPSTREAM = "https://huggingface.co"
-HF_LOCAL_TRIES = 8               # search results asked for a --local-dir download's commit
+HF_LOCAL_TRIES = 8               # search results asked for a --local-dir download's commit, per search
+HF_LOCAL_BUDGET = 24             # commit checks per --local-dir download and harvest
+HF_LOCAL_RETRY = 7 * 86400       # a --local-dir download whose repo was not found is asked again after this
 
 
 def hf_cfg(c):
@@ -2080,35 +2082,81 @@ def _hf_api(path):
 
 def _hf_local_repo(hub, d, memo):
     """The store's name (models--org--name) for the repo a --local-dir download came from, or None.
-    huggingface_hub's metadata there records each file's commit but not the repo; a commit names one
-    history, so the repo is one that has it: a store repo holding that snapshot (the one named like the
-    directory, if several are), else one of the Hub's top search results for the directory's name (models,
-    then datasets; an exact name first) that answers for that commit. A directory renamed past what the
-    search finds, or a private repo, stays unresolved."""
+    huggingface_hub's metadata there records each file's commit but not the repo, and the Hub cannot look a
+    commit up; a commit names one history, so the repo is a candidate that has it. Candidates, in order: a
+    store repo holding that snapshot (the one named like the directory, if several are); the repos the
+    lister found named in the directory (README links, config.json's _name_or_path); then the Hub's top
+    search results for the directory's name and for that name less its last word or two ("-src", "-fp8"),
+    models then datasets, an exact name first. A candidate counts only if the Hub answers for that commit.
+    A private repo, or one nothing names, stays unresolved and is asked again after HF_LOCAL_RETRY
+    (memo["neg"]: when each was last asked). The Hub allows an address few API calls, and the mirror needs
+    them too: once it refuses (429) or cannot be reached, nothing more is asked this harvest."""
     commit = max(d["files"], key=lambda k: len(d["files"][k]))
     name = d["name"].lower()
-    if (commit, name) in memo:
-        return memo[(commit, name)]
+    hints = list(d.get("hints") or ())
     have = sorted(p.parent.parent.name for p in hub.glob(f"*/snapshots/{commit}"))
     pick = [r for r in have if r.lower().endswith("--" + name)] or have
-    repo = pick[0] if pick else None
-    for kind in ("models", "datasets") if repo is None else ():
+    if pick:
+        return pick[0]
+    key = f"{commit} {name} {' '.join(hints)}"
+    if key in memo:
+        return memo[key]
+    neg = memo.setdefault("neg", {})
+    if memo.get("offline") or time.time() - neg.get(key, 0) < HF_LOCAL_RETRY:
+        return None
+    tried = set()
+
+    def ask(path):                                   # (json, None) | (None, "no") | (None, "offline")
         try:
-            found = _hf_api(f"/api/{kind}?search={urllib.parse.quote(d['name'])}&limit=100")
+            return _hf_api(path), None
+        except urllib.error.HTTPError as e:
+            return None, "offline" if e.code == 429 or e.code >= 500 else "no"
         except Exception:
-            break                                            # offline: try again next time
-        ids = [m.get("id", "") for m in found]
-        for rid in sorted(ids, key=lambda i: i.split("/")[-1].lower() != name)[:HF_LOCAL_TRIES]:
-            try:
-                _hf_api(f"/api/{kind}/{rid}/revision/{commit}")
-            except Exception:
-                continue
-            repo = f"{kind}--{rid.replace('/', '--')}"
-            break
+            return None, "offline"
+
+    def has(kind, rid):                              # the store's name, "" if not this repo, None if offline
+        if (kind, rid.lower()) in tried or len(tried) >= HF_LOCAL_BUDGET:
+            return ""
+        tried.add((kind, rid.lower()))
+        info, err = ask(f"/api/{kind}/{rid}/revision/{commit}")
+        if err:
+            return None if err == "offline" else ""
+        rid = (info.get("id") or rid) if isinstance(info, dict) else rid
+        return f"{kind}--{rid.replace('/', '--')}"
+
+    def search():
+        for h in hints:
+            kind, _, rid = h.partition("/")
+            if kind in ("models", "datasets") and "/" in rid:
+                yield kind, rid
+        words = re.split(r"[-_ ]", d["name"])
+        names = [d["name"]] + ["-".join(words[:n]) for n in range(len(words) - 1, max(len(words) - 3, 0), -1)]
+        for q in dict.fromkeys(names):
+            for kind in ("models", "datasets"):
+                if len(tried) >= HF_LOCAL_BUDGET:
+                    return
+                found, err = ask(f"/api/{kind}?search={urllib.parse.quote(q)}&limit=100")
+                if err == "offline":
+                    yield kind, None
+                    return
+                ids = [m.get("id", "") for m in found or []]
+                for rid in sorted(ids, key=lambda i: i.split("/")[-1].lower() not in (name, q.lower()))[:HF_LOCAL_TRIES]:
+                    yield kind, rid
+
+    repo = ""
+    for kind, rid in search():
+        repo = has(kind, rid) if rid else None
+        if repo is None:
+            memo["offline"] = True                   # try again next harvest
+            return None
         if repo:
             break
-    memo[(commit, name)] = repo
-    return repo
+    if repo:
+        neg.pop(key, None)
+    else:
+        neg[key] = time.time()
+    memo[key] = repo or None
+    return memo[key]
 
 
 def hf_harvest_host(c, h, a, hub):
@@ -2124,7 +2172,12 @@ def hf_harvest_host(c, h, a, hub):
     st = {"repos": 0, "new_blobs": 0, "new_bytes": 0, "bad_hash": 0, "unverified": 0, "skipped": [],
           "unresolved": []}
     s_ = c["server"]["ssh"]
-    memo = {}
+    nf = hub.parent / "unresolved.json"              # --local-dir downloads asked about and not found, and when
+    try:
+        neg = {k: t for k, t in json.loads(nf.read_text()).items() if time.time() - t < HF_LOCAL_RETRY}
+    except Exception:
+        neg = {}
+    memo = {"neg": neg}
     for d in repos:
         if d.get("local"):
             d["repo"] = _hf_local_repo(hub, d, memo)
@@ -2211,6 +2264,8 @@ def hf_harvest_host(c, h, a, hub):
         if changed:
             mf.write_text(json.dumps(meta))
             old.unlink(missing_ok=True)
+    nf.write_text(json.dumps(memo["neg"]))
+    st["hub_offline"] = bool(memo.get("offline"))
     return st
 
 
@@ -2252,7 +2307,9 @@ def cmd_hf_harvest(a):
                     print(f"{h['name']}: {st['repos']} repos, {st['new_blobs']} new files "
                           f"({st['new_bytes'] / 1e9:.1f} GB){', ' + str(st['bad_hash']) + ' bad hash' if st['bad_hash'] else ''}"
                           f"{', skipped roots ' + ', '.join(st['skipped']) if st['skipped'] else ''}"
-                          f"{', repo not found for ' + ', '.join(st['unresolved']) if st['unresolved'] else ''}", flush=True)
+                          f"{', repo not found for ' + ', '.join(st['unresolved']) if st['unresolved'] else ''}"
+                          f"{' (huggingface.co refused or unreachable: the rest are asked next time)' if st['hub_offline'] else ''}",
+                          flush=True)
                 except Exception as e:
                     bad += 1
                     st = {"ts": time.time(), "error": str(e)[:300]}

@@ -8,6 +8,7 @@ import pathlib
 import subprocess
 import time
 import types
+import urllib.error
 
 from noctyx.cache import tree
 
@@ -156,7 +157,7 @@ def test_the_harvest_stores_a_local_dir_under_its_repo(tmp_path, monkeypatch):
             return {}
         if path.startswith("/api/datasets?search="):
             return []
-        raise OSError(404)
+        raise _http404(path)
     monkeypatch.setattr(o, "_hf_api", api)
     monkeypatch.setattr(o, "_run_on", lambda *x, **k: subprocess.CompletedProcess(x, 0, json.dumps([a, b]), ""))
     c = {"server": {"ssh": {"user": "ops", "key": "/k"}, "address": "192.0.2.10"}, "hosts": []}
@@ -164,9 +165,84 @@ def test_the_harvest_stores_a_local_dir_under_its_repo(tmp_path, monkeypatch):
                            types.SimpleNamespace(repo=None, ignore_window=True), hub)
     rd = hub / "models--org--A"
     assert st["new_blobs"] == 2 and st["bad_hash"] == 0 and st["unresolved"] == [str(tmp_path / "renamed")]
+    assert list(json.loads((tmp_path / "unresolved.json").read_text())) == [f"{'2' * 40} renamed "]
     assert (rd / "snapshots" / C1 / "w.safetensors").read_bytes() == b"w" * 9
     assert (rd / "snapshots" / C1 / "config.json").is_symlink() and not (hub.parent / ".incoming" / "head" / rd.name).exists()
     calls.clear()                                        # a second host: the store already names the commit
     st = o.hf_harvest_host(c, {"name": "head", "address": "192.0.2.10"},
                            types.SimpleNamespace(repo=None, ignore_window=True), hub)
     assert st["new_blobs"] == 0 and st["repos"] == 1 and not any(C1 in p for p in calls)
+
+
+def _http404(path):
+    import urllib.error
+    return urllib.error.HTTPError(path, 404, "Not Found", None, None)
+
+
+def test_the_lister_reports_the_repos_a_local_dir_names(tmp_path):
+    lister = _lister()
+    d = _local_dir(tmp_path / "x-src", {"config.json": b'{"_name_or_path": "base/Model-7B"}'})
+    (d / "README.md").write_text("[card](https://huggingface.co/org/X) https://huggingface.co/org/X\n"
+                                 "https://huggingface.co/datasets/org/data, https://huggingface.co/docs/hub and "
+                                 "https://huggingface.co/papers/1234 git clone https://huggingface.co/org/Y.git\n"
+                                 "![](https://cdn-uploads.huggingface.co/production/uploads/a.png)\n")
+    assert lister.describe_local(str(d))["hints"] == ["models/org/X", "datasets/org/data", "models/org/Y",
+                                                      "models/base/Model-7B"]
+
+
+def test_a_renamed_local_dir_is_found_by_its_readme_or_a_shorter_name(tmp_path, monkeypatch):
+    from noctyx import orchestrator as o
+    hub = tmp_path / "hub"
+    hub.mkdir()
+    named = {"name": "x-src", "local": True, "files": {C1: {"a": "b"}}, "hints": ["models/base/Model", "models/org/X"]}
+    short = {"name": "Thing-9B-fp8", "local": True, "files": {"2" * 40: {"a": "b"}}, "hints": []}
+    calls = []
+
+    def api(path):                       # org/X has C1 (the README's base model does not); Org/Thing-9B has commit 2
+        calls.append(path)
+        if path == f"/api/models/org/X/revision/{C1}":
+            return {"id": "org/X"}
+        if path == "/api/models?search=Thing-9B&limit=100":
+            return [{"id": "other/Thing-9B-GGUF"}, {"id": "Org/Thing-9B"}]
+        if path == f"/api/models/Org/Thing-9B/revision/{'2' * 40}":
+            return {"id": "Org/Thing-9B"}
+        if "?search=" in path:
+            return []
+        raise _http404(path)
+    monkeypatch.setattr(o, "_hf_api", api)
+    assert o._hf_local_repo(hub, named, {}) == "models--org--X"
+    assert not any("search" in c for c in calls)
+    assert o._hf_local_repo(hub, short, {}) == "models--Org--Thing-9B"
+    assert f"/api/models/other/Thing-9B-GGUF/revision/{'2' * 40}" not in calls      # the exact name is asked first
+
+    for err in (OSError("unreachable"), urllib.error.HTTPError("u", 429, "Too Many Requests", None, None)):
+        def refused(path):
+            calls.append(path)
+            raise err
+        monkeypatch.setattr(o, "_hf_api", refused)
+        memo = {}
+        calls.clear()
+        assert o._hf_local_repo(hub, named, memo) is None and o._hf_local_repo(hub, short, memo) is None
+        assert memo["offline"] and len(calls) == 1 and not memo["neg"]     # nothing more asked; not given up on
+
+
+def test_a_local_dir_nothing_names_is_asked_again_only_after_a_week(tmp_path, monkeypatch):
+    from noctyx import orchestrator as o
+    hub = tmp_path / "hub"
+    hub.mkdir()
+    d = {"name": "models", "local": True, "files": {C1: {"a": "b"}}, "hints": []}
+    calls = []
+
+    def api(path):
+        calls.append(path)
+        if "?search=" in path:
+            return [{"id": f"o{i}/models"} for i in range(40)]
+        raise _http404(path)
+    monkeypatch.setattr(o, "_hf_api", api)
+    memo = {}
+    assert o._hf_local_repo(hub, d, memo) is None
+    assert sum("/revision/" in c for c in calls) == 2 * o.HF_LOCAL_TRIES and memo["neg"]   # models, datasets
+    calls.clear()
+    assert o._hf_local_repo(hub, d, {"neg": dict(memo["neg"])}) is None and calls == []
+    later = {k: t - o.HF_LOCAL_RETRY for k, t in memo["neg"].items()}
+    assert o._hf_local_repo(hub, d, {"neg": later}) is None and calls

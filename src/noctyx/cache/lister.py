@@ -13,10 +13,13 @@ rsync copies what the link points to.
 It also finds downloads made with `--local-dir`: a directory holding .cache/huggingface/download/, where
 huggingface_hub keeps each file's commit and etag. Those print as {"root": "<dir>", "local": true,
 "name": "<dir's name>", "files": ..., "blobs": ..., "paths": {"<blob>": "path/in/repo"}}; the metadata does
-not name the repo, so the harvest works that out on the head.
+not name the repo, so the harvest works that out on the head. To help it, "hints" lists the repos the
+directory's README.md links to (huggingface.co/org/name, datasets/org/name) and config.json's _name_or_path;
+the head takes one only if it has the download's commit.
 """
 import json
 import os
+import re
 import sys
 
 MAXDEPTH = 7
@@ -24,6 +27,9 @@ SKIP = {"/proc", "/sys", "/dev", "/run", "/snap", "/tmp", "/var/lib/docker", "/v
         "/System", "/Library", "/private", "/Volumes"}
 SKIPNAMES = {"node_modules", ".git", "site-packages", ".Trash", "Library", "__pycache__", "blobs", "snapshots"}
 PREFIXES = ("models--", "datasets--", "spaces--")
+HF_LINK = re.compile(r"(?<![\w.-])huggingface\.co/(datasets/)?([A-Za-z0-9][\w.-]*/[A-Za-z0-9][\w.-]*)")
+NOT_REPOS = {"datasets", "spaces", "docs", "blog", "papers", "api", "settings", "organizations", "join", "login",
+             "models", "collections", "learn", "tasks", "new"}
 
 
 def roots(starts):
@@ -130,7 +136,33 @@ def describe_local(root):
             out["files"].setdefault(commit, {})[rel] = etag
             out["blobs"][etag] = st.st_size
             out["paths"].setdefault(etag, rel)
+    if out["files"]:
+        out["hints"] = hints(root)
     return out
+
+
+def hints(root, most=12):
+    """Repos a --local-dir download names: README.md's huggingface.co links ("models/org/name",
+    "datasets/org/name"), and config.json's _name_or_path when it is an org/name id."""
+    out = []
+    try:
+        with open(os.path.join(root, "README.md"), errors="replace") as fh:
+            for ds, rid in HF_LINK.findall(fh.read(1 << 18)):
+                rid = rid.rstrip(".")
+                if rid.endswith(".git"):
+                    rid = rid[:-4]
+                if rid.split("/")[0] not in NOT_REPOS:
+                    out.append(("datasets/" if ds else "models/") + rid)
+    except OSError:
+        pass
+    try:
+        with open(os.path.join(root, "config.json")) as fh:
+            nm = json.load(fh).get("_name_or_path")
+        if isinstance(nm, str) and re.fullmatch(r"[A-Za-z0-9][\w.-]*/[A-Za-z0-9][\w.-]*", nm):
+            out.append("models/" + nm)
+    except (OSError, ValueError, AttributeError):
+        pass
+    return list(dict.fromkeys(out))[:most]
 
 
 def main():

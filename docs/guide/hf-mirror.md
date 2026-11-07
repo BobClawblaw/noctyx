@@ -73,7 +73,7 @@ For each source host:
 
 1. **Find caches.** `cache/lister.py` runs on the host as root, over ssh (locally on the head). It finds every
    directory that holds `models--*`, `datasets--*` or `spaces--*` repos and lists their refs, snapshots and blobs.
-   It only reads.
+   It only reads. It also finds downloads made with `--local-dir` (see below).
 2. **Copy what is missing.** Blobs the store lacks are copied with `rsync` into a staging folder next to the store,
    limited by `bwlimit_mb` if set. Before each copy, harvest waits while the backup window is open (and from 15
    minutes before it opens) or while another job holds the NAS lock. The window is
@@ -85,6 +85,28 @@ For each source host:
 
 Progress and the totals go to `<store>/status.json`, which the console and `/cm-status` read. Only one harvest runs
 at a time. A second one prints `already running — skipped`. The exit code is 1 if any host failed.
+
+### Downloads made with `--local-dir`
+
+A folder filled by `huggingface-cli download --local-dir <dir>` (or `snapshot_download(local_dir=...)`) is not a
+hub cache, but huggingface_hub keeps each file's commit and hash in `<dir>/.cache/huggingface/download`. Harvest
+copies those files and stores them under the repo the commit belongs to. Files changed since the download are left
+out.
+
+That metadata does not name the repo, and huggingface.co cannot look a commit up, so the head tries candidates
+and takes the first that huggingface.co confirms has that commit:
+
+1. a repo in the store that already holds the commit;
+2. repos the folder names: links to `huggingface.co/<org>/<name>` in its `README.md`, and `_name_or_path` in its
+   `config.json`;
+3. huggingface.co's top search results for the folder's name, then for that name without its last word or two
+   (`Nanbeige4.3-33B-src` is also searched as `Nanbeige4.3-33B`).
+
+At most 24 candidates are checked per folder. A folder no candidate fits (a private repo, a folder of several
+models, a name nothing matches) is listed as `repo not found` in the harvest's output, recorded in
+`<store>/unresolved.json`, and asked about again after a week. huggingface.co allows an address about 500 API
+calls per 5 minutes, and the mirror on the same address needs them too: when it refuses (429) or cannot be
+reached, harvest stops asking for the rest of that run and says so.
 
 ### Source hosts and scan roots
 
