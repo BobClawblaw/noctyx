@@ -14,7 +14,7 @@ sudo noctyx hygiene                         # every host: report only
 sudo noctyx hygiene --host gpu-01           # one host
 sudo noctyx hygiene --fix auto              # fix the tier that cannot break anything (the daily timer)
 sudo noctyx hygiene --host gpu-01 --fix manual                 # every space/package fix on that host
-sudo noctyx hygiene --host gpu-01 --fix journal,docker-prune   # specific item ids
+sudo noctyx hygiene --host gpu-01 --fix journal,docker-images  # specific item ids
 ```
 
 - The head node runs `noctyx-agent hygiene [--fix …]` on each host over ssh. That covers every enabled
@@ -58,7 +58,8 @@ tier.
 | `apt-autoremove` | info | manual | `apt-get -s autoremove` would remove packages | `apt-get autoremove --purge` |
 | `old-kernels` | info | manual | installed `linux-image-*` versions other than the running one and the newest other one | purge every installed `linux-*` package of those versions (their initrd goes with them) |
 | `journal` | info | manual | `journalctl --disk-usage` reports 1 G or more | `journalctl --vacuum-size=500M` |
-| `docker-prune` | info | manual | dangling images or exited containers exist | `docker image prune -f` and `docker container prune -f` |
+| `docker-images` | info | manual | dangling images exist | `docker image prune -f` |
+| `docker-containers` | info | manual | exited containers exist; the detail names the first six | `docker container prune -f` |
 | `logrotate` | warning | report | `logrotate -d` reports an error | none |
 | `root-space` | warning | report | `/` is 85 % full or more | none |
 | `needrestart` | info | report | `needrestart` lists services on outdated binaries. Noctyx's own units, vllm, docker, containerd and ssh are left out of the list | none |
@@ -73,10 +74,10 @@ Each space item carries `bytes`, which is what its fix would free, measured the 
 - **old-kernels:** the `Installed-Size` of every installed `linux-*` package of those versions, plus
   their `/boot/initrd.img-*` files.
 - **journal:** the current usage minus 500 MiB.
-- **docker-prune:** Docker's own accounting. It adds the unique size of each dangling image and the size
-  of each exited container. Layers that are shared only among dangling images are not counted, so the
-  figure runs slightly low. It is marked as an estimate (`bytes_approx`) and is printed with a leading
-  **`~`**.
+- **docker-images, docker-containers:** Docker's own accounting: the unique size of each dangling image,
+  and the size of each exited container. Layers that are shared only among dangling images are not counted,
+  so the images' figure runs slightly low. Both are marked as estimates (`bytes_approx`) and are printed
+  with a leading **`~`**.
 
 The `reclaimable:` line adds up the bytes of every unfixed space item in the last report.
 
@@ -84,15 +85,33 @@ The `reclaimable:` line adds up the bytes of every unfixed space item in the las
 
 | Value | Fixes |
 |---|---|
-| `auto` | every `auto` item |
+| `auto` | every `auto` item, and the manual items the site handed to the daily run ([below](#what-the-daily-run-fixes)) |
 | `manual` | every `manual` item **except** real failed units |
 | `ID,ID,…` | exactly those ids, including real failed units (`unit:nginx.service`). The console's per-item buttons send this |
+
+`docker-prune` is still accepted as an id and means both docker items. A list may also name a tier beside
+ids (`auto,journal`).
 
 A real failed unit is restarted only when its id is named. A bulk `--fix manual` never restarts a service.
 The agent also accepts `--fix all`, which fixes every item that has a fix, real failed units included.
 
 In the console, the Hygiene action reports on every host and fixes nothing. Fixing items (`hygieneFix`)
 needs the operator role. Each id must be a fixable item in that host's last report.
+
+## What the daily run fixes
+
+Out of the box the daily timer fixes the `auto` tier only. A site can hand it some of the space items as well:
+
+```bash
+sudo noctyx hygiene-set --json '{"auto": ["journal", "docker-images"]}'
+sudo noctyx hygiene-set --json '{"auto": []}'        # the auto tier only again
+```
+
+It writes `"hygiene": {"auto": [...]}` into the site config. The list takes `journal`, `docker-images`,
+`apt-autoremove` and `old-kernels`: each removes only what is no longer used or can be had again. Exited
+containers and failed units cannot be listed, because somebody may mean to start an exited container again;
+they stay a person's click. Nodes need the agent that knows the split docker items and tier lists: `noctyx
+versions` shows a stale agent as behind, and `noctyx install-agent --host NAME` updates it.
 
 ## Reboot safely
 

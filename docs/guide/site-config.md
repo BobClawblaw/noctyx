@@ -288,6 +288,12 @@ What `noctyx heal` may repair on its own ([self-repair](self-repair.md)). Every 
 sudo noctyx heal-set --json '{"playbooks": {"disk": "shadow"}, "budget_per_hour": 5}'
 ```
 
+## hygiene
+
+| Key | Meaning | Default |
+|---|---|---|
+| `auto` | the manual [hygiene](hygiene.md#what-the-daily-run-fixes) items the daily run fixes on its own: any of `journal`, `docker-images`, `apt-autoremove`, `old-kernels`. Set with `noctyx hygiene-set` | `[]` |
+
 ## checkpoints
 
 When a machine gets a checkpoint (a restic snapshot) before something changes it ([checkpoints](checkpoints.md)).

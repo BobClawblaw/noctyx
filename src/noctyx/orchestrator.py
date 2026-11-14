@@ -689,6 +689,37 @@ def cmd_prune(a):
 
 
 HYGIENE_FILE = pathlib.Path(P["console_state"]) / "hygiene.json"
+# the manual items a site may hand to the daily run (site config "hygiene": {"auto": [...]}). Each only removes
+# what can be had again or is no longer used; exited containers and failed units always wait for a person.
+HYGIENE_AUTO_OK = ("journal", "docker-images", "apt-autoremove", "old-kernels")
+
+
+def hygiene_auto(c):
+    """The site's hygiene.auto: the manual items `hygiene --fix auto` fixes as well. Unknown ids are dropped."""
+    got = (c.get("hygiene") or {}).get("auto") or []
+    return [i for i in HYGIENE_AUTO_OK if isinstance(got, list) and i in got]
+
+
+def cmd_hygiene_set(a):
+    """noctyx hygiene-set --json '{"auto": ["journal", "docker-images"]}': which manual items the daily run
+    fixes on its own."""
+    c = cfg()
+    try:
+        new = json.loads(a.json)
+    except ValueError as e:
+        sys.exit(f"invalid JSON: {e}")
+    got = new.get("auto") if isinstance(new, dict) else None
+    if set(new if isinstance(new, dict) else ()) != {"auto"} or not isinstance(got, list) \
+            or any(i not in HYGIENE_AUTO_OK for i in got):
+        sys.exit('invalid: {"auto": [...]} with any of ' + ", ".join(HYGIENE_AUTO_OK)
+                 + " (exited containers and failed units are never fixed without a person)")
+    blk = {k: v for k, v in (c.get("hygiene") or {}).items() if k != "auto"}
+    auto = [i for i in HYGIENE_AUTO_OK if i in got]
+    if auto:
+        blk["auto"] = auto
+    _write_block("hygiene", blk)
+    audit("hygiene-set", auto=auto)
+    print("hygiene: the daily run fixes the auto tier" + (f" and {', '.join(auto)}" if auto else " only"))
 
 
 def cmd_hygiene(a):
@@ -709,7 +740,11 @@ def cmd_hygiene(a):
         report = json.loads(HYGIENE_FILE.read_text())
     except Exception:
         report = {"hosts": {}}
-    fixarg = f" --fix {shlex.quote(a.fix)}" if a.fix else ""
+    fix = a.fix
+    if fix == "auto" and hygiene_auto(c):          # the daily run, with what the site handed to it
+        fix = ",".join(["auto"] + hygiene_auto(c))
+        print(f"  fixing the auto tier and, by this site's hygiene.auto: {', '.join(hygiene_auto(c))}")
+    fixarg = f" --fix {shlex.quote(fix)}" if fix else ""
     total, fixed = 0, 0
     for h in targets:
         r = ssh(c, h, f"{AGENT} hygiene{fixarg}", timeout=900)
@@ -728,7 +763,7 @@ def cmd_hygiene(a):
                   + (f" — {i['detail'][:110]}" if i.get("detail") else "") + (f"  ({i['tier']})" if i.get("tier") else "")
                   + (f"  frees {'~' if i.get('bytes_approx') else ''}{i['bytes'] / 1e9:.1f} GB" if (i.get("bytes") or 0) > 0 and not i.get("fixed") else ""))
         audit("hygiene", host=h["name"], items=len(items), fixed=sum(1 for i in items if i.get("fixed")),
-              fix=a.fix or "", warnings=sum(1 for i in items if i["severity"] == "warning"))
+              fix=fix or "", warnings=sum(1 for i in items if i["severity"] == "warning"))
     report["ts"] = time.time()
     free = sum(i.get("bytes") or 0 for d in report["hosts"].values() for i in d.get("items") or [] if not i.get("fixed") and (i.get("bytes") or 0) > 0)
     if free:
@@ -4233,6 +4268,8 @@ def main():
     pr.add_argument("--host"); pr.add_argument("--apply", action="store_true")
     pr.add_argument("--forget", action="append", metavar="ID",
                     help="forget these snapshot ids instead of applying the policy (repeatable)")
+    hys = sub.add_parser("hygiene-set", help="which manual hygiene items the daily run fixes on its own (JSON: auto)")
+    hys.add_argument("--json", required=True)
     hy = sub.add_parser("hygiene", help="host housekeeping report; --fix auto|manual|ID,ID applies fixes")
     hy.add_argument("--host"); hy.add_argument("--fix", help="auto (safe fixes) | manual | all (also restarts failed services) | ID,ID")
     rs = sub.add_parser("restore", help="restore a path from a snapshot to staging (NAS), the host, or in place")
@@ -4383,7 +4420,7 @@ def main():
                "verify": cmd_verify, "prune": cmd_prune, "copy": cmd_copy, "capacity": cmd_capacity,
                "probe": cmd_probe, "install-agent": cmd_install_agent, "directory": cmd_directory,
                "tick": cmd_tick, "follow": cmd_follow, "schedule-set": cmd_schedule_set,
-               "nas-rest": cmd_nas_rest, "restore": cmd_restore, "hygiene": cmd_hygiene,
+               "nas-rest": cmd_nas_rest, "restore": cmd_restore, "hygiene": cmd_hygiene, "hygiene-set": cmd_hygiene_set,
                "reboot": cmd_reboot, "policy-set": cmd_policy_set, "policy-apply": cmd_policy_apply,
                "policy-show": cmd_policy_show, "dumps": cmd_dumps, "hf-harvest": cmd_hf_harvest,
                "recipe-deploy": cmd_recipe_deploy, "recipe-stop": cmd_recipe_stop, "recipe-start": cmd_recipe_start,

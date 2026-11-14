@@ -152,3 +152,40 @@ def test_the_network_note_carries_its_date_and_the_newest_readings():
     assert "below half the expected speed: gpu-01" in "\n".join(
         o.network_lines(plain, {"mbit": {"gpu-01": 300.0}, "at": {"gpu-01": now}}, now))
     assert o.network_lines(plain, {}, now) == []
+
+
+# ── hygiene: what a site hands to the daily run ─────────────────────────────
+def test_hygiene_auto_is_a_sites_choice_from_a_fixed_list(site, monkeypatch, capsys):
+    assert o.hygiene_auto(o.cfg()) == []
+    for bad in ('{"auto": ["docker-containers"]}', '{"auto": ["unit:nginx.service"]}', '{"auto": "journal"}',
+                '{"other": []}', '["journal"]', 'nope'):
+        with pytest.raises(SystemExit, match="invalid"):
+            o.cmd_hygiene_set(argparse.Namespace(json=bad))
+    o.cmd_hygiene_set(argparse.Namespace(json='{"auto": ["docker-images", "journal"]}'))
+    assert o.hygiene_auto(o.cfg()) == ["journal", "docker-images"]
+    sent = []
+    monkeypatch.setattr(o, "HYGIENE_FILE", o.STATE_DIR / "hygiene.json")
+    monkeypatch.setattr(o, "ssh", lambda c, h, cmd, timeout=0: sent.append(cmd) or argparse.Namespace(
+        stdout=o.P["result_token"] + ' {"event": "hygiene", "items": []}\n', stderr="", returncode=0))
+    o.cmd_hygiene(argparse.Namespace(host=None, fix="auto"))          # the daily run
+    o.cmd_hygiene(argparse.Namespace(host=None, fix="manual"))        # anything else goes as asked
+    o.cmd_hygiene(argparse.Namespace(host=None, fix=None))
+    assert [s.split("hygiene", 1)[1] for s in sent] == [" --fix auto,journal,docker-images", " --fix manual", ""]
+    o.cmd_hygiene_set(argparse.Namespace(json='{"auto": []}'))
+    assert o.hygiene_auto(o.cfg()) == [] and "hygiene" in o.cfg() and "auto" not in o.cfg()["hygiene"]
+
+
+def test_the_agent_fixes_a_tier_named_in_a_list_but_a_failed_unit_only_by_id():
+    import re
+    import subprocess
+    src = (o.NX_HOME / "agent" / "noctyx-agent.sh").read_text()
+    fn = re.search(r"^hyg_want_fix\(\) \{.*?^  return 1; \}", src, re.M | re.S).group(0)
+
+    def want(fix, tier, item):
+        return subprocess.run(["bash", "-c", fn + f'\nHYG_FIX="$1"; hyg_want_fix "$2" "$3"', "_", fix, tier, item]).returncode == 0
+    assert want("auto", "auto", "reboot-flag") and not want("auto", "manual", "journal")
+    assert want("auto,journal", "auto", "reboot-flag") and want("auto,journal", "manual", "journal")
+    assert not want("auto,journal", "manual", "docker-images") and not want("", "auto", "reboot-flag")
+    assert want("manual", "manual", "old-kernels") and not want("manual", "explicit", "unit:nginx.service")
+    assert not want("auto,explicit", "explicit", "unit:nginx.service")        # never by tier
+    assert want("unit:nginx.service", "explicit", "unit:nginx.service") and want("all", "explicit", "unit:x.service")

@@ -421,7 +421,8 @@ cmd_retention() {
 # Items carry a tier: "auto" (cannot break anything: ghost units, a killed user
 # manager, a reboot flag that is demonstrably stale), "manual" (reclaims space
 # or removes packages — a human clicks), or none (report only: a real failed
-# service, a real pending reboot). `hygiene [--fix auto|manual|ID,ID]`
+# service, a real pending reboot). `hygiene [--fix auto|manual|ID,ID]`; the list may
+# also name a tier beside ids (`--fix auto,journal`: the daily run with a site's hygiene.auto).
 hyg_items=()
 hyg_add() { # <id> <severity> <title> <detail> <tier> [fix-label] [bytes[~]]  — fix-label names what the button will do;
             # bytes = what the fix would free (measured the way the fix works); a trailing ~ marks an estimate
@@ -444,6 +445,7 @@ hyg_want_fix() { # <tier> <id>
   [[ -z $HYG_FIX ]] && return 1
   [[ $HYG_FIX == all ]] && return 0
   [[ $HYG_FIX == "$1" ]] && return 0
+  [[ $1 != explicit && ",$HYG_FIX," == *",$1,"* ]] && return 0
   [[ ",$HYG_FIX," == *",$2,"* ]] && return 0
   return 1; }
 
@@ -538,20 +540,28 @@ cmd_hygiene() {
     local dang stopped
     dang=$(docker images -f dangling=true -q 2>/dev/null | wc -l); stopped=$(docker ps -aq -f status=exited 2>/dev/null | wc -l)
     if (( dang + stopped > 0 )); then
-      # docker's own accounting: each dangling image's UNIQUE size (layers no other image uses) + exited
+      # docker's own accounting: each dangling image's UNIQUE size (layers no other image uses), and exited
       # containers' size. Layers shared only among dangling images are not counted: an estimate, slightly low.
-      local db
+      # Two items: a dangling image is only ever a leftover, an exited container may be one somebody means to
+      # start again, so a site can let the daily run prune the images and not the containers.
+      local db di dc
       db=$(docker system df -v --format '{{json .}}' 2>/dev/null | python3 -c 'import json,re,sys
 U={"B":1,"kB":1e3,"KB":1e3,"MB":1e6,"GB":1e9,"TB":1e12}
 def b(s):
     m=re.match(r"([0-9.]+)\s*([kKMGT]?B)",s or ""); return float(m.group(1))*U[m.group(2)] if m else 0
 try: d=json.loads(sys.stdin.read())
-except Exception: print(""); sys.exit()
-n=sum(b(i.get("UniqueSize")) for i in d.get("Images") or [] if i.get("Repository")=="<none>")
-n+=sum(b(c.get("Size","").split(" ")[0]) for c in d.get("Containers") or [] if c.get("State")=="exited")
-print(int(n))')
-      hyg_add docker-prune info "docker leftovers" "$dang dangling image(s), $stopped exited container(s)" manual "" "${db}~"
-      hyg_want_fix manual docker-prune && docker image prune -f >/dev/null 2>&1 && docker container prune -f >/dev/null 2>&1 && hyg_mark_fixed docker-prune
+except Exception: print(" "); sys.exit()
+print(int(sum(b(i.get("UniqueSize")) for i in d.get("Images") or [] if i.get("Repository")=="<none>")),
+      int(sum(b(c.get("Size","").split(" ")[0]) for c in d.get("Containers") or [] if c.get("State")=="exited")))')
+      read -r di dc <<<"$db"
+      if (( dang > 0 )); then
+        hyg_add docker-images info "docker leftovers: $dang dangling image(s)" "docker image prune" manual "" "${di}~"
+        { hyg_want_fix manual docker-images || hyg_want_fix manual docker-prune; } && docker image prune -f >/dev/null 2>&1 && hyg_mark_fixed docker-images
+      fi
+      if (( stopped > 0 )); then
+        hyg_add docker-containers info "docker leftovers: $stopped exited container(s)" "$(docker ps -a -f status=exited --format '{{.Names}}' 2>/dev/null | head -6 | tr '\n' ' ')" manual "" "${dc}~"
+        { hyg_want_fix manual docker-containers || hyg_want_fix manual docker-prune; } && docker container prune -f >/dev/null 2>&1 && hyg_mark_fixed docker-containers
+      fi
     fi
   fi
 
