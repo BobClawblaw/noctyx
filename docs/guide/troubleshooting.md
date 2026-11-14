@@ -14,7 +14,7 @@ the automatic answers off.
 ## First checks
 
 ```bash
-noctyx status                      # repos, hosts, network.degraded, the last 8 audit lines
+noctyx status                      # repos, hosts, path readings, network.degraded, the last 8 actions
 noctyx tick --dry-run              # what is due and why not
 sudo noctyx probe --host gpu-01    # the client → head path in Mbit/s
 noctyx paths                       # where this site keeps its files

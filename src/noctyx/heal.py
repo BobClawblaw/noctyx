@@ -22,6 +22,8 @@ playbook (PLAYBOOKS):
              answering                                        once Noctyx has seen that slot's own unit serve
   upgrades   heal.upgrades.auto (off by default): a           noctyx upgrade, inside the window, one machine per
              component is older than Noctyx's pin             run, waiting soak_minutes between machines
+  serving    a slot answers with other models than its        none: somebody swapped the model by hand. For a
+             recorded deployment's, for 15 min                person: noctyx recipe-adopt records it
 
 Safety, on top of each playbook's own checks (site config "heal", validate_policy):
   - each thing is repaired at most 3 times in 6 hours; then it needs a person (NoctyxNeedsAttention);
@@ -79,6 +81,7 @@ PLAYBOOKS = {
     "backups":  ("on", "a failed backup: its cause, for a person (the tick retries it)"),
     "slots":    ("on", "a model server listed in restart_slots, down 15 min: start it again"),
     "upgrades": ("on", "upgrades.auto only: a component older than Noctyx's pin, upgraded in the window"),
+    "serving":  ("on", "a slot serves other models than the recorded deployment's: for a person (recipe-adopt)"),
 }
 MODES = ("on", "shadow", "off")
 # which playbook an alert wakes (the console's alert webhook runs `noctyx heal --host H` for these)
@@ -797,6 +800,30 @@ def check_backups(c):
     return out
 
 
+# ── what each slot serves against its recorded deployment (every slot) ────────
+def check_serving(c, st):
+    """A slot that answers with models its recorded deployment does not serve: a swap made by hand, which no
+    restart repairs. Reported once it has lasted SLOT_DOWN_FOR (a deploy in flight answers oddly for a while)."""
+    cm = _cm()
+    out = []
+    seen = st.setdefault("serving", {})
+    for n, s in cm.recipes_cfg(c)["slots"].items():
+        cur, _, _ = cm.slot_records(c, n)
+        exp = (cur or {}).get("models") or (cur or {}).get("expect") or []
+        lv = cm.recipe_live(c, n) if exp else {}
+        if not (lv.get("ok") and not set(exp) & set(lv["models"])) or cm.spindle_holder(f"recipe-{n}"):
+            seen.pop(n, None)
+            continue
+        since = seen.setdefault(n, time.time())
+        if time.time() - since < SLOT_DOWN_FOR:
+            continue
+        out.append(Finding("serving", s["head"], f"slot {n} serves {', '.join(lv['models'])}, not the recorded "
+                           f"{cm.rec_label(cur)}",
+                           why=f"swapped by hand: `noctyx recipe-adopt --slot {n} --unit UNIT` records what serves "
+                               "now, or deploy the recorded one again"))
+    return out
+
+
 # ── model servers (only the slots in heal.restart_slots) ────────────────────
 def check_slots(c, st, pol):
     cm = _cm()
@@ -1028,6 +1055,7 @@ def _run_locked(c, dry, log, only):
         found += check("nas", check_nas, c)
         found += check("backups", check_backups, c)
         found += check("slots", check_slots, c, st, pol)
+        found += check("serving", check_serving, c, st)
     found += check("upgrades", check_upgrades, c, st, pol, only)
     tries = {k: [t for t in v if now - t < WINDOW] for k, v in (st.get("tries") or {}).items()}
     old = {p["key"]: p for p in st.get("problems") or []}

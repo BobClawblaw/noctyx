@@ -165,7 +165,8 @@ sudo noctyx recipe-rollback --slot rtx5090 --yes   # switch back to the previous
 - Noctyx keeps only one previous deployment. A rollback makes the two swap places, so a second rollback goes back to
   where you started.
 - `recipe-status` warns about **drift**: the port serves models other than the ones Noctyx last started, or a
-  deployment marked serving does not answer.
+  deployment marked serving does not answer. A swap that lasts 15 minutes also raises the `NoctyxNeedsAttention`
+  alert (self-repair's `serving` check); see [A model swapped by hand](#a-model-swapped-by-hand).
 
 ## Adopted deployments
 
@@ -180,6 +181,34 @@ the slot's current deployment until the first deploy:
 The first deploy disables the adopted unit, and the adopted unit becomes `previous`. `recipe-rollback` then
 re-enables it and starts it. For an adopted spark checkout, set `spark_dir` so the switch runs `spark down` there
 and the prepare step can tell whether the two share a weights cache.
+
+An `adopt` block with only a unit and a name tells Noctyx nothing about the models, so it cannot notice a swap;
+`recipe-status` says so. `recipe-adopt` (next) adds the models.
+
+## A model swapped by hand
+
+When somebody starts a different model on a slot outside Noctyx, record it:
+
+```bash
+sudo noctyx recipe-adopt --slot rtx5090 --unit other-llm.service          # prints what would change
+sudo noctyx recipe-adopt --slot rtx5090 --unit other-llm.service --yes
+```
+
+It asks the slot's port which models answer and writes them, the unit and a name (`--name`, default the model
+ids) into the slot's `adopt` block. Nothing is stopped or started. The unit must exist on the slot's head, because
+Noctyx stops and starts a deployment through its unit; it is added to `conflicts`, so a later deploy disables it.
+Without `--unit` the block's present unit is kept. A deployment Noctyx made before becomes `previous`, so
+`recipe-rollback` puts it back. For a spark checkout add `--spark-dir`.
+
+## Watch-only slots
+
+A slot with `"deploy": false` is one Noctyx reports and never switches: a server it has no unit for, such as a
+Mac's launchd job. `recipe-status` and the console show what it serves, `recipe-adopt --slot NAME --yes` records
+that (no unit needed), and a later swap is drift like on any other slot. Deploy, stop, start and rollback refuse it.
+
+```json
+"mac": {"head": "mac-01", "port": 8888, "deploy": false}
+```
 
 ## Discovering recipes
 

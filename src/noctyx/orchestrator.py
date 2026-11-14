@@ -2354,6 +2354,12 @@ def recipe_slot(c, name):
     return s
 
 
+def slot_deploys(s):
+    """False for a watch-only slot ("deploy": false): Noctyx shows what it serves and says when that changes,
+    and never deploys to it, stops it or starts it (a server it has no unit for, a Mac's launchd job)."""
+    return s.get("deploy", True) is not False
+
+
 def _recipe_state():
     try:
         return json.loads(RECIPE_STATE.read_text())
@@ -2370,10 +2376,10 @@ def _save_recipe_state(st):
 
 def _adopted(s):
     a = s.get("adopt") or {}
-    if not a.get("unit"):
+    if not a.get("unit") and not a.get("models"):      # a watch-only slot's record has models and no unit
         return None
-    return {"recipe": None, "name": a.get("name") or a["unit"], "adopted": True, "unit": a["unit"],
-            "spark_dir": a.get("spark_dir")}
+    return {"recipe": None, "name": a.get("name") or a["unit"], "adopted": True, "unit": a.get("unit"),
+            "spark_dir": a.get("spark_dir"), **({"models": list(a["models"])} if a.get("models") else {})}
 
 
 def slot_records(c, slot):
@@ -2755,6 +2761,8 @@ def recipe_plan(c, slot, name=None, ref=None):
     hosts_ = [s["head"]] + ([s["worker"]] if s.get("worker") else [])
     plan = {"slot": slot, "hosts": hosts_, "port": s["port"], "current": cur, "previous": prev, "live": live,
             "impact": [], "blockers": []}
+    if not slot_deploys(s):
+        plan["blockers"].append(f"{slot} is watch-only (deploy: false in the site config): Noctyx does not switch it")
     if live["ok"]:
         plan["impact"].append(f"{', '.join(live['models'])} on {'+'.join(hosts_)}:{s['port']} stops serving during the switch")
     if name:
@@ -2905,8 +2913,10 @@ def recipe_summary(c, live=True):
             drift = f"serving {', '.join(lv['models'])}, but Noctyx last started {rec_label(cur)} ({', '.join(exp)})"
         elif not lv.get("ok") and (cur or {}).get("state") == "serving":
             drift = f"{rec_label(cur)} should be serving but the port does not answer"
+        unrecorded = bool(lv.get("ok") and not exp and (cur is None or cur.get("adopted")))
         slots[n] = {"head": s["head"], "worker": s.get("worker"), "port": s["port"], "lock": s.get("lock"),
                     "current": cur, "previous": prev, "history": hist[:10], "live": lv, "drift": drift,
+                    "unrecorded": unrecorded, "deploy": slot_deploys(s),
                     "prepared": {k: {x: v.get(x) for x in ("sha", "ref", "prepared_ts")} for k, v in
                                  ((st.get(n) or {}).get("prepared") or {}).items()},
                     "recipes": [k for k, v in rc_["catalog"].items() if n in (v.get("slots") or [])],
@@ -2935,11 +2945,86 @@ def cmd_recipe_status(a):
               + (f"  · previous: {rec_label(s['previous'])}" if s["previous"] else ""))
         if s["drift"]:
             print(f"          ! {s['drift']}")
+            if lv.get("ok"):
+                print(f"            a swap made by hand? `noctyx recipe-adopt --slot {n} --unit UNIT` records it")
+        elif s["unrecorded"]:
+            print(f"          · Noctyx has no record of which models this serves, so it cannot tell a swap: "
+                  f"`noctyx recipe-adopt --slot {n}` records what answers now")
+        if not s["deploy"]:
+            print("          watch-only (deploy: false): Noctyx reports it and never switches it")
         if s["busy"]:
             print(f"          busy: {s['busy']}")
     print("catalog:")
     for k, v in d["catalog"].items():
         print(f"  {k:<24} {v['kind']:<8} {v.get('ref', 'main'):<10} {', '.join(v.get('slots') or [])}  {v['repo']}")
+
+
+_UNIT = re.compile(r"^[A-Za-z0-9@._:-]{1,120}\.service$")
+
+
+def cmd_recipe_adopt(a):
+    """Record what a slot serves now as its deployment: a model somebody started or swapped by hand. Writes the
+    slot's `adopt` (unit, name, the models that answer) into the site config; a deployment Noctyx made before
+    becomes `previous`. Nothing on the slot is stopped or started."""
+    c = cfg()
+    s = recipe_slot(c, a.slot)
+    lv = recipe_live(c, a.slot, timeout=10)
+    if not lv.get("ok"):
+        sys.exit(f"{a.slot} does not answer on port {s['port']} ({lv.get('error') or lv.get('status')}): "
+                 "nothing to adopt")
+    cur, _, _ = slot_records(c, a.slot)
+    old = dict(s.get("adopt") or {})
+    if not a.unit and cur and not cur.get("adopted"):
+        sys.exit(f"{a.slot} runs Noctyx's own deployment {rec_label(cur)}: name the unit that serves now "
+                 "(--unit), or deploy again to put Noctyx's back")
+    unit = a.unit or old.get("unit")
+    if slot_deploys(s) and not unit:
+        sys.exit("name the unit that serves it (--unit NAME.service): Noctyx stops and starts a deployment "
+                 "through its unit")
+    if unit and not _UNIT.match(unit):
+        sys.exit(f"not a service unit name: {unit}")
+    if a.spark_dir and not re.match(r"^[A-Za-z0-9~/._-]{1,200}$", a.spark_dir):
+        sys.exit(f"not a directory path: {a.spark_dir}")
+    name = a.name or ", ".join(lv["models"])
+    new = {k: v for k, v in old.items() if k not in ("unit", "name", "models", "spark_dir", "adopted_ts")}
+    new.update(name=name, models=lv["models"],
+               adopted_ts=datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"))
+    if unit:
+        new["unit"] = unit
+        if unit == old.get("unit") and old.get("spark_dir") and not a.spark_dir:
+            new["spark_dir"] = old["spark_dir"]
+    if a.spark_dir:
+        new["spark_dir"] = a.spark_dir
+    print(f"{a.slot}: serving {', '.join(lv['models'])}")
+    print(f"  recorded now: {rec_label(cur)}" + (f" ({', '.join(cur['models'])})" if (cur or {}).get("models") else ""))
+    print(f"  to record   : {name}" + (f", unit {unit}" if unit else ", no unit (watch-only)"))
+    if unit and slot_deploys(s):
+        h = host_by_name(c, s["head"])
+        try:
+            r = ssh(c, h, f"systemctl show -p LoadState --value {shlex.quote(unit)}", timeout=20)
+            if (r.stdout or "").strip() != "loaded":
+                sys.exit(f"{unit} is not a unit on {s['head']}: Noctyx could not stop or start this deployment "
+                         "through it")
+        except subprocess.TimeoutExpired:
+            sys.exit(f"{s['head']} did not answer over ssh: the unit could not be checked")
+    if not a.yes:
+        print("\nnothing changed: add --yes to record it")
+        sys.exit(2)
+    r = dict(c.get("recipes") or {})
+    slots = dict(r.get("slots") or {})
+    slots[a.slot] = {**s, "adopt": new}
+    if unit and slot_deploys(s) and unit not in (s.get("conflicts") or []):
+        slots[a.slot]["conflicts"] = list(s.get("conflicts") or []) + [unit]   # a later deploy disables it
+    r["slots"] = slots
+    _write_block("recipes", r)
+    if cur and not cur.get("adopted"):         # Noctyx's own deployment was replaced by hand: keep it as previous
+        st = _recipe_state()
+        sl = st["slots"].setdefault(a.slot, {})
+        sl["previous"] = sl.pop("current")
+        _save_recipe_state(st)
+    _record(a.slot, event={"event": "adopt", "to": name, "from": rec_label(cur), "rc": 0})
+    audit("recipe-adopt", slot=a.slot, name=name, unit=unit, models=lv["models"], replaced=rec_label(cur))
+    print(f"✓ {a.slot}: {name} is the recorded deployment")
 
 
 def validate_catalog_entry(name, e, c):
@@ -4133,6 +4218,11 @@ def main():
         sp.add_argument("--yes", action="store_true", help="really do it (without: print the plan)")
         sp.add_argument("--wait-lock", type=int, default=0, metavar="MIN", help="wait this long for the GPU lock (default: fail at once)")
     rst = sub.add_parser("recipe-status", help="slots, what they serve, and the catalog"); rst.add_argument("--json", action="store_true")
+    rad = sub.add_parser("recipe-adopt", help="record what a slot serves now (a model started or swapped by hand) as its deployment")
+    rad.add_argument("--slot", required=True); rad.add_argument("--unit", help="the systemd unit on the slot's head that serves it")
+    rad.add_argument("--name", help="what to call it (default: the model ids)")
+    rad.add_argument("--spark-dir", help="a spark recipe's checkout, so a later switch runs `spark down` there")
+    rad.add_argument("--yes", action="store_true", help="really record it (without: print what would change)")
     rcat = sub.add_parser("recipe-catalog", help="add/replace (--json) or --remove a catalog recipe")
     rcat.add_argument("--name", required=True); g2 = rcat.add_mutually_exclusive_group(required=True)
     g2.add_argument("--json"); g2.add_argument("--remove", action="store_true")
@@ -4231,7 +4321,7 @@ def main():
                "policy-show": cmd_policy_show, "dumps": cmd_dumps, "hf-harvest": cmd_hf_harvest,
                "recipe-deploy": cmd_recipe_deploy, "recipe-stop": cmd_recipe_stop, "recipe-start": cmd_recipe_start,
                "recipe-rollback": cmd_recipe_rollback, "recipe-status": cmd_recipe_status,
-               "recipe-catalog": cmd_recipe_catalog, "recipe-discover": cmd_recipe_discover, "nightly": cmd_nightly, "install-head": cmd_install_head, "console-set": cmd_console_set, "user": cmd_user, "setup": cmd_setup, "assistant-set": cmd_assistant_set, "versions": cmd_versions,
+               "recipe-catalog": cmd_recipe_catalog, "recipe-adopt": cmd_recipe_adopt, "recipe-discover": cmd_recipe_discover, "nightly": cmd_nightly, "install-head": cmd_install_head, "console-set": cmd_console_set, "user": cmd_user, "setup": cmd_setup, "assistant-set": cmd_assistant_set, "versions": cmd_versions,
                "upgrade": cmd_upgrade, "versions-skip": cmd_versions_skip, "heal": cmd_heal, "heal-set": cmd_heal_set,
                "changes": cmd_changes, "ssh-log": lambda a: __import__("noctyx.sshlog").sshlog.cmd(a), "revert": cmd_revert, "checkpoint": cmd_checkpoint, "checkpoints": cmd_checkpoints,
                "checkpoint-set": cmd_checkpoint_set, "config-history": cmd_config_history, "signals-set": cmd_signals_set,
@@ -4252,23 +4342,80 @@ def main():
             print(f"NOCTYX_EXIT {rc}", flush=True)
 
 
+def audit_line(r):
+    """One audit record as a line for people: what happened, in the record's own words."""
+    ev = r.get("event", "")
+    if ev == "alert":
+        what = f"{r.get('status', '')} {r.get('name', '')}: {r.get('summary', '')}"
+    elif ev == "heal":
+        what = f"{r.get('what', '')}: {r.get('how', '')} ({'ok' if r.get('ok') else 'failed'})"
+    elif ev == "hygiene":
+        n = r.get("items")
+        what = f"{len(n) if isinstance(n, list) else n} item(s), {r.get('fixed', 0)} fixed"
+    elif ev == "ui-trigger":
+        what = str(r.get("action", ""))
+    elif ev == "job-detached":
+        what = " ".join(map(str, r.get("argv") or []))
+    else:
+        skip = ("ts", "event", "host")
+        what = " ".join(f"{k}={v if isinstance(v, (str, int, float, bool)) else json.dumps(v)}"
+                        for k, v in r.items() if k not in skip and not k.startswith("_") and v not in ("", None))
+    what = " ".join(what.split())
+    return f"{r.get('ts', '')} {r.get('host', ''):<10} {ev:<14} {what[:150]}".rstrip()
+
+
+def network_lines(n, probes, now=None):
+    """What `status` says about the client-to-server path: the newest reading per host (every backup takes
+    one), and the site's hand-written `degraded` note with its date, marked when the readings no longer
+    support it."""
+    now = now or time.time()
+    out = []
+    exp = n.get("expected_client_to_server_mbit")
+    mb, at = probes.get("mbit") or {}, probes.get("at") or {}
+    fresh = {h: v for h, v in mb.items() if now - at.get(h, 0) < 7 * 86400}
+    if fresh:
+        oldest = min(at[h] for h in fresh)
+        out.append("  network: " + ", ".join(f"{h} {v:.0f}" for h, v in sorted(fresh.items())) + " Mbit/s"
+                   + (f" (expected {exp})" if exp else "") + f", measured within {fmt_duration(now - oldest)}")
+    if n.get("degraded"):
+        when = n.get("measured_ts")
+        out.append(f"  NETWORK DEGRADED ({'noted ' + str(when) if when else 'undated note'}): "
+                   f"{n.get('degraded_reason', '')}")
+        if exp:
+            out.append(f"            expected {exp} Mbit/s, noted {n.get('measured_client_to_server_mbit')} Mbit/s")
+        if fresh and exp and min(fresh.values()) >= 0.8 * exp:
+            out.append("            every reading is now within 20% of the expected speed: the note is out of "
+                       'date (remove "degraded" from the site config\'s network block)')
+    elif fresh and exp and min(fresh.values()) < 0.5 * exp:
+        slow = ", ".join(sorted(h for h, v in fresh.items() if v < 0.5 * exp))
+        out.append(f"            below half the expected speed: {slow}")
+    return out
+
+
 def cmd_status(a):
     c = cfg()
     n = c["network"]
     print(f"Noctyx @ {c['server']['hostname']} ({c['server']['address']})")
     print(f"  repos : {', '.join(r['id'] for r in c['repositories'])}")
     print(f"  hosts : {len(hosts(c))} enabled")
-    if n.get("degraded"):
-        print(f"  NETWORK DEGRADED: {n['degraded_reason']}")
-        print(f"            expected {n['expected_client_to_server_mbit']} Mbit/s, "
-              f"measured {n['measured_client_to_server_mbit']} Mbit/s")
+    try:
+        probes = json.loads(PROBE_FILE.read_text())
+    except Exception:
+        probes = {}
+    for line in network_lines(n, probes):
+        print(line)
     recent = []
     if AUDIT.exists():
-        recent = [json.loads(l) for l in AUDIT.read_text().splitlines()[-8:]]
-    print("  last jobs:")
-    for r in recent or [{"event": "none"}]:
-        print(f"    {r.get('ts','')} {r.get('host',''):<10} {r.get('event','')} "
-              f"rc={r.get('rc','')} snap={r.get('snapshot','')}")
+        for l in AUDIT.read_text().splitlines()[-8:]:
+            try:
+                recent.append(json.loads(l))
+            except ValueError:
+                pass
+    print("  last actions:")
+    for r in recent:
+        print("    " + audit_line(r))
+    if not recent:
+        print("    none")
 
 
 if __name__ == "__main__":

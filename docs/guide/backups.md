@@ -336,8 +336,9 @@ noctyx follow --unit noctyx-backup-gpu-01-20261019T020000Z-12345 \
 | scheduler state (last attempt per host and profile) | `/etc/noctyx/state/schedule-state.json` |
 | spindle lock holders | `/var/lock/noctyx/<spindle>.lock` (JSON: `what`, `pid`, `since`) |
 
-`noctyx status` prints the repositories, the host count, any `network.degraded` note and the last eight
-audit lines. Audit events you will see include `backup`, `backup-refused`, `backup-refused-unmeasurable`,
+`noctyx status` prints the repositories, the host count, each host's newest path reading (every backup takes
+one), any `network.degraded` note with its date, and the last eight audit records, each as one line saying what
+happened. Audit events you will see include `backup`, `backup-refused`, `backup-refused-unmeasurable`,
 `backup-skipped-busy`, `backup-skipped-running`, `backup-unlock-retry`, `tick-start`, `retention-plan`,
 `retention`, `verify`, `policy-applied`, `dumps-run` and `job-detached`.
 

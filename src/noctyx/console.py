@@ -5747,7 +5747,8 @@ function rRecipes(d){
   <div class=rh><span class="dot ${L.ok?'ok':'bad'}"></span><b>${esc(n)}</b><span class=mut>${esc(s.head)}${s.worker?' + '+esc(s.worker):''} · :${esc(s.port)}</span><span class=hspacer></span>${s.busy?`<span class="tag warn" title="${esc(s.busy)}">busy</span>`:''}</div>
   <div>deployment <b>${esc(rcLabel(c))}</b>${c&&c.deployed_ts?` <span class=mut>${esc(agoS(c.deployed_ts))}</span>`:''}${c&&c.adopted?' <span class=mut>(adopted: from before Noctyx; '+esc(c.unit)+')</span>':''}${c&&c.state=='stopped'?' <span class=warn>stopped</span>':''}</div>
   <div class=rm>${L.ok?`<span class=ok>serving</span> ${esc((L.models||[]).join(', '))}${L.connections!=null?` <span class=mut>· ${esc(L.connections)} connected</span>`:''}`:`<span class=bad>not serving</span> <span class=mut>${esc(L.error||L.status||'')}</span>`}</div>
-  ${s.drift?`<div class=drift>⚠ ${esc(s.drift)}</div>`:''}
+  ${s.drift?`<div class=drift>⚠ ${esc(s.drift)}${L.ok?` <span class=mut>· swapped by hand? <code>noctyx recipe-adopt --slot ${esc(n)} --unit UNIT</code> records it</span>`:''}</div>`:s.unrecorded?`<div class=mut style="font-size:11px">no record of which models this serves, so a swap goes unnoticed: <code>noctyx recipe-adopt --slot ${esc(n)}</code> records what answers now</div>`:''}
+  ${s.deploy===false?`<div class=mut style="font-size:11px">watch-only: Noctyx reports this slot and never switches it</div>`:''}
   ${prep?`<div class=mut style="font-size:11px">prepared: ${prep}</div>`:''}
   <div class=ract>
    <select id="rs-r-${esc(n)}" onchange="RSEL['${esc(n)}']={...(RSEL['${esc(n)}']||{}),recipe:this.value}">${opts}</select>

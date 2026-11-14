@@ -37,6 +37,7 @@ switch.
 | `backups` | a backup failed twice in a row | nothing: the tick retries it an hour later. Heal says why it failed (ssh lost, a locked repository, unreadable files, the endpoint down) |
 | `slots` | a model server in `restart_slots` stops answering | `noctyx recipe-start`, after 15 minutes ([below](#model-servers)) |
 | `upgrades` | `upgrades.auto` is on and a component is older than Noctyx's pin | `noctyx upgrade`, in the window ([below](#automatic-upgrades)) |
+| `serving` | a slot has answered for 15 minutes with models its recorded deployment does not serve | nothing: somebody swapped the model by hand. It says so, and [`noctyx recipe-adopt`](recipes.md#a-model-swapped-by-hand) records the swap |
 
 The drop-in repair covers an exporter upgraded with an older drop-in: it still answers, but every scrape times
 out. The rules repair is also how a Noctyx upgrade's new or changed alert rules reach Prometheus.

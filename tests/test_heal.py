@@ -33,7 +33,7 @@ def findings(monkeypatch):
     """Every check returns nothing, except "units", which returns what the test puts in the list."""
     got = []
     for name in ("check_services", "check_dropins", "check_exporters", "check_textfiles", "check_rules",
-                 "check_disk", "check_nas", "check_backups", "check_slots", "check_upgrades"):
+                 "check_disk", "check_nas", "check_backups", "check_slots", "check_serving", "check_upgrades"):
         monkeypatch.setattr(heal, name, lambda *a: [])
     monkeypatch.setattr(heal, "_targets", lambda: [])
     monkeypatch.setattr(heal, "check_units", lambda *a: list(got))

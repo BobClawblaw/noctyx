@@ -198,8 +198,8 @@ sudo noctyx schedule-set --profile system --host gpu-02 --disable
 | Key | Meaning | Default |
 |---|---|---|
 | `min_throughput_mbit` | a backup refuses to start below this measured rate | `40` |
-| `degraded`, `degraded_reason` | a note `status` prints | none |
-| `expected_client_to_server_mbit`, `measured_client_to_server_mbit` | printed alongside it | none |
+| `expected_client_to_server_mbit` | the speed the path should reach. `status` prints it beside each host's newest reading and names the hosts below half of it | none |
+| `degraded`, `degraded_reason`, `measured_ts`, `measured_client_to_server_mbit` | a hand-written note `status` prints with its date. `status` says the note is out of date once every reading of the last week is within 20% of the expected speed | none |
 
 
 ## backup_policy
@@ -338,7 +338,8 @@ sudo noctyx signals-set --json '{"growth_gb_per_hour": 500}'
 | `settle_s` | pause between stop and start | `5` |
 | `gpu_idle_check` | after stopping, wait until `nvidia-smi` shows no compute process | `false` |
 | `conflicts` | other systemd units stopped before a switch | `[]` |
-| `adopt` | `{"unit": ..., "name": ...}`: the service that served before Noctyx, treated as the current deployment | none |
+| `adopt` | `{"unit": ..., "name": ..., "models": [...]}`: the service that served before Noctyx, treated as the current deployment; `noctyx recipe-adopt` writes it | none |
+| `deploy` | `false` makes the slot watch-only: reported, never switched | `true` |
 | `env` | environment for every deployment | `{}` |
 | `script_env` | `.env` values for `script` recipes | `{}` |
 | `cluster` | `[cluster]` values written into a `spark` recipe's `cluster.toml` (plus `port`) | `{}` |
