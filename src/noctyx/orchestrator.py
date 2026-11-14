@@ -446,7 +446,7 @@ def _live_writer_in_class(c, h):
     return None
 
 
-def _run_backup(c, h, profile, dry, force_low_net, _unlocked=False):
+def _run_backup(c, h, profile, dry, force_low_net):
     net = net_floor(c, h)
     floor = c["network"].get("min_throughput_mbit", 40)
     if net is None and not force_low_net:
@@ -474,8 +474,10 @@ def _run_backup(c, h, profile, dry, force_low_net, _unlocked=False):
         # A backup killed by an earlier disconnect/timeout leaves a restic lock
         # in the repo; the NEXT backup then fails with "repo already locked" —
         # the classic invisible cause of "snapshots randomly don't happen".
-        # Unlock and retry once, but only on a lock-shaped error.
-        if rc != 0 and _looks_like_a_stale_lock(err) and not _unlocked:
+        # Unlock and retry once, but only on a lock-shaped error. The retry runs
+        # here, under the spindle lock this run already holds: taking it again
+        # (a second handle on the lock file) would find it busy.
+        if rc != 0 and _looks_like_a_stale_lock(err):
             live = _live_writer_in_class(c, h)
             if live:
                 print(f"  SKIP {h['name']}: repo lock is HELD BY A LIVE WRITER on {live} "
@@ -486,7 +488,8 @@ def _run_backup(c, h, profile, dry, force_low_net, _unlocked=False):
             print(f"  UNLOCK {h['name']}: repo lock error detected — clearing stale locks and retrying once")
             ssh(c, h, f"{AGENT} unlock")
             audit("backup-unlock-retry", host=h["name"])
-            return _run_backup(c, h, profile, dry, force_low_net, _unlocked=True)
+            rc, out, err = ssh_stream(c, h, f"{AGENT} backup --profile {profile}"
+                                      + (" --dry-run" if dry else ""))
         # agent-level "one job per host" flock busy: a skip, not a failure —
         # the manual run that raced this one is doing the work
         if rc != 0 and "another noctyx job" in (err or ""):
