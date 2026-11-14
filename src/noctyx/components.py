@@ -16,8 +16,11 @@ import re
 import time
 import urllib.request
 
+from noctyx.paths import P
+
 # pinned releases and their SHA-256 sums (from each release's own sums file). A download that does not match
-# is refused. Moving a pin = new version + new sums together, in one commit.
+# is refused. Moving a pin = new version + new sums together, in one commit. A site can move the pin of a
+# SITE_PINNABLE component ahead of this table on its own (`noctyx versions-pin`, below).
 PINS = {
     "restic": {
         "version": "0.19.1", "repo": "restic/restic",
@@ -60,6 +63,68 @@ PINS = {
             "linux_amd64": "b51d8a76aa2a9156a55d501aca6276fae09e262259a5e4e831d2c2222f084e63",
             "linux_arm64": "ad35b605f9954b9f1ffddf5ba054bdc5a98d790b9eae5291e1eeb83f1ecbd0e7"}},
 }
+
+# ── a site's own pins: a release newer than this table's, taken without waiting for a Noctyx release ──
+# Only the components `noctyx upgrade` installs as a checked change (rolled back when the new one does not work).
+# The sums come from the release's own sums file, as this table's do, and are kept with the version.
+SITE_PINNABLE = ("prometheus", "alertmanager", "node_exporter")
+SITE_PINS_FILE = pathlib.Path(P["state"]) / "version-pins.json"
+PLATFORMS = ("darwin_amd64", "darwin_arm64", "linux_amd64", "linux_arm64")
+_BUILTIN = {k: {"version": v["version"], "sums": dict(v["sums"])} for k, v in PINS.items()}
+
+
+def release_sums(name, version, fetch=None):
+    """The SHA-256 sums of a release's assets for every platform Noctyx installs on, from the release's own
+    sums file. Raises ValueError when the release or one of its assets is not there."""
+    p, v = PINS[name], norm(version)
+    url = f"https://github.com/{p['repo']}/releases/download/v{v}/sha256sums.txt"
+    try:
+        text = (fetch or _fetch)(url)
+    except Exception as e:
+        raise ValueError(f"{name} {v}: no sums file at {url} ({e})")
+    listed = {}
+    for line in text.splitlines():
+        m = re.fullmatch(r"([0-9a-f]{64})\s+\*?(\S+)", line.strip())
+        if m:
+            listed[m.group(2)] = m.group(1)
+    sums = {}
+    for pl in PLATFORMS:
+        o, a = pl.split("_")
+        f = p["asset"].format(v=v, os=o, arch=a)
+        if f not in listed:
+            raise ValueError(f"{name} {v}: the release's sums file does not list {f}")
+        sums[pl] = listed[f]
+    return sums
+
+
+def _fetch(url):
+    with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "noctyx"}), timeout=30) as r:
+        return r.read().decode()
+
+
+def apply_site_pins(site=None):
+    """Put the site's pins (SITE_PINS_FILE) over the table: one that is newer than the table's and has every
+    platform's sum takes effect; anything else leaves the table's own pin. Called at import and before each
+    inventory, so the long-running console follows `noctyx versions-pin`. -> the names now pinned by the site."""
+    site = load(SITE_PINS_FILE) if site is None else site
+    took = []
+    for name in SITE_PINNABLE:
+        own, s = _BUILTIN.get(name), site.get(name) or {}
+        if not own or name not in PINS:
+            continue
+        v, sums = norm(s.get("version")), s.get("sums") or {}
+        if (re.fullmatch(r"\d+(\.\d+){1,3}", v) and newer(v, own["version"])
+                and all(re.fullmatch(r"[0-9a-f]{64}", str(sums.get(pl) or "")) for pl in PLATFORMS)):
+            PINS[name].update(version=v, sums={pl: sums[pl] for pl in PLATFORMS})
+            took.append(name)
+        elif PINS[name].get("version") != own["version"] and "sums" in PINS[name]:
+            PINS[name].update(version=own["version"], sums=dict(own["sums"]))
+    return took
+
+
+def builtin_pin(name):
+    return _BUILTIN[name]["version"]
+
 
 # what each machine runs. role: head = the head only; node = every Linux host Noctyx backs up; both.
 # bins: where the component may live and who put it there, first match wins: "noctyx" (installed and pinned by
@@ -186,6 +251,7 @@ def upgrade_cmd(comp, host, is_head, source="noctyx"):
 def inventory(c, probe, cache, want_agent=None, version=None, only=None):
     """Every critical component on every machine. probe(host, snippet) -> stdout of the snippet run on that
     machine as root (locally on the head). -> {"ts", "hosts": {name: [row, …]}}"""
+    apply_site_pins()
     s = c["server"]
     head = next((h for h in c.get("hosts", []) if h.get("local") or h.get("address") == s.get("address")),
                 {"name": s.get("hostname") or "head", "address": s.get("address"), "local": True})
@@ -251,6 +317,10 @@ def fix(row, host, is_head):
         return {"why": "Noctyx itself is upgraded with pip (see the upgrade guide), not from the console"}
     pin = PINS.get(name, {}).get("version")
     if not pin or (inst and not newer(pin, inst)):
+        if pin and name in SITE_PINNABLE and row.get("latest") and newer(row["latest"], pin):
+            return {"why": f"Noctyx pins {name} {pin}. Take {norm(row['latest'])} now by moving this site's pin: "
+                           f"sudo noctyx versions-pin --component {name} --version {norm(row['latest'])} --yes",
+                    "pin": norm(row["latest"])}
         return {"why": f"Noctyx pins {name} {pin}: {row.get('latest')} comes with a Noctyx release that moves the pin"
                        if pin else f"Noctyx does not install {name}"}
     if name == "node_exporter" and linux and src in ("distro", "noctyx", "adopted"):
@@ -296,3 +366,6 @@ def load(path):
         return json.loads(pathlib.Path(path).read_text())
     except (OSError, ValueError):
         return {}
+
+
+apply_site_pins()

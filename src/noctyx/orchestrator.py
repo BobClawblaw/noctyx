@@ -3911,6 +3911,68 @@ def cmd_self_rollback(a):
                                      by=os.environ.get("SUDO_USER")))
 
 
+def cmd_versions_pin(a):
+    """noctyx versions-pin --component C --version V [--yes] | --undo | (nothing: list): move this site's pin of
+    a component ahead of Noctyx's own, so `noctyx upgrade` installs that release (checked, rolled back when it
+    does not work). The release's SHA-256 sums are read from its own sums file and kept with the pin."""
+    from noctyx import components as comp
+    pins = comp.load(comp.SITE_PINS_FILE)
+    if not a.component:
+        for n in comp.SITE_PINNABLE:
+            s = pins.get(n)
+            on = n in comp.apply_site_pins(pins)
+            print(f"{n:<14} Noctyx pins {comp.builtin_pin(n):<9} "
+                  + (f"this site pins {s['version']}" + ("" if on else " (not in effect: Noctyx's own pin caught up)")
+                     if s else "no site pin"))
+        return
+    if a.component not in comp.SITE_PINNABLE:
+        sys.exit(f"{a.component}: a site can pin {', '.join(comp.SITE_PINNABLE)} (what `noctyx upgrade` installs "
+                 "as a checked change)")
+    own = comp.builtin_pin(a.component)
+    if a.undo:
+        had = pins.pop(a.component, None)
+        print(f"{a.component}: " + (f"site pin {had['version']} removed; the pin is Noctyx's {own} again (what is "
+                                    "installed stays: `noctyx revert` undoes an upgrade)" if had else "no site pin"))
+        if not had:
+            return
+    else:
+        v = comp.norm(a.version)
+        if not re.fullmatch(r"\d+(\.\d+){1,3}", v):
+            sys.exit("--version: the release to pin, e.g. 3.16.0")
+        if not comp.newer(v, own):
+            sys.exit(f"{a.component} {v} is not newer than Noctyx's own pin {own}: a site pin only moves ahead")
+        try:
+            sums = comp.release_sums(a.component, v)
+        except ValueError as e:
+            sys.exit(str(e))
+        print(f"{a.component}: Noctyx pins {own}; this site would pin {v}")
+        for pl, s in sums.items():
+            print(f"  {pl:<13} sha256 {s}")
+        if not a.yes:
+            print("\nnothing changed: add --yes to pin it")
+            sys.exit(2)
+        pins[a.component] = {"version": v, "sums": sums, "by": os.environ.get("SUDO_USER"), "ts": time.time()}
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = comp.SITE_PINS_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(pins, indent=1))
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, comp.SITE_PINS_FILE)
+    comp.apply_site_pins(pins)
+    audit("versions-pin", component=a.component, version=None if a.undo else pins[a.component]["version"],
+          undo=bool(a.undo))
+    try:                                   # the rows the console and the alerts read follow the new pin
+        inv = versions(cfg())
+    except Exception as e:
+        print(f"  (the versions check did not run: {e}; `noctyx versions` does it)")
+        inv = {"hosts": {}}
+    if not a.undo:
+        behind = [h for h, rows in inv["hosts"].items()
+                  for r in rows if r["component"] == a.component and r["state"] == "behind"]
+        print(f"✓ {a.component} pinned at {pins[a.component]['version']} for this site"
+              + (f"; behind on {', '.join(behind)}: sudo noctyx upgrade --host HOST --component {a.component}"
+                 if behind else ""))
+
+
 def cmd_versions_skip(a):
     """noctyx versions-skip --host H|all --component C [--release V] [--undo]: stop alerting on a release you
     choose not to take; a later release alerts again."""
@@ -3965,7 +4027,9 @@ def cmd_versions(a):
               if any(r.get("source") == "distro" for _, r in todo) else "\nto upgrade:")
         for host, r in todo:
             print(f"  {host:<12} {r['component']:<14} {r['upgrade']}"
-                  + ("   (after moving the pin in components.py)" if r["state"] == "upgrade" and r["pinned"] else ""))
+                  + ((f"   (after: sudo noctyx versions-pin --component {r['component']} --version {r['latest']} --yes)"
+                      if r["component"] in comp.SITE_PINNABLE else "   (with the Noctyx release that moves the pin)")
+                     if r["state"] == "upgrade" and r["pinned"] else ""))
     audit("versions", behind=sum(r["state"] in ("behind", "missing") for _, r in todo),
           upgradable=sum(r["state"] == "upgrade" for _, r in todo))
 
@@ -4291,6 +4355,9 @@ def main():
     hs = sub.add_parser("heal-set", help="set the self-repair policy (JSON: auto, budget_per_hour, freeze_after, disk_pct, "
                                          "playbooks, restart_units, restart_slots, upgrades)")
     hs.add_argument("--json", required=True)
+    vpn = sub.add_parser("versions-pin", help="move this site's pin of a component to a newer release (no arguments: list the site's pins)")
+    vpn.add_argument("--component"); vpn.add_argument("--version"); vpn.add_argument("--undo", action="store_true")
+    vpn.add_argument("--yes", action="store_true", help="really pin it (without: print the release's sums)")
     vsk = sub.add_parser("versions-skip", help="stop alerting on a newer release you choose not to take (--undo: alert again)")
     vsk.add_argument("--host", required=True, help="a host, or all"); vsk.add_argument("--component", required=True)
     vsk.add_argument("--release"); vsk.add_argument("--undo", action="store_true")
@@ -4322,7 +4389,7 @@ def main():
                "recipe-deploy": cmd_recipe_deploy, "recipe-stop": cmd_recipe_stop, "recipe-start": cmd_recipe_start,
                "recipe-rollback": cmd_recipe_rollback, "recipe-status": cmd_recipe_status,
                "recipe-catalog": cmd_recipe_catalog, "recipe-adopt": cmd_recipe_adopt, "recipe-discover": cmd_recipe_discover, "nightly": cmd_nightly, "install-head": cmd_install_head, "console-set": cmd_console_set, "user": cmd_user, "setup": cmd_setup, "assistant-set": cmd_assistant_set, "versions": cmd_versions,
-               "upgrade": cmd_upgrade, "versions-skip": cmd_versions_skip, "heal": cmd_heal, "heal-set": cmd_heal_set,
+               "upgrade": cmd_upgrade, "versions-skip": cmd_versions_skip, "versions-pin": cmd_versions_pin, "heal": cmd_heal, "heal-set": cmd_heal_set,
                "changes": cmd_changes, "ssh-log": lambda a: __import__("noctyx.sshlog").sshlog.cmd(a), "revert": cmd_revert, "checkpoint": cmd_checkpoint, "checkpoints": cmd_checkpoints,
                "checkpoint-set": cmd_checkpoint_set, "config-history": cmd_config_history, "signals-set": cmd_signals_set,
                "config-restore": cmd_config_restore, "self-checkpoint": cmd_self_checkpoint,

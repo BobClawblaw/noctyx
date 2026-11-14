@@ -222,9 +222,12 @@ sudo noctyx versions-skip --host gpu-01 --component node_exporter --undo        
 
 - **upgrade** runs the row's Noctyx upgrade (the table above) as a job, checked and rolled back as below, then
   runs `noctyx versions --host` for that machine, so the alert clears when the component is current. It needs an
-  admin. Noctyx only ever installs its own pin, so a row it cannot fix says why in place of the button: Noctyx
-  itself (pip), anything Homebrew manages, and a release newer than Noctyx's pin, which arrives with the Noctyx
-  release that moves the pin.
+  admin. Noctyx only ever installs a pinned release, so a row it cannot fix says why in place of the button:
+  Noctyx itself (pip), anything Homebrew manages, and a release of restic or rest-server newer than Noctyx's
+  pin, which arrives with the Noctyx release that moves the pin.
+- **take &lt;release&gt;** appears where Prometheus, Alertmanager or node_exporter has a release newer than
+  Noctyx's pin. It moves this site's pin to that release ([below](#a-sites-own-pin)); the row then reads
+  `behind` and **upgrade** installs it. It needs an admin.
 - **skip** marks that release as skipped (`<state>/version-skips.json`) for that host, or for every host with
   `--host all`. The row reads `skipped`, its alert resolves, and a later release alerts again. It needs an
   operator, like a silence. Unlike a silence it has no end time, and it is tied to the release, not the alert.
@@ -243,6 +246,24 @@ what happens after a failure.
 
 **Undoing one later.** Every upgrade waits for a checkpoint of its machine and keeps what it replaced; `noctyx
 changes` lists them and `noctyx revert <change>` undoes the newest one in effect ([checkpoints](checkpoints.md#undoing-a-change)).
+
+### A site's own pin
+
+A site can take a newer Prometheus, Alertmanager or node_exporter without waiting for a Noctyx release:
+
+```bash
+sudo noctyx versions-pin --component prometheus --version 3.16.0        # prints the release's sums, changes nothing
+sudo noctyx versions-pin --component prometheus --version 3.16.0 --yes  # pins it, then checks every machine again
+sudo noctyx upgrade --host head --component prometheus                  # installs it, checked and rolled back
+sudo noctyx versions-pin                                                # the site's pins
+sudo noctyx versions-pin --component prometheus --undo                  # Noctyx's own pin again
+```
+
+Noctyx reads the SHA-256 sums of the release's four platform archives from the release's own `sha256sums.txt`
+and keeps them with the version in `<state>/version-pins.json`; an upgrade refuses a download that does not match
+them. A site pin only moves ahead of Noctyx's own, and it stops applying once a Noctyx release pins the same or a
+newer version. `--undo` changes the pin, not what is installed: `noctyx revert` undoes an upgrade. restic and
+rest-server keep Noctyx's pin, because they are not installed as a checked change.
 
 **Moving a pin.** The pinned versions and their SHA-256 sums live in
 [`src/noctyx/components.py`](../../src/noctyx/components.py). Change a version and its sums (from the release's own

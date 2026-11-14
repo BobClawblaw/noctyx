@@ -169,6 +169,9 @@ ACTIONS = {
     "setCheckpoints": lambda p: [ORCH, "checkpoint-set", "--json", json.dumps(p["checkpoints"])],
     "configRestore": lambda p: [ORCH, "config-restore", p["name"], "--yes"],
     "setHeal": lambda p: [ORCH, "heal-set", "--json", json.dumps(p["heal"])],
+    # take a release newer than Noctyx's pin: the site's own pin moves (its sums come from the release's sums
+    # file), then the row reads "behind" and its upgrade button installs it
+    "pinRelease": lambda p: [ORCH, "versions-pin", "--component", p["component"], "--version", p["release"], "--yes"],
     "skipRelease": lambda p: [ORCH, "versions-skip", "--host", p["host"], "--component", p["component"]]
                              + (["--undo"] if p.get("undo") else ["--release", p["release"]]),
     "dumpsNow":   lambda p: [ORCH, "dumps"] + (["--host", p["host"]] if p.get("host") else []),
@@ -187,7 +190,7 @@ VALID_PROFILES = set(CFG.get("profiles", {}).keys())
 # host-REQUIRED actions: their builders index p["host"] directly; missing would KeyError
 HOST_REQUIRED = {"backupHost", "verifyHost", "reboot", "rebootFinish"}
 RECIPE_ACTIONS = {"recipeDeploy", "recipeStop", "recipeStart", "recipeRollback", "recipeCatalog"}
-PARAM_ACTIONS = HOST_REQUIRED | RECIPE_ACTIONS | {"upgradeComponent", "upgradeEverywhere", "skipRelease", "setAssistant", "setHeal", "revertChange", "takeCheckpoint", "setCheckpoints", "configRestore", "setConsoleDefaults", "setSchedule", "restore", "hygieneFix", "setPolicy", "dumpsNow"}
+PARAM_ACTIONS = HOST_REQUIRED | RECIPE_ACTIONS | {"upgradeComponent", "upgradeEverywhere", "skipRelease", "pinRelease", "setAssistant", "setHeal", "revertChange", "takeCheckpoint", "setCheckpoints", "configRestore", "setConsoleDefaults", "setSchedule", "restore", "hygieneFix", "setPolicy", "dumpsNow"}
 # Only these wait for the one-long-job slot; everything else (status, schedule
 # edits, probes) runs at once instead of queueing silently behind a 3-hour seed.
 LONG_ACTIONS = {"backup", "verify", "copy", "prune", "backupHost", "verifyHost", "restore", "hygieneFix", "upgradeComponent",
@@ -320,7 +323,7 @@ def console_mode():
 
 # what each action needs: everything else that changes something needs "operate"
 ADMIN_ACTIONS = {"setPolicy", "setSchedule", "setAssistant", "setHeal", "revertChange", "setCheckpoints", "configRestore",
-                 "setConsoleDefaults", "recipeCatalog", "upgradeComponent",
+                 "setConsoleDefaults", "recipeCatalog", "upgradeComponent", "pinRelease",
                  "upgradeEverywhere",
                  "reboot", "rebootFinish", "nasRest", "policyApply"}
 NEED_RANK = {"view": 0, "operate": 1, "admin": 2}
@@ -410,6 +413,9 @@ def valid_params(name: str, p: dict) -> bool:
     if name == "upgradeEverywhere":
         return sum(1 for rows in (_versions().get("hosts") or {}).values() for r in rows
                    if r["component"] == p.get("component") and (r.get("fix") or {}).get("change")) > 0
+    if name == "pinRelease":
+        return any(r["component"] == p.get("component") and (r.get("fix") or {}).get("pin") == p.get("release")
+                   for rows in (_versions().get("hosts") or {}).values() for r in rows)
     if name in ("upgradeComponent", "skipRelease"):
         row = next((r for r in (_versions().get("hosts") or {}).get(p.get("host"), [])
                     if r["component"] == p.get("component")), None)
@@ -5976,6 +5982,7 @@ async function unsilenceAlert(id,btn){
 function compBtns(host,f){if(!f)return '';const x=f.fix||{},h=esc(JSON.stringify(host)),c=esc(JSON.stringify(f.component));let b='';
  if(x.argv)b+=`<button class=silbtn onclick="event.stopPropagation();compUpgrade(${h},${c},${esc(JSON.stringify(x.what||''))},this)" title="${esc(x.what||'')}">upgrade</button>`;
  if(x.change&&f.hosts>1)b+=`<button class=silbtn onclick="event.stopPropagation();compEverywhere(${c},${f.hosts},this)" title="every machine that needs it: one first, watched 5 min, then the rest one at a time; stops at the first failure">upgrade all ${f.hosts}</button>`;
+ else if(x.pin)b+=`<button class=silbtn onclick="event.stopPropagation();compPin(${c},${esc(JSON.stringify(x.pin))},this)" title="${esc(x.why||'')}">take ${esc(x.pin)}</button>`;
  else if(x.why)b+=`<span class=mut style="font:10px var(--mono)" title="${esc(x.why)}">no upgrade here ⓘ</span>`;
  if(f.state=='upgrade'&&f.latest)b+=`<button class=silbtn onclick="event.stopPropagation();compSkip(${h},${c},${esc(JSON.stringify(f.latest))},false,this)" title="stay on ${esc(f.installed||'this version')}: no alert for ${esc(f.latest)}; a later release alerts again">skip ${esc(f.latest)}</button>`;
  if(f.state=='skipped')b+=`<button class=silbtn onclick="event.stopPropagation();compSkip(${h},${c},'',true,this)" title="alert on this release again">unskip</button>`;
@@ -5990,6 +5997,10 @@ async function compEverywhere(component,n,btn){
  const r=await act('upgradeEverywhere',{component});if(r&&r.error&&btn){btn.disabled=false;btn.textContent='upgrade all';alert(r.error)}}
 async function healNow(btn){if(btn){btn.disabled=true;btn.textContent='repairing…'}
  const r=await act('healNow');if(r&&r.error&&btn){btn.disabled=false;btn.textContent='repair now';alert(r.error)}}
+async function compPin(component,release,btn){
+ if(!confirm(`Move this site's pin of ${component} to ${release}?\n\nNoctyx reads the release's SHA-256 sums from its own sums file and keeps them with the pin. Nothing is installed yet: the row then reads "behind" and its upgrade button installs ${release}, checked and rolled back if it does not work.`))return;
+ if(btn){btn.disabled=true;btn.textContent='pinning…'}
+ const r=await act('pinRelease',{component,release});if(r&&r.error&&btn){btn.disabled=false;btn.textContent='take '+release;alert(r.error)}}
 async function compSkip(host,component,release,undo,btn){
  if(!undo&&!confirm(`Skip ${component} ${release} on ${host}?\n\nThe alert resolves and stays quiet until a newer release than ${release} appears.`))return;
  if(btn){btn.disabled=true;btn.textContent=undo?'…':'skipping…'}
