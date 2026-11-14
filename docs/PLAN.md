@@ -163,8 +163,11 @@ macOS head** (2026-10-20): `noctyx init` (the assistant first, then a site confi
 `setup metrics` (a pinned Prometheus) and `noctyx versions` (every critical component per machine, with
 alerts when one is behind or can be upgraded). The head runs on Linux (systemd) or macOS (launchd, made from
 the same unit templates); only Linux hosts are backed up, Macs are monitored and report Time Machine. CI tests
-both platforms. Left: splitting the two large modules, the web UI out of Python, `noctyx migrate` (move nodes
-to Noctyx's own layout), a restore on real hardware, Alertmanager on a macOS head.
+both platforms. **Module split started** (2026-11-14): the console's page is a file (`assets/console.html`), no
+longer a string in `console.py`; recipe discovery (`discover.py`) and the schedule's rules (`schedule.py`) are out
+of the orchestrator. Left: the rest of the orchestrator split (recipe deployment, the HF harvest, reboot), the
+page's CSS and JS as files of their own, `noctyx migrate` (move nodes to Noctyx's own layout), a restore on real
+hardware, Alertmanager on a macOS head.
  Port module by module from the private implementation, each
 through the privacy check, none of its history. Order: config + inventory → jobs/locks/audit →
 protect (restic, schedule, dumps) → cache → deploy → watch → console API → web UI split out of

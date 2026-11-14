@@ -54,6 +54,7 @@ the mode and group a rewrite finds.
 | `hf_mirror` | Hugging Face mirror | see [hf_mirror](#hf_mirror) |
 | `assistant` | the LLM the console asks | off |
 | `heal` | what self-repair may do on its own | see [heal](#heal) |
+| `hygiene` | which housekeeping items the daily run fixes on its own | see [hygiene](#hygiene) |
 | `checkpoints` | checkpoints before changes and apt | see [checkpoints](#checkpoints) |
 | `signals` | the thresholds of the early warnings | see [signals](#signals) |
 | `recipes` | GPU slots and the recipe catalog | none |
