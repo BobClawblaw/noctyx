@@ -34,7 +34,7 @@ and **sign out** when you are signed in.
 | `admin` | also change configuration and reboot hosts: the actions in `ADMIN_ACTIONS` below, plus setting or clearing the assistant's API key |
 
 Admin-only actions (`ADMIN_ACTIONS` in `console.py`): `setPolicy` (backup policy, retention, mirror settings),
-`setSchedule`, `setAssistant`, `setConsoleDefaults` (save as site default), `recipeCatalog`, `reboot`,
+`setSchedule`, `setAssistant`, `setConsoleDefaults` (save as site default), `recipeCatalog`, `pinRelease`, `reboot`,
 `rebootFinish`, `nasRest`, `policyApply`. Every other action needs `operator`.
 
 A denied request returns 401 (*sign in first*) or 403 (*viewer may not do this (needs operator)*).

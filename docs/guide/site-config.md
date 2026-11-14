@@ -25,6 +25,8 @@ rewrite *one* top-level block in place and leave the rest of the file byte for b
 | `signals-set` | `signals` |
 | `console-set` | `console` |
 | `recipe-catalog` | `recipes.catalog` |
+| `recipe-adopt` | `recipes.slots.<slot>.adopt` (and its `conflicts`) |
+| `hygiene-set` | `hygiene` |
 
 A block that is missing is inserted just before `"schedule": {`, or last in the file when there is none. Every
 rewrite is re-parsed before an atomic replace, keeps the file's owner and mode, and is written to the audit log.

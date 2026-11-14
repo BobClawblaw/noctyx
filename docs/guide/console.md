@@ -140,7 +140,9 @@ running, and the deployment history. From the card you can:
 
 Below the cards, **Discover on GitHub** searches for public recipes that fit this cluster's hardware. Sort them by
 `fastest`, `newest` or `stars`, and **add** one to the **Catalog**. The CLI equivalents are `recipe-deploy`,
-`recipe-stop`, `recipe-start`, `recipe-rollback`, `recipe-status`, `recipe-catalog` and `recipe-discover`.
+`recipe-stop`, `recipe-start`, `recipe-rollback`, `recipe-status`, `recipe-catalog` and `recipe-discover`. A card
+whose slot serves a model other than the recorded one names the command that records the swap
+(`recipe-adopt`, CLI only); a watch-only slot's card says so.
 
 ## Self-repair (`/heal`)
 
