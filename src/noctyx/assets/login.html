@@ -1,0 +1,30 @@
+<!doctype html><html><head><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">
+<title>Noctyx · sign in</title><link rel=icon href="/assets/favicon.svg">__THEME_JS__<style>
+:root{--bg:#070913;--bg-1:#0d1020;--bg-0:#05060d;--line:#242a47;--fg:#e2e8f6;--fg-dim:#97a3c2;--fg-faint:#67718f;--accent:#3fe6ff;--accent-2:#c3a6ff;--accent-ink:#0a0d14;--bad:#ef5a5a;--glow:#0b1124;
+ --sans:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;--mono:ui-monospace,Menlo,Consolas,monospace}
+html,body{height:100%;margin:0}
+body{display:grid;place-items:center;background:radial-gradient(900px 500px at 70% -10%,var(--glow),transparent 60%),var(--bg);color:var(--fg);font:14px var(--sans)}
+.box{width:min(360px,92vw);background:var(--bg-1);border:1px solid var(--line);border-radius:14px;padding:26px 26px 22px;box-shadow:0 20px 60px rgba(0,0,0,.35)}
+.brand{display:flex;align-items:center;gap:10px;margin-bottom:18px} .brand img{width:34px;height:34px}
+.brand b{font:800 20px var(--sans);letter-spacing:.14em;background:linear-gradient(90deg,var(--accent),var(--accent-2));-webkit-background-clip:text;background-clip:text;color:transparent}
+label{display:block;font:600 12px var(--sans);color:var(--fg-dim);margin:12px 0 5px}
+input[type=text],input[type=password]{width:100%;box-sizing:border-box;background:var(--bg-0);border:1px solid var(--line);color:var(--fg);border-radius:8px;padding:9px 10px;font:14px var(--mono)}
+input:focus{outline:none;border-color:var(--accent)}
+.rem{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:12.5px;color:var(--fg-dim)}
+button{margin-top:18px;width:100%;background:var(--accent);color:var(--accent-ink);border:0;border-radius:8px;padding:10px;font:700 13px var(--sans);letter-spacing:.06em;text-transform:uppercase;cursor:pointer}
+#msg{min-height:18px;margin-top:10px;font-size:12.5px;color:var(--bad)} .foot{margin-top:6px;font-size:11.5px;color:var(--fg-faint)}
+</style></head><body>
+<form class=box id=lf><div class=brand><img src="/assets/favicon.svg" alt=""><b>NOCTYX</b></div>
+ <label for=u>Name</label><input id=u type=text autocomplete=username autofocus required>
+ <label for=pw>Password</label><input id=pw type=password autocomplete=current-password required>
+ <label class=rem><input id=rem type=checkbox> keep me signed in for 30 days</label>
+ <button type=submit>Sign in</button><div id=msg></div><div class=foot id=foot></div></form>
+<script>
+const next=new URLSearchParams(location.search).get('next')||'/';
+document.getElementById('lf').addEventListener('submit',go);
+fetch('/api/v1/me').then(r=>r.json()).then(m=>{if(m.mode=='open')document.getElementById('foot').innerHTML='This console is in open access: signing in is optional (per-user settings, your name in the audit). <a href="/" style="color:var(--accent)">Continue without</a>'});
+async function go(e){e.preventDefault();const m=document.getElementById('msg');m.textContent='';
+ const r=await fetch('/api/v1/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:document.getElementById('u').value,password:document.getElementById('pw').value,remember:document.getElementById('rem').checked})});
+ const j=await r.json().catch(()=>({}));
+ if(r.ok)location.href=next.startsWith('/')&&!next.startsWith('//')?next:'/';else{m.textContent=j.error||('sign-in failed ('+r.status+')');document.getElementById('pw').select()}}
+</script></body></html>
