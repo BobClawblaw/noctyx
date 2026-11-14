@@ -56,6 +56,10 @@ Regenerate them with `python3 tools/screenshots.py`.
 - GPU *slots* (one GPU, or a head + worker pair) and a *catalog* of recipes; `noctyx recipe-deploy` builds
   the next recipe while the current one keeps serving, switches under the slot's GPU lock, health-checks
   it and rolls back by itself when it fails.
+- A model somebody swapped by hand is noticed: a slot that serves other models than its recorded deployment
+  is reported by self-repair after 15 minutes and raises an alert 15 minutes later, and `noctyx recipe-adopt`
+  records what serves now. A watch-only slot
+  (`"deploy": false`) is reported and never switched.
 - Recipe discovery: public recipes on GitHub that fit your hardware, ranked by **measured** speed (your own
   harness runs, tensorfold.dev) ahead of a README's claims.
 
@@ -76,12 +80,17 @@ Regenerate them with `python3 tools/screenshots.py`.
   network fabric, disks, uptime, containers.
 - Alerts with LLM triage, a morning brief, Prometheus metrics, a kiosk view.
 - Hygiene: old kernels, unused packages, journal and Docker leftovers per node, with the space each fix frees.
+  The daily run fixes what cannot break anything, plus the space items a site hands to it (`noctyx hygiene-set`);
+  exited containers and failed units always wait for a person.
 - **Ask Noctyx**: a drawer in the console where the site's LLM answers questions about the cluster by looking
   them up first (live metrics, Prometheus history, alerts, backups, logs, versions, what Noctyx repaired),
   within the asker's role, with every secret redacted before the model sees it. It only looks; it says which
   page, button or command would change things. Up and Down recall earlier questions.
 - Every critical component on every machine (restic, rest-server, Prometheus, Alertmanager, node_exporter, the
-  agent) checked nightly against Noctyx's pin and the latest release, as alerts with an upgrade button.
+  agent) checked nightly against Noctyx's pin and the latest release, as alerts with an upgrade button. A site
+  can take a newer Prometheus, Alertmanager or node_exporter than Noctyx pins (`noctyx versions-pin`, or the
+  alert's *take* button), verified against the release's own SHA-256 sums.
+- `noctyx status`: each host's newest path speed, the last actions in plain words.
 - Macs are monitored, not backed up: vitals, GPU power, LLM servers and their Time Machine status.
 
 **Heal**
@@ -118,12 +127,12 @@ Regenerate them with `python3 tools/screenshots.py`.
 | [Site config](docs/guide/site-config.md) | every block and key, the `paths` layer |
 | [Backups](docs/guide/backups.md) | schedules, policy, databases, retention, verification |
 | [Restore](docs/guide/restore.md) | a file, a whole node, the head node; the recovery stick |
-| [Recipes](docs/guide/recipes.md) | slots, catalog, deploy and roll back, discovery |
+| [Recipes](docs/guide/recipes.md) | slots, catalog, deploy and roll back, a model swapped by hand, watch-only slots, discovery |
 | [HF mirror](docs/guide/hf-mirror.md) | the model cache and `HF_ENDPOINT` |
 | [Assistant](docs/guide/assistant.md) | the LLM endpoint, triage, the morning brief |
-| [Hygiene](docs/guide/hygiene.md) | housekeeping reports and fixes |
+| [Hygiene](docs/guide/hygiene.md) | housekeeping reports and fixes, what the daily run fixes on its own |
 | [Accounts](docs/guide/accounts.md) | sign-in, roles, sessions |
-| [Upgrade](docs/guide/upgrade.md) | upgrading, rolling back, moving from an older layout |
+| [Upgrade](docs/guide/upgrade.md) | upgrading, component versions and a site's own pins, rolling back, moving from an older layout |
 | [Early warnings](docs/guide/signals.md) | NFS and NAS speed, the GPU pairs' RoCE link, ssh logins, storage filling up: alerts before they break |
 | [Checkpoints](docs/guide/checkpoints.md) | restic checkpoints before upgrades and apt, `noctyx revert`, the site config's history, `noctyx self-rollback` |
 | [Self-repair](docs/guide/self-repair.md) | `noctyx heal`: its playbooks, its safety rules, automatic upgrades, and its log |

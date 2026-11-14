@@ -165,8 +165,8 @@ sudo noctyx recipe-rollback --slot rtx5090 --yes   # switch back to the previous
 - Noctyx keeps only one previous deployment. A rollback makes the two swap places, so a second rollback goes back to
   where you started.
 - `recipe-status` warns about **drift**: the port serves models other than the ones Noctyx last started, or a
-  deployment marked serving does not answer. A swap that lasts 15 minutes also raises the `NoctyxNeedsAttention`
-  alert (self-repair's `serving` check); see [A model swapped by hand](#a-model-swapped-by-hand).
+  deployment marked serving does not answer. Self-repair's `serving` check reports a swap that has lasted 15
+  minutes, and the `NoctyxNeedsAttention` alert fires 15 minutes after that; see [A model swapped by hand](#a-model-swapped-by-hand).
 
 ## Adopted deployments
 

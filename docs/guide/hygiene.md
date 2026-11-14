@@ -29,18 +29,20 @@ sudo noctyx hygiene --host gpu-01 --fix journal,docker-images  # specific item i
   [Backups › Detached jobs](backups.md#detached-jobs-and-follow)).
 - The result is written to `/var/lib/noctyx-console/hygiene.json`, which the console reads, and one
   `hygiene` audit line is written per host.
-- `noctyx-hygiene.timer` runs `hygiene --fix auto` every day at 06:45.
+- `noctyx-hygiene.timer` runs `hygiene --fix auto` every day at 06:45: the `auto` tier, and the items in the
+  site's `hygiene.auto` ([below](#what-the-daily-run-fixes)).
 
 Sample output of `--fix auto`:
 
 ```text
-  gpu-01     4 item(s), 1 fixed
+  gpu-01     5 item(s), 1 fixed
      · [info] old kernels installed — 6.8.0-45-generic: 7 package(s) (running 6.8.0-48-generic; newest kept)  (manual)  frees 0.6 GB
      · [info] journal uses 3.1G — vacuum to 500M keeps recent history  (manual)  frees 2.8 GB
-     · [info] docker leftovers — 3 dangling image(s), 2 exited container(s)  (manual)  frees ~4.2 GB
+     · [info] docker leftovers: 3 dangling image(s) — docker image prune  (manual)  frees ~4.1 GB
+     · [info] docker leftovers: 2 exited container(s) — builder-1 old-test  (manual)  frees ~0.1 GB
      ✓ [info] ghost failed unit foo.service — its unit file no longer exists; only the failed state lingers  (auto)
 reclaimable: about 7.6 GB (the space fixes, if all applied)
-hygiene: 4 item(s) across 1 host(s), 1 fixed
+hygiene: 5 item(s) across 1 host(s), 1 fixed
 ```
 
 `✓` marks an item fixed in this run, and `·` an item still open. `(auto)` and `(manual)` show the item's

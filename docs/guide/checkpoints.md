@@ -99,7 +99,7 @@ button on the ones in effect (admin).
 ## The site config's history
 
 Every rewrite of the site config first keeps a copy of the file as it was, in `<state>/config-history` (the last
-50). This covers every `noctyx *-set` command, `recipe-catalog`, the console's Configure page and `config-restore` itself.
+50). This covers every `noctyx *-set` command, `recipe-catalog`, `recipe-adopt`, the console's Configure page and `config-restore` itself.
 
 ```bash
 sudo noctyx config-history                                       # the copies, newest first

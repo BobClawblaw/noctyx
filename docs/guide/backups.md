@@ -59,7 +59,8 @@ node does the following:
    any *other* host that shares the repository holds its agent lock.
    - If one does, a live writer is there: the head node refuses (`backup-refused-live-lock`) and leaves
      the lock alone.
-   - Otherwise it runs `noctyx-agent unlock` and retries once.
+   - Otherwise it runs `noctyx-agent unlock` and retries once, in the same run and under the spindle lock it
+     already holds.
 
 `--dry-run` passes `--dry-run` to restic. `rc=255` means ssh lost the connection, not that restic failed.
 The agent ignores SIGHUP and SIGPIPE and carries on. Its result lands in the host's own audit, and the next

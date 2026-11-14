@@ -1431,7 +1431,7 @@ function rAbout(d){
   <div class=apills>${pill('version',d.version)}${pill('license','Apache 2.0')}${pill('python',d.python)}${pill('restic',d.restic)}${pill('status','alpha','warn')}</div>
   <div class=acols>
    <div class=acard><h3>What Noctyx does</h3>
-    <div class=afeat><b>Deploy</b><span>Model recipes onto GPU slots: built while the current model serves, switched under the slot's GPU lock, rolled back automatically. Public recipes for your hardware, ranked by measured speed.</span></div>
+    <div class=afeat><b>Deploy</b><span>Model recipes onto GPU slots: built while the current model serves, switched under the slot's GPU lock, rolled back automatically. A model swapped by hand is noticed. Public recipes for your hardware, ranked by measured speed.</span></div>
     <div class=afeat><b>Cache</b><span>One copy of every Hugging Face model on the cluster, served back as <code>HF_ENDPOINT</code>; keeps working when the Hub does not.</span></div>
     <div class=afeat><b>Protect</b><span>Nightly snapshots of every node, Docker volumes, consistent database dumps, retention, verification, a dual-arch recovery stick for bare-metal restores.</span></div>
     <div class=afeat><b>Watch</b><span>Live fleet: temperatures, power, tokens/s per model, alerts with LLM triage, a morning brief, hygiene with the space each fix frees. <b style="font:inherit;color:var(--fg)">Ask</b> answers questions from the cluster's own data.</span></div>

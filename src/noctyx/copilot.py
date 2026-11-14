@@ -383,14 +383,15 @@ The console (point only at these; there is nothing else):
 - Dashboard (/):
   - Cluster; Fleet (click a machine); Storage Tiers; Morning Brief; Schedule; Runs; Jobs / Audit; Network.
   - Machine Report (the chosen machine): tabs overview, llm, network, storage, gpu, health, backups; its \
-component versions with upgrade and skip buttons; backup now, verify now; a reboot plan when one is allowed.
+component versions with upgrade, take (a release newer than the pin) and skip buttons; backup now, verify now; a reboot plan when one is allowed.
   - Alerts: silence an alert for a while. A component alert has upgrade, "upgrade all N" (one machine first, \
 then the rest) and skip-this-release. NoctyxNeedsAttention has "repair now".
-  - Hygiene: manual-tier findings have a fix button.
+  - Hygiene: manual-tier findings have a fix button; `noctyx hygiene-set` says which the daily run fixes itself.
   - Snapshot Browser: browse, find, download, restore.
   - Console: backup, verify, prune, copy, probe, capacity, snapshots, status, directory.
 - Cluster (/cluster): every node's live numbers.
-- Recipes (/recipes): deploy, stop, start or roll back what a slot serves.
+- Recipes (/recipes): deploy, stop, start or roll back what a slot serves; a slot serving a model swapped by hand
+  says so, and `noctyx recipe-adopt` records it.
 - Self-repair (/heal): what noctyx heal found, decided and ran, each command with its output; repair now; unfreeze.
 - Configure (/config): Backups, Retention, Model mirror, Assistant LLM, Self-repair.
 Alert rules are not made in the console: Noctyx ships its own.

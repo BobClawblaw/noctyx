@@ -43,7 +43,7 @@ collapse it with ▾. The layout is saved in the browser. **Reset panel layout**
 | Fleet | a card per node: CPU, GPU, temperature and power, network, memory, disk, the model it serves, uptime, its next scheduled backup |
 | Machine Report | the selected node, with tabs **overview, llm, network, storage, gpu, health** (with its ssh logins, RoCE ports and NFS mounts: [early warnings](signals.md)), **backups**, and *backup now* / *verify now* (backed-up hosts only) |
 | Storage Tiers | NAS free and used space, size per repository, growth forecast |
-| Alerts | firing alerts with LLM triage (when an assistant is configured); silence one for a while; on a component alert *upgrade* it (or *upgrade all N*, one machine first) or *skip* that release ([upgrade](upgrade.md#acting-on-a-component-alert)); on `NoctyxNeedsAttention`, *repair now*; under an alert self-repair has a playbook for, what it did about it ([self-repair](self-repair.md)) |
+| Alerts | firing alerts with LLM triage (when an assistant is configured); silence one for a while; on a component alert *upgrade* it (or *upgrade all N*, one machine first), *take* a release newer than Noctyx's pin, or *skip* that release ([upgrade](upgrade.md#acting-on-a-component-alert)); on `NoctyxNeedsAttention`, *repair now*; under an alert self-repair has a playbook for, what it did about it ([self-repair](self-repair.md)) |
 | Morning Brief | the assistant's summary of the fleet |
 | Hygiene | housekeeping findings per host, the space each fix frees, fixes you can run |
 | Snapshot Browser | browse and search (`*.conf`) any snapshot; operators can download files and directories. Restore to staging or the host |
@@ -69,7 +69,8 @@ A bare `/#gpu-01` selects a host.
   [install](install.md)).
 - **Components:** every critical component Noctyx tracks on that machine (Noctyx itself, restic, rest-server,
   Prometheus, node_exporter, the agent) with the installed version, Noctyx's pin, the latest upstream release, its
-  state, and the buttons that act on it: *upgrade* where Noctyx installs it, *skip* a newer release, *unskip*
+  state, and the buttons that act on it: *upgrade* where Noctyx installs it, *take* a release newer than the pin
+  (Prometheus, Alertmanager, node_exporter), *skip* a newer release, *unskip*
   (see [upgrade](upgrade.md#acting-on-a-component-alert)). The table
   is `noctyx versions`' last run (nightly, or by hand); the line under it says when. See
   [upgrade](upgrade.md#component-versions).
@@ -114,7 +115,7 @@ One machine, everything at once, with what can be done about it. **‹ ›**, th
   shows its progress next to them.
 - **The sections**: vitals (the last hour), LLM, GPU, storage (filesystems, NVMe health, disk I/O, and when the
   root disk would be full), network, health with the fabric, NFS mounts and ssh, backups (schedule, recent
-  snapshots, agent jobs), components (**upgrade**, **skip**), hygiene (each fix), alerts (**silence** 1 h or
+  snapshots, agent jobs), components (**upgrade**, **take**, **skip**), hygiene (each fix), alerts (**silence** 1 h or
   24 h), self-repair (**repair now**), the changes Noctyx made (**undo**), and the system (OS, CPU, memory,
   addresses, disks and serials).
 

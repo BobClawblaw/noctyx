@@ -113,6 +113,17 @@ These lines appear in the job log as `[cm-agent] FATAL: …`.
 | stick build: `stick restic differs from the fleet's` | the head node's `restic` version is not `restic_version`; align them |
 | stick build: `the stick's <repo> key + credential do not open the live repository` | the keys or creds on the head node are out of date, or the endpoint is down |
 
+## Recipes
+
+| Message | Meaning | What to do |
+|---|---|---|
+| `! serving <models>, but Noctyx last started <deployment> (<models>)` (`recipe-status`, the slot's card, alert `NoctyxNeedsAttention` after about 30 minutes) | somebody started another model on the slot outside Noctyx | `sudo noctyx recipe-adopt --slot <slot> --unit <unit> --yes` records it, or deploy the recorded one again ([recipes](recipes.md#a-model-swapped-by-hand)) |
+| `· Noctyx has no record of which models this serves, so it cannot tell a swap` | the slot's `adopt` block names a unit only | `sudo noctyx recipe-adopt --slot <slot> --yes` |
+| `<slot> is watch-only (deploy: false in the site config): Noctyx does not switch it` | deploy, stop, start or rollback on a watch-only slot | nothing; remove `"deploy": false` if Noctyx should manage it |
+| `<unit> is not a unit on <head>` (`recipe-adopt`) | the unit named does not exist on the slot's head | name the unit that starts the server (`systemctl list-unit-files` there) |
+| `<component> <version>: the release's sums file does not list <file>` (`versions-pin`) | that release has no archive for one of the four platforms | pin a release that has them all |
+| `<component> <version> is not newer than Noctyx's own pin` (`versions-pin`) | a site pin only moves ahead | nothing: Noctyx already installs that version or a newer one |
+
 ## Jobs
 
 | Message | Meaning | What to do |
