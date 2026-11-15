@@ -56,6 +56,9 @@ Regenerate them with `python3 tools/screenshots.py`.
 - GPU *slots* (one GPU, or a head + worker pair) and a *catalog* of recipes; `noctyx recipe-deploy` builds
   the next recipe while the current one keeps serving, switches under the slot's GPU lock, health-checks
   it and rolls back by itself when it fails.
+- A model that is up but answering differently is noticed: each slot's model is asked a few fixed prompts after
+  every switch and every hour, and its replies are compared with the ones recorded for that deployment
+  (`noctyx slot-check`).
 - A model somebody swapped by hand is noticed: a slot that serves other models than its recorded deployment
   is reported by self-repair after 15 minutes and raises an alert 15 minutes later, and `noctyx recipe-adopt`
   records what serves now. A watch-only slot
@@ -72,6 +75,8 @@ Regenerate them with `python3 tools/screenshots.py`.
   window, refusing to start over a link slower than a set floor.
 - Docker volumes, consistent database dumps (Postgres, MariaDB/MySQL, Redis/Valkey, SQLite) before each
   backup, retention, scheduled verification, capacity forecasts.
+- Restores are rehearsed: every node regularly restores a few files from its newest snapshot and compares them
+  with the live ones (`noctyx rehearse`, monthly by default), with an alert when one fails or is overdue.
 - Restore a path to staging, to the host or in place; restore a dead node bare-metal from a recovery stick
   that boots both x86_64 and aarch64; rebuild the head node itself.
 
@@ -85,7 +90,11 @@ Regenerate them with `python3 tools/screenshots.py`.
 - **Ask Noctyx**: a drawer in the console where the site's LLM answers questions about the cluster by looking
   them up first (live metrics, Prometheus history, alerts, backups, logs, versions, what Noctyx repaired),
   within the asker's role, with every secret redacted before the model sees it. It only looks; it says which
-  page, button or command would change things. Up and Down recall earlier questions.
+  page, button or command would change things, and for a short list of safe actions (a backup, a verify, a
+  hygiene fix, an upgrade) it can put the button in the conversation: the click is yours and goes through the
+  console's usual checks. Up and Down recall earlier questions.
+- The assistant uses any model server on the site: its own endpoint first, then the others, with an alert when
+  none answers.
 - Every critical component on every machine (restic, rest-server, Prometheus, Alertmanager, node_exporter, the
   agent) checked nightly against Noctyx's pin and the latest release, as alerts with an upgrade button. A site
   can take a newer Prometheus, Alertmanager or node_exporter than Noctyx pins (`noctyx versions-pin`, or the
@@ -106,6 +115,8 @@ Regenerate them with `python3 tools/screenshots.py`.
   you turn it on, upgrades components in a nightly window. A per-hour budget, a freeze after repeated failures,
   and shadow mode keep it safe. Every decision and command is in its log (the Self-repair page), the audit trail,
   the morning brief and Ask Noctyx.
+- What it leaves to a person comes with a diagnosis: the site's LLM reads that machine's logs, Noctyx's recent
+  changes and the audit trail, and writes a likely cause and a next step under the problem. It only reads.
 - Checkpoints: before an upgrade or an apt run, a restic snapshot of the machine (a recent nightly one counts).
   `noctyx revert` undoes any change still in effect, from its kept copy or that snapshot; the site config keeps
   its history; `noctyx self-rollback` takes Noctyx itself back to the commit it ran before.
@@ -126,16 +137,16 @@ Regenerate them with `python3 tools/screenshots.py`.
 | [Console](docs/guide/console.md) | every view, settings and themes, keys |
 | [Site config](docs/guide/site-config.md) | every block and key, the `paths` layer |
 | [Backups](docs/guide/backups.md) | schedules, policy, databases, retention, verification |
-| [Restore](docs/guide/restore.md) | a file, a whole node, the head node; the recovery stick |
-| [Recipes](docs/guide/recipes.md) | slots, catalog, deploy and roll back, a model swapped by hand, watch-only slots, discovery |
+| [Restore](docs/guide/restore.md) | a file, a whole node, the head node; restore rehearsals; the recovery stick |
+| [Recipes](docs/guide/recipes.md) | slots, catalog, deploy and roll back, the answer check, a model swapped by hand, watch-only slots, discovery |
 | [HF mirror](docs/guide/hf-mirror.md) | the model cache and `HF_ENDPOINT` |
-| [Assistant](docs/guide/assistant.md) | the LLM endpoint, triage, the morning brief |
+| [Assistant](docs/guide/assistant.md) | the LLM endpoint and its fallbacks, triage, diagnosis, the morning brief, Ask and the buttons it offers |
 | [Hygiene](docs/guide/hygiene.md) | housekeeping reports and fixes, what the daily run fixes on its own |
 | [Accounts](docs/guide/accounts.md) | sign-in, roles, sessions |
 | [Upgrade](docs/guide/upgrade.md) | upgrading, component versions and a site's own pins, rolling back, moving from an older layout |
 | [Early warnings](docs/guide/signals.md) | NFS and NAS speed, the GPU pairs' RoCE link, ssh logins, storage filling up: alerts before they break |
 | [Checkpoints](docs/guide/checkpoints.md) | restic checkpoints before upgrades and apt, `noctyx revert`, the site config's history, `noctyx self-rollback` |
-| [Self-repair](docs/guide/self-repair.md) | `noctyx heal`: its playbooks, its safety rules, automatic upgrades, and its log |
+| [Self-repair](docs/guide/self-repair.md) | `noctyx heal`: its playbooks, its safety rules, the diagnosis of what it leaves to a person, automatic upgrades, and its log |
 | [Troubleshooting](docs/guide/troubleshooting.md) | what an error means and what to do |
 
 Try it without a cluster: `PYTHONPATH=src python3 -m noctyx.cli demo` serves the console on

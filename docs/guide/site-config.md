@@ -195,6 +195,7 @@ sudo noctyx schedule-set --profile system --host gpu-02 --disable
 | Key | Meaning | Default |
 |---|---|---|
 | `read_data_subset` | the share of pack data `noctyx verify` has each host's agent read back (`--subset` overrides) | `"2%"` |
+| `restore_rehearsal` | how often each host proves a restore ([`noctyx rehearse`](restore.md#rehearse-a-restore)): `daily`, `weekly`, `monthly`, or `off` | `"monthly"` |
 
 ## network
 
@@ -331,6 +332,7 @@ sudo noctyx signals-set --json '{"growth_gb_per_hour": 500}'
 |---|---|---|
 | `root` | checkout directory on a slot's head (`~` = the slot user's home) | `paths.recipe_root` |
 | `hf_mirror` | give deployments `HF_ENDPOINT` pointing at the mirror | `true` |
+| `answer_check_every` | how often the repair loop asks each slot's model the fixed prompts ([recipes](recipes.md#does-it-still-answer-the-same)): a duration, or `"off"` | `"1h"` |
 | `harness_dir` | a recipe-harness checkout whose `stats/` rank discovered recipes by measured speed | `/srv/recipe-harness` |
 | `slots` | `{slot: {...}}`, below | `{}` |
 | `catalog` | `{name: {...}}`, below | `{}` |

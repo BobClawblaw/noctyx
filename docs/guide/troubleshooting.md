@@ -86,6 +86,15 @@ These lines appear in the job log as `[cm-agent] FATAL: …`.
 | `NAS mount not present — check /etc/fstab (_netdev); refusing to copy into an unmounted mountpoint` | `copy` found no NAS mount | mount it |
 | `no retired hot tier in the site config … nothing to copy` | `copy` has nothing to do | nothing |
 
+## Restore rehearsal
+
+| Message | Meaning | What to do |
+|---|---|---|
+| `✗ <host> differs from the live file: <files>` (`rehearse`, alert `RestoreRehearsalFailed`) | a file restored from the newest snapshot is not the live file, and the live file is older than the snapshot | restore it by hand and compare (`noctyx restore --host <host> --path <file>`); run `noctyx verify --host <host>` |
+| `✗ <host> no system snapshot to restore from` | the host has no `system` snapshot | back it up first |
+| `✗ <host> nothing restored (missing: …)` | none of the four files is in the snapshot: `/etc` is excluded from the `system` profile | check the backup policy's exclusions |
+| alert `RestoreRehearsalOverdue` | no rehearsal within the interval plus three days: the nightly run is not reaching that host | `sudo noctyx rehearse --host <host>`; an agent without `rehearse` needs `noctyx install-agent --host <host>` |
+
 ## Retention
 
 | Message | Meaning |
@@ -119,6 +128,8 @@ These lines appear in the job log as `[cm-agent] FATAL: …`.
 |---|---|---|
 | `! serving <models>, but Noctyx last started <deployment> (<models>)` (`recipe-status`, the slot's card, alert `NoctyxNeedsAttention` after about 30 minutes) | somebody started another model on the slot outside Noctyx | `sudo noctyx recipe-adopt --slot <slot> --unit <unit> --yes` records it, or deploy the recorded one again ([recipes](recipes.md#a-model-swapped-by-hand)) |
 | `· Noctyx has no record of which models this serves, so it cannot tell a swap` | the slot's `adopt` block names a unit only | `sudo noctyx recipe-adopt --slot <slot> --yes` |
+| `! answers changed: …` (`recipe-status`), `<slot>: CHANGED — <model> no longer answers as recorded` (`slot-check`), alert `NoctyxNeedsAttention` | the model's replies to the fixed prompts differ from the ones recorded for this deployment: something behind the port changed (an engine build, a cache or precision setting, weights, hardware) | meant: `sudo noctyx slot-check --slot <slot> --accept`. Not meant: put the recorded deployment back, and compare what changed ([recipes](recipes.md#does-it-still-answer-the-same)) |
+| `<slot>: WRONG — <model> answers wrongly` | a reply misses what any working model says | the model is up and its output is broken: restart or roll back the deployment |
 | `<slot> is watch-only (deploy: false in the site config): Noctyx does not switch it` | deploy, stop, start or rollback on a watch-only slot | nothing; remove `"deploy": false` if Noctyx should manage it |
 | `<unit> is not a unit on <head>` (`recipe-adopt`) | the unit named does not exist on the slot's head | name the unit that starts the server (`systemctl list-unit-files` there) |
 | `<component> <version>: the release's sums file does not list <file>` (`versions-pin`) | that release has no archive for one of the four platforms | pin a release that has them all |
@@ -177,6 +188,14 @@ after the reboot. Restart its service; a tensor-parallel pair may need both rank
 | `security add-trusted-cert` failed, or the System keychain holds "Noctyx site CA" entries marked untrusted | over ssh or from a script the keychain takes no trust setting (no one is at the screen to approve it), but it still adds the certificate | Noctyx no longer touches the keychain: it hands every tool the CA file. For browsers and curl on the Mac, run the command `setup tls` prints, in Terminal. Remove the clutter: `security find-certificate -a -c "Noctyx site CA" -Z /Library/Keychains/System.keychain`, then `sudo security delete-certificate -Z <SHA-1> /Library/Keychains/System.keychain` for each |
 | `noctyx backup` (or another detached job) never returns after the job's log says `NOCTYX_EXIT 0` | older versions kept the finished job as a zombie child, which still looked alive | fixed. Stop the follower; the job itself is done. Logs and pid files are in `/var/log/noctyx/jobs/` |
 | `install-agent` or `backup` on a Mac: `monitored only, never backed up` | Macs are monitored only | nothing; see [Backups](backups.md#macs-are-monitored-not-backed-up) |
+
+## Assistant
+
+| Message | Meaning | What to do |
+|---|---|---|
+| alert `AssistantDown` | none of the assistant's endpoints (its own, then the discovered model servers) lists a model: no triage, brief, diagnosis or Ask | bring a model server back, or point the assistant at another endpoint (Configure › Assistant LLM) |
+| alert `AssistantOnFallback` | the assistant's own endpoint has not answered for 6 hours; a discovered server answers instead | fix or change the endpoint; the settings page's **Now** row names the model answering |
+| Ask: `refused: offer_action offers only: …` (in a lookup line) | the model tried to offer an action that is not on the list | nothing: it then names the page instead |
 
 ## Console
 

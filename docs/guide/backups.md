@@ -287,6 +287,8 @@ noctyx capacity                                    # free space on repo_root (an
 noctyx probe [--host gpu-01]                       # just the throughput measurement
 ```
 
+`verify` proves the repository's data reads back. [`rehearse`](restore.md#rehearse-a-restore) proves a restore.
+
 `verify` takes its subset from `--subset`, else from `verification.read_data_subset` (default `2%`). `capacity` warns when the measured source size exceeds the free space on the
 NAS.
 
@@ -296,7 +298,8 @@ NAS.
 `noctyx nightly`. Each step runs in its own process, so one failure never skips the rest:
 
 - every day: `hf-harvest`, then `recipe-discover`, then `versions` (every critical component on every
-  machine against its pin and the newest release: see [Upgrade](upgrade.md))
+  machine against its pin and the newest release: see [Upgrade](upgrade.md)), then `rehearse --due` (a restore
+  rehearsal on the hosts that are due one: see [Restore](restore.md#rehearse-a-restore))
 - on Sundays, in addition: `prune` (a dry run) and `verify`
 
 The exit code is 1 if any step failed (`WARN <step> failed (rc=N)`).

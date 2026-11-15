@@ -200,6 +200,38 @@ Noctyx stops and starts a deployment through its unit; it is added to `conflicts
 Without `--unit` the block's present unit is kept. A deployment Noctyx made before becomes `previous`, so
 `recipe-rollback` puts it back. For a spark checkout add `--spark-dir`.
 
+## Does it still answer the same
+
+A port that answers says nothing about what it answers. A different engine build, cache precision or weight
+file, or failing hardware, leaves `/health` and `/v1/models` as they were and changes the tokens. So Noctyx asks
+each slot's model four fixed prompts (17 × 23, the first eight primes, a sentence to repeat, and two sentences of
+free prose), greedily: temperature 0, a fixed seed, thinking off, 48 tokens. It keeps the replies per model and
+deployment and compares:
+
+```bash
+sudo noctyx slot-check                    # every slot
+sudo noctyx slot-check --slot rtx5090
+sudo noctyx slot-check --slot rtx5090 --accept    # the change was meant: these replies are the baseline now
+```
+
+| State | Meaning |
+|---|---|
+| `ok` | every reply is the recorded one |
+| `recorded` | the first replies for this model and deployment (after a deploy, an adopt or `--accept`): the baseline. After a deploy it also says how many differ from the previous deployment's |
+| `changed` | a reply differs from the recorded one twice in a row. A reply that differs once and matches on the second ask is counted, not reported |
+| `wrong` | a reply misses what any working model says (391, the primes, the sentence, light being scattered). A wrong reply never becomes a baseline |
+| `down`, `error` | the slot does not answer, or the request failed. The baseline stays |
+
+It runs after every deploy, start and rollback that comes up, and from the repair loop every hour
+(`recipes.answer_check_every`: a duration such as `"6h"`, or `"off"`). `recipe-status` and the slot's card show
+the last result. `changed` and `wrong` are self-repair's `answers` check: reported for a person, with the alert
+`NoctyxNeedsAttention`, and never repaired by restarting a model. The exit code is 1 when a slot is `changed` or
+`wrong`.
+
+The first three prompts have one right answer, which every healthy model gives; the prose is what shows a small
+change in the numbers behind the port. The check tells you that the replies changed, not whether the new ones
+are better: that is what a quality run measures.
+
 ## Watch-only slots
 
 A slot with `"deploy": false` is one Noctyx reports and never switches: a server it has no unit for, such as a

@@ -260,7 +260,7 @@ write: systemd units on Linux, the launchd property lists made from the same uni
 | `directory` | the directory and discovery service (`directory_port` TCP, `discovery_udp_port` UDP), as `repo_owner` |
 | `hf-mirror` | the Hugging Face mirror on `hf_mirror.port`, as `repo_owner` |
 | `tick` | `noctyx tick` every 15 minutes: runs the backups that are due |
-| `nightly` | 07:30 daily: HF harvest, recipe discovery, `noctyx versions`. On Sundays also a prune dry run and a verify. |
+| `nightly` | 07:30 daily: HF harvest, recipe discovery, `noctyx versions`, a restore rehearsal on the hosts that are due one. On Sundays also a prune dry run and a verify. |
 | `hygiene` | 06:45 daily: `hygiene --fix auto` (the auto tier, and the site's [`hygiene.auto`](hygiene.md#what-the-daily-run-fixes) items) |
 | `retention` | 08:00 on the 1st of each month: `prune --apply`, gated by `restic check` |
 

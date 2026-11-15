@@ -49,6 +49,31 @@ sudo noctyx restore --host gpu-01 --snapshot 1a2b3c4d --path /etc/nginx --in-pla
 
 The console offers only staging and host restores.
 
+## Rehearse a restore
+
+A backup is proven by restoring from it. `noctyx rehearse` has each backed-up host restore four small files
+(`/etc/hostname`, `/etc/fstab`, `/etc/passwd`, `/etc/group`) from its newest `system` snapshot into a scratch
+directory under `/var/lib/noctyx`, compare each with the live file, and remove the directory. It takes the path
+a real restore takes: the repository endpoint, the node's own key, the repository, `restic restore`. The live
+tree is not touched.
+
+```bash
+sudo noctyx rehearse                  # every backed-up host
+sudo noctyx rehearse --host gpu-01
+sudo noctyx rehearse --due            # only the hosts whose last rehearsal is older than the site's interval
+```
+
+- A restored file that equals the live one counts as matched. One that differs is a failure, unless the live
+  file is newer than the snapshot (it changed since: nothing to compare with). A rehearsal that restores nothing
+  fails.
+- The nightly run does `rehearse --due`. The interval is `verification.restore_rehearsal` (`monthly` by default;
+  `weekly`, `daily` or `off`), and a host that never rehearsed is due.
+- Each result is audited (`event: rehearsal`) and kept in `<state>/rehearsal.json`. The alerts are
+  `RestoreRehearsalFailed` (the last one failed) and `RestoreRehearsalOverdue` (none within the interval plus
+  three days). The exit code is 1 when a host fails.
+- It proves that files come back out of the newest snapshot intact. It does not prove a whole machine rebuilds:
+  that is the recovery stick below. Nodes need the agent that has `rehearse` (`noctyx install-agent`).
+
 ## `copy`: carry history over from a retired tier
 
 `copy` exists for one job: moving the snapshots of an older repository tier (`server.hot_root`) into the

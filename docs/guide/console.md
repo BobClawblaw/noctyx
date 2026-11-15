@@ -15,7 +15,8 @@ Related pages: [accounts](accounts.md) · [site config](site-config.md) · [inst
 The header has four menus: **Monitor** (Dashboard, Machines, Cluster, Self-repair), **Deploy** (Recipes), **Configure**
 (Backups, Retention, Model mirror, Assistant LLM, Self-repair, Checkpoints) and **Kiosk**. It also shows the page name, the head and node count, the
 clock, status pills (*backups N/N on schedule*, alerts) and your sign-in state. **Ask** opens a drawer where the
-assistant answers questions about the site from its own data (see [Assistant](assistant.md#ask-noctyx)). The gear
+assistant answers questions about the site from its own data, and can offer an action as a button for you to
+click (see [Assistant](assistant.md#ask-noctyx)). The gear
 opens the display settings. Click the logo for About.
 
 | Key | Goes to |
@@ -143,14 +144,17 @@ Below the cards, **Discover on GitHub** searches for public recipes that fit thi
 `fastest`, `newest` or `stars`, and **add** one to the **Catalog**. The CLI equivalents are `recipe-deploy`,
 `recipe-stop`, `recipe-start`, `recipe-rollback`, `recipe-status`, `recipe-catalog` and `recipe-discover`. A card
 whose slot serves a model other than the recorded one names the command that records the swap
-(`recipe-adopt`, CLI only); a watch-only slot's card says so.
+(`recipe-adopt`, CLI only); a watch-only slot's card says so. Each card also shows the slot's answer check:
+whether its model still answers the fixed prompts as recorded, and when that was last asked
+([recipes](recipes.md#does-it-still-answer-the-same)).
 
 ## Self-repair (`/heal`)
 
 What `noctyx heal` found, decided and ran, and the ways back:
 - whether repairs are on and whether they are frozen, with **unfreeze** and **repair now**;
 - the repairs this hour against the budget;
-- the open problems with their state and why;
+- the open problems with their state and why, and under each one that is a person's turn the assistant's
+  diagnosis: a likely cause and a next step ([self-repair](self-repair.md#diagnosis));
 - the last day's repairs;
 - each playbook's mode;
 - the log, newest first. Filter it by machine, playbook or text. Open a run for its steps, and a command for its
@@ -308,6 +312,12 @@ The console exports its own state for Prometheus, cached for 30 seconds:
   `what`), `noctyx_heal_repairs_24h`, `noctyx_heal_last_run_timestamp_seconds`, `noctyx_heal_frozen`,
   `noctyx_heal_actions_1h`, `noctyx_heal_auto`; the rules `NoctyxNeedsAttention`, `NoctyxHealFrozen`,
   `NoctyxRepairedItself` and `NoctyxHealNotRunning` read them ([self-repair](self-repair.md))
+- **the assistant:** `noctyx_assistant_endpoints_up`, `noctyx_assistant_endpoints`, `noctyx_assistant_preferred_up`,
+  `noctyx_assistant_last_asked_timestamp_seconds`, `noctyx_assistant_last_ask_ok`; the rules `AssistantDown` and
+  `AssistantOnFallback` read them ([assistant](assistant.md#what-it-does))
+- **restore rehearsals:** `noctyx_restore_rehearsal_ok`, `noctyx_restore_rehearsal_timestamp_seconds` and
+  `noctyx_restore_rehearsal_overdue`, per host; the rules `RestoreRehearsalFailed` and `RestoreRehearsalOverdue`
+  read them ([restore](restore.md#rehearse-a-restore))
 - **GPU and temperatures from the node collectors:** `noctyx_gpu_*`, `noctyx_system_temperature_celsius`
 - **the NAS endpoint's answer time:** `noctyx_rest_endpoint_seconds`; the node collectors add the NFS probe
   (`noctyx_nfs_probe_*`) and sshd logins (`noctyx_ssh_*`): [early warnings](signals.md)

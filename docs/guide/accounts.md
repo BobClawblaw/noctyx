@@ -30,7 +30,7 @@ and **sign out** when you are signed in.
 | Role | May |
 |---|---|
 | `viewer` | see every page and panel and browse snapshots. Changes nothing, and cannot download files from snapshots (they can hold keys and databases) |
-| `operator` | also download files and directories from snapshots, and run jobs: backups, verifies, copy, prune dry run, probes, restores to staging or a fresh directory on the host, hygiene fixes, database dumps, HF harvest, recipe deploy/prepare/stop/start/rollback, recipe discovery, assistant **test**, LLM explanations |
+| `operator` | also be offered actions as buttons by Ask, download files and directories from snapshots, and run jobs: backups, verifies, copy, prune dry run, probes, restores to staging or a fresh directory on the host, hygiene fixes, database dumps, HF harvest, recipe deploy/prepare/stop/start/rollback, recipe discovery, assistant **test**, LLM explanations |
 | `admin` | also change configuration and reboot hosts: the actions in `ADMIN_ACTIONS` below, plus setting or clearing the assistant's API key |
 
 Admin-only actions (`ADMIN_ACTIONS` in `console.py`): `setPolicy` (backup policy, retention, mirror settings),

@@ -102,6 +102,7 @@ Admins change the same settings under **Configuration › Assistant LLM** (`/con
 |---|---|---|---|
 | **Alert triage** | In the background, for each alert Alertmanager posts as firing | Under the alert on the dashboard, in 2-3 sentences | Kept in `alerts.jsonl` in the console state dir |
 | **Explain** a hygiene finding | When someone clicks **explain** next to a finding | Under the finding, in 3-5 sentences | Stored with the finding in `hygiene.json` |
+| **Diagnosis** of a problem self-repair leaves to a person | During the `noctyx heal` run that reports it: once per problem, again when the problem's text changes or after a day, at most two per run | Under the problem on Self-repair, under its alert and on the machine's page; in `noctyx heal`'s output | With the problem in `heal.json` ([self-repair](self-repair.md#diagnosis)) |
 | **Morning brief** | When the Morning Brief panel loads (it polls every 10 minutes) or someone clicks **refresh** | Dashboard › Morning Brief, 5-8 lines | `digest.json`, regenerated after 1 hour. If a regeneration fails, the last brief is shown with the error. |
 
 The console state dir is `paths.console_state`, `/var/lib/noctyx-console` by default. All three are also available
@@ -111,7 +112,16 @@ over the API: `GET /api/v1/alerts` (with triage), `POST /api/v1/explain` with
 How requests are made:
 
 - **Order.** Noctyx tries the configured `url` first. With `fallback` on, it then tries the other discovered
-  servers in turn and keeps the first non-empty answer.
+  servers in turn and keeps the first non-empty answer. The console, Ask, the diagnosis and the command line
+  (`noctyx ask`, setup help) all choose this way.
+- **A swapped model.** An endpoint that refuses the configured `model` name (HTTP 400 or 404: the model behind it
+  was changed) is asked again for whatever it serves. Answers are labelled with the model that gave them, not the
+  configured name.
+- **Which one answered.** Configure › Assistant LLM shows, under **Now**, how many of the endpoints answer and
+  which model gave the last answer, marked when it was a fallback. Two alerts follow it: `AssistantDown` (no
+  endpoint has listed a model for 30 minutes: no triage, brief, diagnosis or Ask) and `AssistantOnFallback` (its
+  own endpoint has not answered for 6 hours and another does). The check is a `/v1/models` request to each
+  endpoint, at most every 5 minutes; it sends no prompt.
 - **Request settings.** Requests use temperature 0.2 and ask the server to turn thinking off
   (`chat_template_kwargs.enable_thinking: false`). They are capped at 220 to 420 tokens.
 - **System prompt.** It tells the model to use only the data given, to say "not in the data" instead of guessing,
@@ -138,11 +148,13 @@ It works through read-only tools that read what the panels read:
 | `run_log` | the end of a backup, verify, prune or deploy run's log | operator |
 | `containers`, `service_log`, `container_log` | a Linux node's containers, a unit's journal, a container's log (over SSH) | operator |
 | `read_guide` | this guide | viewer |
+| `offer_action` | nothing: it puts a button in the conversation ([below](#buttons-it-can-offer)) | operator |
 
 How it behaves:
 
 - **It changes nothing.** When something should change, it says what and where (the page and the button, or the
-  `noctyx` command), and you do it.
+  `noctyx` command), and you do it. For some actions it can put the button in the conversation; clicking it is
+  still yours.
 - **Arguments are checked first.** Host names must be in the site, unit and container names must be plain
   names, a run's log is named by its unit, and what goes to a node over SSH is quoted.
 - **Secrets are redacted.** Keys, tokens, passwords (in URLs too) and private keys are cut out of what a tool
@@ -166,6 +178,23 @@ role as it is at that moment. Conversations live in the console's memory: a rest
 without use. The API is `POST /api/v1/ask` with `{"text": "...", "sid": "..."}` (no `sid` starts a new
 conversation and returns one; `tunit` is `C` or `F`, `tz` an IANA time zone such as `Europe/Paris`) and
 `GET /api/v1/ask/<sid>?since=<rev>`.
+
+### Buttons it can offer
+
+When what it looked up shows that one console action is what the question needs, Ask can put that action in the
+conversation as a button, with a sentence saying why. Nothing has run at that point. Clicking the button asks
+you to confirm and then sends the action from your browser through `/api/v1/action`, exactly as the same button
+elsewhere in the console would: the same whitelist, the same checks of its parameters and of your role, the same
+job and audit record. The assistant is told only that the button was offered, never that it ran.
+
+It can offer: back up a host now, verify a host's repository, take a checkpoint, dump a host's databases, fix
+named hygiene items, run the repair loop now, harvest the model mirror, start a slot that is down, upgrade a
+component, skip a release, and move the site's pin to a newer release. It cannot offer anything that stops a
+model, reboots, restores, deletes, undoes a change or rewrites the site's configuration; for those it names the
+page. An offer is refused, and the assistant told why, when the action is not on that list, when your role could
+not click it (a viewer gets no offers; pin and upgrade need an admin), or when the console would refuse the
+values now (a host that is not backed up, a hygiene id that is not in the last report). A conversation holds at
+most four offers.
 
 ### What Ask is told
 
@@ -226,7 +255,7 @@ The console (point only at these; there is nothing else):
   - Console: backup, verify, prune, copy, probe, capacity, snapshots, status, directory.
 - Cluster (/cluster): every node's live numbers.
 - Recipes (/recipes): deploy, stop, start or roll back what a slot serves; a slot serving a model swapped by hand
-  says so, and `noctyx recipe-adopt` records it.
+  says so, and `noctyx recipe-adopt` records it. Each slot shows its answer check (`noctyx slot-check`).
 - Self-repair (/heal): what noctyx heal found, decided and ran, each command with its output; repair now; unfreeze.
 - Configure (/config): Backups, Retention, Model mirror, Assistant LLM, Self-repair.
 Alert rules are not made in the console: Noctyx ships its own.
@@ -279,7 +308,7 @@ With console accounts (see [Accounts](accounts.md)):
 |---|---|
 | Read triage, explanations and the brief; refresh the brief | viewer |
 | **Ask**, with the viewer's tools | viewer |
-| **Ask** with the log tools (`run_log`, `containers`, `service_log`, `container_log`) | operator |
+| **Ask** with the log tools (`run_log`, `containers`, `service_log`, `container_log`) and with offers of actions | operator |
 | **explain** a finding; **test** an endpoint | operator |
 | Save the assistant settings; set or clear the API key | admin |
 
@@ -306,6 +335,9 @@ Use an `https://` URL if the endpoint is off the trusted network.
   - NAS free space and RAID state, and the titles of open hygiene findings.
 - **Ask:** your questions and, redacted, what each lookup returned (live numbers, query results, facts, alerts,
   backup state, file names from snapshots and, for operators, log lines).
+- **Diagnosis:** the problem's text, and from that machine: the named units' state and last 40 journal lines (or
+  the last backup's log, or `df`), the changes Noctyx made there in two days, what it already tried, and the
+  machine's last ten audit records. Redacted like a tool's output.
 - **test:** only a fixed test prompt.
 - **Setup help** (`init`'s `?`, a failing setup step, `noctyx ask`): the question or the error text (the last
   3000 characters), the machine facts listed [above](#help-during-the-install), its address and host name (for

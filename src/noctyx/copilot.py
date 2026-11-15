@@ -464,7 +464,7 @@ then the rest) and skip-this-release. NoctyxNeedsAttention has "repair now".
   - Console: backup, verify, prune, copy, probe, capacity, snapshots, status, directory.
 - Cluster (/cluster): every node's live numbers.
 - Recipes (/recipes): deploy, stop, start or roll back what a slot serves; a slot serving a model swapped by hand
-  says so, and `noctyx recipe-adopt` records it.
+  says so, and `noctyx recipe-adopt` records it. Each slot shows its answer check (`noctyx slot-check`).
 - Self-repair (/heal): what noctyx heal found, decided and ran, each command with its output; repair now; unfreeze.
 - Configure (/config): Backups, Retention, Model mirror, Assistant LLM, Self-repair.
 Alert rules are not made in the console: Noctyx ships its own.

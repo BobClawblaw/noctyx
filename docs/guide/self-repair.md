@@ -37,6 +37,7 @@ switch.
 | `backups` | a backup failed twice in a row | nothing: the tick retries it an hour later. Heal says why it failed (ssh lost, a locked repository, unreadable files, the endpoint down) |
 | `slots` | a model server in `restart_slots` stops answering | `noctyx recipe-start`, after 15 minutes ([below](#model-servers)) |
 | `upgrades` | `upgrades.auto` is on and a component is older than Noctyx's pin | `noctyx upgrade`, in the window ([below](#automatic-upgrades)) |
+| `answers` | a slot's model answers the fixed prompts differently from the replies recorded for it, twice in a row, or answers one wrongly (asked hourly) | nothing: what is behind the port changed, or the model is broken. It says which prompts, and [`noctyx slot-check`](recipes.md#does-it-still-answer-the-same) asks again or accepts the change |
 | `serving` | a slot has answered for 15 minutes with models its recorded deployment does not serve | nothing: somebody swapped the model by hand. It says so, and [`noctyx recipe-adopt`](recipes.md#a-model-swapped-by-hand) records the swap |
 
 The drop-in repair covers an exporter upgraded with an older drop-in: it still answers, but every scrape times
@@ -137,6 +138,21 @@ heal never starts it.
 - A release that fails anywhere (rolled back) is not tried again on its own. The problem says where it failed and
   when; `noctyx upgrade` by hand is the way on.
 - It needs a versions check from the last 2 days (the nightly run makes one).
+
+## Diagnosis
+
+A problem that is a person's turn gets a likely cause and a next step from the [assistant](assistant.md), when one
+is set up. The run that reports the problem collects what you would look up first: the state and the last 40
+journal lines of the units the problem names (or the last backup's log, or the filesystems), the changes Noctyx
+made on that machine in the last two days, what it already tried, and the machine's last audit records. The
+assistant reads that, redacted, and writes at most six lines, which are kept with the problem and shown under it
+on the Self-repair page, under its alert, on the machine's page and in `noctyx heal`'s output.
+
+- It only reads, through commands fixed in the code, and nothing it writes is run. It is a model's reading of
+  the evidence: check a command it names before you run it.
+- A problem is diagnosed once, and again when its text changes or after a day. A run asks for at most two.
+- With no assistant, or one that does not answer, the problem is reported as before. `NOCTYX_NO_ASSIST=1` turns
+  it off for a run; a `--dry-run` never asks.
 
 ## Alerts wake it
 
