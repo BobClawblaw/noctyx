@@ -59,6 +59,7 @@ Regenerate them with `python3 tools/screenshots.py`.
 - A model that is up but answering differently is noticed: each slot's model is asked a few fixed prompts after
   every switch and every hour, and its replies are compared with the ones recorded for that deployment
   (`noctyx slot-check`).
+- Each slot shows who is on its GPU: the processes using it, who holds its lock and who waits for it.
 - A model somebody swapped by hand is noticed: a slot that serves other models than its recorded deployment
   is reported by self-repair after 15 minutes and raises an alert 15 minutes later, and `noctyx recipe-adopt`
   records what serves now. A watch-only slot

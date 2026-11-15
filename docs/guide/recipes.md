@@ -164,6 +164,9 @@ sudo noctyx recipe-rollback --slot rtx5090 --yes   # switch back to the previous
 - `recipe-start` does nothing if the slot already serves.
 - Noctyx keeps only one previous deployment. A rollback makes the two swap places, so a second rollback goes back to
   where you started.
+- `recipe-status` and each slot's card show who is on the slot's GPU: the processes using it with their memory,
+  who holds the slot's GPU lock and for how long, and who waits for it (read on the slot's head; command lines
+  are redacted and cut).
 - `recipe-status` warns about **drift**: the port serves models other than the ones Noctyx last started, or a
   deployment marked serving does not answer. Self-repair's `serving` check reports a swap that has lasted 15
   minutes, and the `NoctyxNeedsAttention` alert fires 15 minutes after that; see [A model swapped by hand](#a-model-swapped-by-hand).

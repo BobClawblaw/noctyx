@@ -2320,6 +2320,23 @@ def probe_last():
         return {"ts": 0, "mbit": {}}
 
 
+_GPU_USE = {"ts": 0, "slots": {}}
+
+
+def recipes_view():
+    """The slots and the catalog, each slot with who is on its GPU (the lock's holder and waiters, the processes
+    using it): read on each slot's head at most every 20 s, all slots at once."""
+    c = CM.cfg()
+    d = CM.recipe_summary(c)
+    if time.time() - _GPU_USE["ts"] > 20:
+        names = list(d["slots"])
+        with ThreadPoolExecutor(max_workers=max(1, min(8, len(names)))) as ex:
+            _GPU_USE.update(ts=time.time(), slots=dict(zip(names, ex.map(lambda n: CM.slot_gpu_use(c, n), names))))
+    for n, s in d["slots"].items():
+        s["gpu_use"] = _GPU_USE["slots"].get(n)
+    return d
+
+
 def _versions():
     """The last versions check, skipped releases marked, each row with how Noctyx would upgrade it (`fix`)."""
     try:
@@ -2802,7 +2819,7 @@ class H(BaseHTTPRequestHandler):
             return self._json({"settings": (CM.cfg().get("console") or {}).get("settings") or {}})
         if p == "/api/v1/recipes":
             try:
-                return self._json(CM.recipe_summary(CM.cfg()))
+                return self._json(recipes_view())
             except Exception as e:
                 return self._json({"error": str(e)[:200]}, 500)
         if p == "/api/v1/policy":

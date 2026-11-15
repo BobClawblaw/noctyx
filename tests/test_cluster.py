@@ -368,3 +368,58 @@ def test_the_switch_script_stops_every_conflicting_unit_and_is_valid_bash(cluste
     assert "base64 -d > /etc/systemd/system/noctyx-recipe-gpu.service" in go and "systemctl enable noctyx-recipe-gpu.service" in go
     assert 'echo "== stopped"; exit 0' in stop and "systemctl start" not in stop
     assert "base64 -d" not in back and "systemctl start --no-block by-hand.service" in back
+
+
+# ── who is on a slot's GPU ───────────────────────────────────────────────────
+GPU_OUT = """H 4321
+W 5000
+W 5001
+==
+777, 30412
+==
+    1     900 root     /sbin/init
+  777   86400 ops      /srv/engine/bin/engine-native --port 30000 --api-key sk-abcdefghijklmnop1234
+ 4321     125 ops      flock /srv/locks/gpu.lock python3 -m harness run target
+ 5000      60 ana      flock /srv/locks/gpu.lock ./bench.sh
+"""
+
+
+def test_gpu_use_names_the_holder_the_waiters_and_the_gpus_processes():
+    u = o.parse_gpu_use(GPU_OUT)
+    assert u["lock"] == "held" and u["holder"] == {"pid": 4321, "seconds": 125, "user": "ops",
+                                                   "cmd": "flock /srv/locks/gpu.lock python3 -m harness run target"}
+    assert [p["pid"] for p in u["waiting"]] == [5000, 5001] and u["waiting"][1]["cmd"].startswith("(a process in another")
+    g, = u["gpu"]
+    assert g["mib"] == 30412 and g["pid"] == 777 and "abcdefghijklmnop" not in g["cmd"]          # a key on a command line
+    line = o.gpu_use_line(u)
+    assert "engine-native 29.7 GiB" in line and "lock held by flock" in line and "2 waiting" in line
+    free = o.parse_gpu_use("==\n==\n    1 9 root /sbin/init\n")
+    assert free["lock"] == "free" and free["holder"] is None and free["gpu"] == [] and o.gpu_use_line(free) == "GPU: idle · lock free"
+    assert o.parse_gpu_use("N\n==\n==\n")["lock"] == "none"
+    assert "could not read" in o.gpu_use_line({"error": "ssh timed out"})
+
+
+def test_the_gpu_snippet_is_valid_shell_and_reads_the_real_lock_table(tmp_path, cluster):
+    c = cluster.config()
+    lock = tmp_path / "gpu.lock"
+    lock.write_text("")
+    c["recipes"] = {"slots": {"gpu": {"head": "gpu-03", "port": 30000, "lock": str(lock)}}, "catalog": {}}
+    ran = []
+
+    def on(c_, h, cmd, timeout=0):
+        ran.append(cmd)
+        return subprocess.run(["sh", "-c", cmd], capture_output=True, text=True, timeout=30)
+    import pytest as _pt
+    mp = _pt.MonkeyPatch()
+    mp.setattr(o, "_on", on)
+    try:
+        assert o.slot_gpu_use(c, "gpu")["lock"] == "free"
+        with open(lock, "a+") as held:
+            fcntl.flock(held, fcntl.LOCK_EX)
+            u = o.slot_gpu_use(c, "gpu")
+        assert u["lock"] == "held" and u["holder"]["pid"] == __import__("os").getpid() and u["path"] == str(lock)
+        assert subprocess.run(["sh", "-n"], input=ran[0], capture_output=True, text=True).returncode == 0
+        c["recipes"]["slots"]["gpu"]["lock"] = str(tmp_path / "never-made.lock")
+        assert o.slot_gpu_use(c, "gpu")["lock"] == "none"
+    finally:
+        mp.undo()

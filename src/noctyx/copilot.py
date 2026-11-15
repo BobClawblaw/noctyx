@@ -251,7 +251,8 @@ def t_repairs(sess, a):
 def t_recipes(sess, a):
     r = C.CM.recipe_summary(C.CM.cfg())
     slots = {n: {"head": s["head"], "worker": s.get("worker"), "port": s["port"], "live": s.get("live"), "drift": s.get("drift"),
-                 "busy": s.get("busy"), "current": s.get("current"),
+                 "busy": s.get("busy"), "current": s.get("current"), "answer_check": s.get("answers"),
+                 "gpu_use": C.CM.slot_gpu_use(C.CM.cfg(), n),
                  "previous": {k: (s.get("previous") or {}).get(k) for k in ("recipe", "name", "unit")} if s.get("previous") else None,
                  "recipes_for_slot": s.get("recipes")}
              for n, s in r["slots"].items()}
@@ -395,7 +396,8 @@ TOOLS = dict([
        "own and how, what it leaves to a person, and the changes ledger (every upgrade: checked, ok or rolled "
        "back, and why) over the last `hours` (default 24).", {"hours": I}, run=t_repairs),
     fn("recipes", "The model-serving slots (what each serves, its systemd unit, live answer, drift from what "
-       "Noctyx started) and the recipe catalog.", {}, run=t_recipes),
+       "Noctyx started, whether its model still answers fixed prompts as recorded, which processes use its GPU and "
+       "who holds or waits for its GPU lock) and the recipe catalog.", {}, run=t_recipes),
     fn("audit", "The audit trail's latest entries: who did what in the console, and when.", {"n": I}, run=t_audit),
     fn("containers", "The Docker containers on a Linux host, running or not, with their status and image.",
        {"host": HOST}, ["host"], run=t_containers, need="operate"),

@@ -147,7 +147,8 @@ Below the cards, **Discover on GitHub** searches for public recipes that fit thi
 `fastest`, `newest` or `stars`, and **add** one to the **Catalog**. The CLI equivalents are `recipe-deploy`,
 `recipe-stop`, `recipe-start`, `recipe-rollback`, `recipe-status`, `recipe-catalog` and `recipe-discover`. A card
 whose slot serves a model other than the recorded one names the command that records the swap
-(`recipe-adopt`, CLI only); a watch-only slot's card says so. Each card also shows the slot's answer check:
+(`recipe-adopt`, CLI only); a watch-only slot's card says so. Each card shows who is on the slot's GPU (the processes
+using it, the lock's holder and anyone waiting for it) and the slot's answer check:
 whether its model still answers the fixed prompts as recorded, and when that was last asked
 ([recipes](recipes.md#does-it-still-answer-the-same)).
 

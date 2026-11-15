@@ -2754,6 +2754,69 @@ def _llm_refresh(wait=False):
                        env={**os.environ, "PYTHONPATH": str(NX_HOME.parent)})
 
 
+# ── who is on a slot's GPU: the lock's holder and waiters, and the processes using the GPU ──
+_GPU_SNIPPET = r"""f=%(lock)s
+case "$f" in "~/"*) f="$(getent passwd %(user)s | cut -d: -f6)/${f#\~/}";; esac
+if [ -e "$f" ]; then
+  key=$(printf '%%02x:%%02x:%%s' $(stat -c '%%Hd %%Ld %%i' "$f"))
+  awk -v k="$key" '$0 ~ k {print ($2=="->" ? "W " $6 : "H " $5)}' /proc/locks
+else echo "N"; fi
+echo "=="
+nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader,nounits 2>/dev/null
+echo "=="
+ps -eo pid=,etimes=,user=,args= 2>/dev/null
+"""
+
+
+def parse_gpu_use(text):
+    """The snippet's output -> {"lock": "free"|"held"|"none", "holder": {...}|None, "waiting": [...], "gpu": [...]}.
+    A process: {pid, seconds, user, cmd} (cmd redacted and cut); a GPU process adds its MiB."""
+    from noctyx import agent
+    locks, gpu, ps = (text.split("==\n") + ["", ""])[:3]
+    procs = {}
+    for line in ps.splitlines():
+        m = re.match(r"\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)", line)
+        if m:
+            procs[int(m.group(1))] = {"pid": int(m.group(1)), "seconds": int(m.group(2)), "user": m.group(3),
+                                      "cmd": agent.redact(m.group(4))[:160]}
+    who = lambda pid: procs.get(pid) or {"pid": pid, "seconds": None, "user": None, "cmd": "(a process in another namespace)"}
+    held = [int(l.split()[1]) for l in locks.splitlines() if l.startswith("H ") and l.split()[1].isdigit()]
+    wait = [int(l.split()[1]) for l in locks.splitlines() if l.startswith("W ") and l.split()[1].isdigit()]
+    out = {"lock": "none" if locks.strip() == "N" else "held" if held else "free",
+           "holder": who(held[0]) if held else None, "waiting": [who(p) for p in wait], "gpu": []}
+    for line in gpu.splitlines():
+        m = re.match(r"\s*(\d+)\s*,\s*(\d+)", line)
+        if m:
+            out["gpu"].append({**who(int(m.group(1))), "mib": int(m.group(2))})
+    return out
+
+
+def slot_gpu_use(c, slot, timeout=12):
+    """Who holds the slot's GPU lock, who waits for it, and which processes use its GPU, read on the slot's head."""
+    s = recipe_slot(c, slot)
+    h = host_by_name(c, s["head"])
+    if h.get("os", "linux") != "linux":
+        return {"lock": "none", "holder": None, "waiting": [], "gpu": [], "note": "not a Linux host"}
+    snippet = _GPU_SNIPPET % {"lock": shlex.quote(s.get("lock") or P["gpu_lock"]), "user": shlex.quote(_slot_user(c, h))}
+    try:
+        r = _on(c, h, snippet, timeout=timeout)
+    except Exception as e:
+        return {"error": str(e)[:120]}
+    if r.returncode not in (0,) and not (r.stdout or "").strip():
+        return {"error": (r.stderr or f"rc {r.returncode}").strip()[-120:]}
+    return {**parse_gpu_use(r.stdout or ""), "path": s.get("lock") or P["gpu_lock"]}
+
+
+def gpu_use_line(u):
+    """One line for a slot's GPU use (recipe-status)."""
+    if u.get("error"):
+        return f"GPU: could not read ({u['error']})"
+    d = lambda p: f"{p['cmd'][:70]} (pid {p['pid']}" + (f", {fmt_duration(p['seconds'])}" if p.get("seconds") is not None else "") + ")"
+    gpu = "; ".join(f"{p['cmd'].split()[0].rsplit('/', 1)[-1]} {p['mib'] / 1024:.1f} GiB" for p in u.get("gpu") or []) or "idle"
+    lock = ("lock held by " + d(u["holder"]) if u.get("holder") else "lock free" if u.get("lock") == "free" else "no lock file yet")
+    return f"GPU: {gpu} · {lock}" + (f" · {len(u['waiting'])} waiting: " + "; ".join(d(p) for p in u["waiting"]) if u.get("waiting") else "")
+
+
 def _answers_after(c, slot):
     """After a switch that came up: ask the fixed prompts (noctyx.answers). A new deployment's replies become
     its baseline; the same deployment started again must answer as recorded. Never fails the switch."""
@@ -2978,6 +3041,7 @@ def cmd_recipe_status(a):
                   f"`noctyx recipe-adopt --slot {n}` records what answers now")
         if not s["deploy"]:
             print("          watch-only (deploy: false): Noctyx reports it and never switches it")
+        print("          " + gpu_use_line(slot_gpu_use(c, n)))
         an = s.get("answers") or {}
         if an.get("state") in ("changed", "wrong"):
             print(f"          ! answers {an['state']}: {an.get('detail')}  (`noctyx slot-check --slot {n}`)")

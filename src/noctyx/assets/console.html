@@ -1315,7 +1315,7 @@ function askItem(i){
  if(i.kind=='user')return askEl('div','askmsg user',i.text);
  if(i.kind=='assistant'){const d=askEl('div','askmsg bot');d.append(askRich(i.text));if(i.model)$('askmodel').textContent=i.model;return d}
  if(i.kind=='tool'){const d=askEl('details','asktool'+(i.ok?'':' bad'));const a=Object.entries(i.args||{}).map(([k,v])=>k+'='+JSON.stringify(v)).join(' ');
-  d.append(askEl('summary',null,(i.ok?'looked at ':'could not look at ')+i.tool+(a?' ('+a+')':'')),askEl('pre',null,i.out||''));return d}
+  d.append(askEl('summary',null,(i.tool=='offer_action'?(i.ok?'offered a button: ':'could not offer: '):(i.ok?'looked at ':'could not look at '))+i.tool+(a?' ('+a+')':'')),askEl('pre',null,i.out||''));return d}
  if(i.kind=='action'){const d=askEl('div','askact');if(i.why)d.append(askEl('div','askwhy',i.why));
   const b=askEl('button','act',i.label);b.title=`runs the console's ${i.action} action as you (${i.need}); nothing has run yet`;
   if(ASK.done[i.id]){b.disabled=true;b.textContent=i.label+' · '+ASK.done[i.id]}
@@ -3050,6 +3050,13 @@ function asVals(){return {enabled:$('as-on').checked,url:$('as-url').value.trim(
  timeout_seconds:Number($('as-to').value)||60,fallback:$('as-fb').checked,ask_notes:$('as-notes').value,ask_prompt:$('as-prompt').value}}
 /* the assistant's diagnosis of a problem self-repair leaves to a person: a likely cause and a next step, advice only */
 function diagNote(d){return d&&d.text?`<div class=srnote title="written by ${esc(d.model||'the assistant')} from this machine's logs, Noctyx's changes and the audit trail; nothing in it is run"><b>likely cause</b> <span class=mut>(${esc(d.model||'assistant')}, ${esc(agoS(d.ts))})</span><br>${esc(d.text).replace(/\n/g,'<br>')}</div>`:''}
+/* who is on a slot's GPU: the processes using it, and who holds its lock or waits for it */
+function gpuUse(u){if(!u)return '';if(u.error)return `<div class=mut style="font-size:11px">GPU: could not read (${esc(u.error)})</div>`;
+ const pr=p=>`${esc((p.cmd||'').slice(0,60))} <span class=mut>pid ${esc(p.pid)}${p.seconds!=null?' · '+esc(fmtDur(p.seconds)):''}${p.user?' · '+esc(p.user):''}</span>`;
+ const g=(u.gpu||[]).map(p=>`<span title="${esc(p.cmd||'')}">${esc(((p.cmd||'').split(' ')[0]||'').split('/').pop())} ${esc((p.mib/1024).toFixed(1))} GiB</span>`).join(' · ')||'idle';
+ const l=u.holder?`<span class=warn>lock held</span> by ${pr(u.holder)}`:u.lock=='free'?'lock free':'no lock file yet';
+ const w=(u.waiting||[]).length?`<div class=warn style="font-size:11px">${u.waiting.length} waiting for the lock: ${u.waiting.map(pr).join('; ')}</div>`:'';
+ return `<div class=mut style="font-size:11px" title="${esc(u.path||'')}">GPU ${g} · ${l}</div>${w}`}
 /* a slot's answer check: do its model's replies to the fixed prompts still match the recorded ones */
 function ansLine(n,a){if(!a||!a.state)return '';
  if(a.state=='changed'||a.state=='wrong')return `<div class=drift title="${esc(a.detail||'')}">⚠ answers ${esc(a.state)} ${esc(agoS(a.ts))}: ${esc((a.prompts||[]).length)} fixed prompt${(a.prompts||[]).length==1?'':'s'} <span class=mut>· <code>noctyx slot-check --slot ${esc(n)}</code></span></div>`;
@@ -3140,6 +3147,7 @@ function rRecipes(d){
   <div>deployment <b>${esc(rcLabel(c))}</b>${c&&c.deployed_ts?` <span class=mut>${esc(agoS(c.deployed_ts))}</span>`:''}${c&&c.adopted?' <span class=mut>(adopted: from before Noctyx; '+esc(c.unit)+')</span>':''}${c&&c.state=='stopped'?' <span class=warn>stopped</span>':''}</div>
   <div class=rm>${L.ok?`<span class=ok>serving</span> ${esc((L.models||[]).join(', '))}${L.connections!=null?` <span class=mut>· ${esc(L.connections)} connected</span>`:''}`:`<span class=bad>not serving</span> <span class=mut>${esc(L.error||L.status||'')}</span>`}</div>
   ${s.drift?`<div class=drift>⚠ ${esc(s.drift)}${L.ok?` <span class=mut>· swapped by hand? <code>noctyx recipe-adopt --slot ${esc(n)} --unit UNIT</code> records it</span>`:''}</div>`:s.unrecorded?`<div class=mut style="font-size:11px">no record of which models this serves, so a swap goes unnoticed: <code>noctyx recipe-adopt --slot ${esc(n)}</code> records what answers now</div>`:''}
+  ${gpuUse(s.gpu_use)}
   ${ansLine(n,s.answers)}
   ${s.deploy===false?`<div class=mut style="font-size:11px">watch-only: Noctyx reports this slot and never switches it</div>`:''}
   ${prep?`<div class=mut style="font-size:11px">prepared: ${prep}</div>`:''}
