@@ -19,6 +19,9 @@ assistant answers questions about the site from its own data, and can offer an a
 click (see [Assistant](assistant.md#ask-noctyx)). The gear
 opens the display settings. Click the logo for About.
 
+A panel whose content is wider than the panel scrolls sideways, with a scrollbar that is always visible. Prose
+in a table (an alert's summary and triage) wraps, so the columns after it (*act in*, *silence*) stay in view.
+
 | Key | Goes to |
 |---|---|
 | `1` | Dashboard `/` |

@@ -376,6 +376,19 @@ body.kiosk .kiosk-wrap.kfit-scroll{overflow-y:auto;overscroll-behavior:contain}
 /* content-sized panels (/cluster): no fixed height, no inner scroll, nothing clipped */
 .panel.auto{resize:none!important;overflow:visible!important;height:auto!important;max-height:none!important;min-height:0!important;flex:none!important}
 .panel.auto .pbody{flex:none!important;overflow:visible!important;height:auto!important;max-height:none!important}
+/* content wider than its panel scrolls sideways, with a bar that is always there to see (an overlay scrollbar
+   shows only while scrolling, and a column of buttons past the edge then looks like it does not exist) */
+.panel.auto .pbody{overflow-x:auto!important}
+.pbody::-webkit-scrollbar,.m1sec::-webkit-scrollbar,.asklog::-webkit-scrollbar,.setpanel::-webkit-scrollbar{width:11px;height:11px}
+.pbody::-webkit-scrollbar-thumb,.m1sec::-webkit-scrollbar-thumb,.asklog::-webkit-scrollbar-thumb,.setpanel::-webkit-scrollbar-thumb{background:var(--line);border-radius:6px;border:2px solid var(--bg-1)}
+.pbody::-webkit-scrollbar-thumb:hover,.m1sec::-webkit-scrollbar-thumb:hover{background:var(--fg-faint)}
+.pbody::-webkit-scrollbar-track,.m1sec::-webkit-scrollbar-track,.asklog::-webkit-scrollbar-track,.setpanel::-webkit-scrollbar-track,.pbody::-webkit-scrollbar-corner{background:transparent}
+@supports not selector(::-webkit-scrollbar){.pbody,.m1sec,.asklog,.setpanel{scrollbar-width:thin;scrollbar-color:var(--line) transparent}}
+/* a cell of prose (an alert's summary and triage) wraps, so the columns after it stay in view */
+td.wrap{white-space:normal;overflow-wrap:anywhere;min-width:160px}
+td.wrapn{white-space:normal;overflow-wrap:anywhere}          /* a name or a short link that may break */
+td.btncol{white-space:normal;width:1%}                       /* a column of small buttons: they stack when narrow */
+td.btncol .silbtn{margin-bottom:3px}
 #desk.stack{display:flex;flex-direction:column;align-items:stretch}
 .panel.collapsed .pbody{display:none}
 
@@ -3389,7 +3402,7 @@ function rAlerts(d){
  const rows=act.map(a=>{const t=alertTarget(a);const fp=a.fingerprint||'';const comp=(a.labels||{}).component||'';
   const sil=fp?`<button class=silbtn onclick="event.stopPropagation();silenceAlert('${fp}',60,this)" title="silence this one alert for 1 hour">1h</button><button class=silbtn onclick="event.stopPropagation();silenceAlert('${fp}',1440,this)" title="silence this one alert for 24 hours">24h</button><button class=silbtn onclick="event.stopPropagation();silenceAlert('${fp}',10080,this)" title="silence this one alert for 7 days">7d</button>`:'';
   return `<tr ${goAttr({host:t.host,panel:t.panel,tab:t.tab})} title="open ${esc(t.what||'')}"><td><span class="tag ${a.severity=='critical'?'bad':'warn'}">${esc(a.severity||'')}</span></td>
-  <td>${esc(a.name||'')}${comp?`<div class=mut style="font:10px var(--mono)">${esc(comp)}</div>`:''}</td><td>${esc(a.host||'')}</td><td>${esc(a.summary||'')}${a.fix?`<div class=compbtns>${compBtns(a.host,a.fix)}</div>`:''}${a.heal?`<div class=compbtns><button class=silbtn onclick="event.stopPropagation();healNow(this)" title="run noctyx heal now: it tries the safe repairs again">repair now</button></div>`:''}${a.selfrepair?`<div class=srnote>self-repair: <span class="${SRST[a.selfrepair.state]||''}">${esc(SRWORD[a.selfrepair.state]||a.selfrepair.state||'')}</span> — ${esc(a.selfrepair.why||a.selfrepair.how||'')} <a class=lnk href="/heal" onclick="event.stopPropagation()">log →</a></div>${diagNote(a.selfrepair.diagnosis)}`:''}${a.triage?`<div style="font:11.5px/1.5 var(--sans);color:var(--fg);margin-top:4px;white-space:normal;border-left:2px solid var(--line);padding-left:8px">${esc(a.triage)}<span class=mut style="font:10px var(--mono)"> — ${esc(a.triage_model||'assistant')}</span></div>`:''}</td><td class=mut>${esc(agoS(a.since))}</td><td class=golnk>${t.what?esc(t.what)+' →':''}</td><td class=nowrap>${sil}</td></tr>`}).join('');
+  <td class=wrapn>${esc(a.name||'')}${comp?`<div class=mut style="font:10px var(--mono)">${esc(comp)}</div>`:''}</td><td>${esc(a.host||'')}</td><td class=wrap>${esc(a.summary||'')}${a.fix?`<div class=compbtns>${compBtns(a.host,a.fix)}</div>`:''}${a.heal?`<div class=compbtns><button class=silbtn onclick="event.stopPropagation();healNow(this)" title="run noctyx heal now: it tries the safe repairs again">repair now</button></div>`:''}${a.selfrepair?`<div class=srnote>self-repair: <span class="${SRST[a.selfrepair.state]||''}">${esc(SRWORD[a.selfrepair.state]||a.selfrepair.state||'')}</span> — ${esc(a.selfrepair.why||a.selfrepair.how||'')} <a class=lnk href="/heal" onclick="event.stopPropagation()">log →</a></div>${diagNote(a.selfrepair.diagnosis)}`:''}${a.triage?`<div style="font:11.5px/1.5 var(--sans);color:var(--fg);margin-top:4px;white-space:normal;border-left:2px solid var(--line);padding-left:8px">${esc(a.triage)}<span class=mut style="font:10px var(--mono)"> — ${esc(a.triage_model||'assistant')}</span></div>`:''}</td><td class=mut>${esc(agoS(a.since))}</td><td class="golnk wrapn">${t.what?esc(t.what)+' →':''}</td><td class=btncol>${sil}</td></tr>`}).join('');
  const sl=(d.silenced||[]).map(s=>{const m=(s.matchers||[]).map(x=>esc(x.name)+'='+esc(x.value)).join(' · ');
   const until=s.ends?fmtTs(new Date(s.ends).getTime()/1000):'—';
   return `<tr><td class=mut style="font:10.5px var(--mono)">${m}</td><td class=mut>${esc(until)}</td><td class=mut>${esc(s.by||'')}</td>
@@ -3419,8 +3432,8 @@ function rStorage(tiers){
  (tiers||[]).map(t=>{const tot=t.free_gb+t.used_gb||1;
   const rp=t.repos_gb,cm=rp?Object.values(rp).reduce((a,b)=>a+b,0):null;
   return `<tr><td>${t.mounted?esc(t.tier):'<span class=bad>'+esc(t.tier)+' ↓</span>'}</td><td>${t.free_gb}G</td><td>${t.used_gb}G</td><td>${bar(100*t.used_gb/tot)}</td></tr>`+
-   (rp?`<tr><td class=mut>&nbsp; backups</td><td></td><td>${cm.toFixed(0)}G</td><td class=mut style="font:10.5px var(--mono)">${Object.entries(rp).map(([k,v])=>esc(k)+' '+v.toFixed(0)+'G').join(' · ')}</td></tr>`+
-    `<tr><td class=mut>&nbsp; other data</td><td></td><td>${Math.max(0,t.used_gb-cm).toFixed(0)}G</td><td class=mut style="font:10.5px var(--mono)">not Noctyx${t.repos_ts?' · sized '+esc(ago(t.repos_ts)):''}</td></tr>`:'')}).join('')+'</table>'+gl}
+   (rp?`<tr><td class=mut>&nbsp; backups</td><td></td><td>${cm.toFixed(0)}G</td><td class="mut wrapn" style="font:10.5px var(--mono)">${Object.entries(rp).map(([k,v])=>esc(k)+' '+v.toFixed(0)+'G').join(' · ')}</td></tr>`+
+    `<tr><td class=mut>&nbsp; other data</td><td></td><td>${Math.max(0,t.used_gb-cm).toFixed(0)}G</td><td class="mut wrapn" style="font:10.5px var(--mono)">not Noctyx${t.repos_ts?' · sized '+esc(ago(t.repos_ts)):''}</td></tr>`:'')}).join('')+'</table>'+gl}
 function rJobs(rows){
  return `<table><tr><th>when</th><th>host</th><th>event</th><th>rc</th></tr>`+
  (rows||[]).map(a=>`<tr><td>${esc(fmtTs(a.ts))}</td><td>${esc(a.host||'')}</td><td>${esc(a.event||'')}</td><td class="${(a.rc??0)==0?'ok':'bad'}">${a.rc??''}</td></tr>`).join('')+'</table>'}
