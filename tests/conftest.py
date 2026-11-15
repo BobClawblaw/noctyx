@@ -41,3 +41,6 @@ def no_site_pins():
     from noctyx import answers, llm
     answers.FILE = _SITE_FILE.parent / "slot-answers.json"          # nor its slots' recorded replies
     llm.HEALTH = _SITE_FILE.parent / "assistant-health.json"
+    from noctyx import logdigest, relnotes
+    relnotes.FILE = _SITE_FILE.parent / "release-notes.json"
+    logdigest.KINDS, logdigest.DIGEST = _SITE_FILE.parent / "log-kinds.json", _SITE_FILE.parent / "log-digest.json"

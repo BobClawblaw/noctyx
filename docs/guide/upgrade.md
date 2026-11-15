@@ -247,6 +247,16 @@ what happens after a failure.
 **Undoing one later.** Every upgrade waits for a checkpoint of its machine and keeps what it replaced; `noctyx
 changes` lists them and `noctyx revert <change>` undoes the newest one in effect ([checkpoints](checkpoints.md#undoing-a-change)).
 
+### What a release changes
+
+For each release a row offers, `noctyx versions` fetches the project's release notes from GitHub once and has
+the [assistant](assistant.md) say in a few lines what could matter to a site that runs the component the way
+Noctyx sets it up: removed flags, config or rule syntax, storage format, changed defaults, security fixes. The
+alert and the Machine Report show it under **what &lt;release&gt; changes**, beside *take* and *skip*, with a link
+to the notes; `noctyx versions` prints it under the row. It is a model's summary of what the project published:
+read the notes themselves before a major upgrade. With no assistant the row gets the link and the notes' first
+lines. The notes are kept in `<state>/release-notes.json`.
+
 ### A site's own pin
 
 A site can take a newer Prometheus, Alertmanager or node_exporter without waiting for a Noctyx release:

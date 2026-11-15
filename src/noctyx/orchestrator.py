@@ -3430,6 +3430,8 @@ def versions_view():
     from noctyx import components as comp
     c = cfg()
     inv = comp.apply_skips(comp.load(VERSIONS), comp.load(VERSION_SKIPS))
+    from noctyx import relnotes
+    relnotes.attach(inv)
     for name, rows in (inv.get("hosts") or {}).items():
         h = next((x for x in hosts(c) if x["name"] == name), None) or {"name": name, "local": True}
         for r in rows:
@@ -3854,6 +3856,12 @@ def cmd_versions(a):
     component on every machine, and the command that upgrades what is behind."""
     from noctyx import components as comp
     inv = comp.apply_skips(versions(cfg(), a.host, a.refresh), comp.load(VERSION_SKIPS))
+    from noctyx import relnotes
+    try:                      # what each offered release changes, from its release notes (kept; asked once)
+        relnotes.refresh(inv, {x["name"]: comp.PINS.get(x["name"], {}).get("repo") or x.get("repo") for x in comp.COMPONENTS})
+    except Exception as e:
+        print(f"  (release notes not read: {str(e)[:100]})", file=sys.stderr)
+    relnotes.attach(inv)
     if a.json:
         print(json.dumps(inv, indent=1))
         return
@@ -3876,6 +3884,11 @@ def cmd_versions(a):
                   + ((f"   (after: sudo noctyx versions-pin --component {r['component']} --version {r['latest']} --yes)"
                       if r["component"] in comp.SITE_PINNABLE else "   (with the Noctyx release that moves the pin)")
                      if r["state"] == "upgrade" and r["pinned"] else ""))
+            n = r.get("notes") or {}
+            if n.get("summary") or n.get("url"):
+                for line in (n.get("summary") or "").splitlines():
+                    print(f"      {line}")
+                print(f"      release notes: {n.get('url')}" + (f"  (summary by {n['model']})" if n.get("model") else ""))
     audit("versions", behind=sum(r["state"] in ("behind", "missing") for _, r in todo),
           upgradable=sum(r["state"] == "upgrade" for _, r in todo))
 

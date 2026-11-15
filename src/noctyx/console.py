@@ -2066,7 +2066,7 @@ def alerts_view():
             row = next((r for r in (inv.get("hosts") or {}).get(a["host"], [])
                         if r["component"] == (a.get("labels") or {}).get("component")), None)
             if row:
-                a["fix"] = {k: row.get(k) for k in ("component", "state", "installed", "latest", "fix")}
+                a["fix"] = {k: row.get(k) for k in ("component", "state", "installed", "latest", "fix", "notes")}
                 a["fix"]["hosts"] = sum(1 for rows in (inv.get("hosts") or {}).values() for r in rows
                                         if r["component"] == row["component"] and (r.get("fix") or {}).get("change"))
         if a["name"] == "NoctyxNeedsAttention":

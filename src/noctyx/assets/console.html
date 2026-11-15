@@ -385,6 +385,7 @@ body.kiosk .kiosk-wrap.kfit-scroll{overflow-y:auto;overscroll-behavior:contain}
 .pbody::-webkit-scrollbar-track,.m1sec::-webkit-scrollbar-track,.asklog::-webkit-scrollbar-track,.setpanel::-webkit-scrollbar-track,.pbody::-webkit-scrollbar-corner{background:transparent}
 @supports not selector(::-webkit-scrollbar){.pbody,.m1sec,.asklog,.setpanel{scrollbar-width:thin;scrollbar-color:var(--line) transparent}}
 /* a cell of prose (an alert's summary and triage) wraps, so the columns after it stay in view */
+.relnotes{flex-basis:100%;font:11.5px/1.5 var(--sans);white-space:normal} .relnotes summary{cursor:pointer;color:var(--fg-dim);font:10.5px var(--mono)} .relnotes>div{margin-top:4px;overflow-wrap:anywhere}
 td.wrap{white-space:normal;overflow-wrap:anywhere;min-width:160px}
 td.wrapn{white-space:normal;overflow-wrap:anywhere}          /* a name or a short link that may break */
 td.btncol{white-space:normal;width:1%}                       /* a column of small buttons: they stack when narrow */
@@ -3381,6 +3382,8 @@ function compBtns(host,f){if(!f)return '';const x=f.fix||{},h=esc(JSON.stringify
  else if(x.why)b+=`<span class=mut style="font:10px var(--mono)" title="${esc(x.why)}">no upgrade here ⓘ</span>`;
  if(f.state=='upgrade'&&f.latest)b+=`<button class=silbtn onclick="event.stopPropagation();compSkip(${h},${c},${esc(JSON.stringify(f.latest))},false,this)" title="stay on ${esc(f.installed||'this version')}: no alert for ${esc(f.latest)}; a later release alerts again">skip ${esc(f.latest)}</button>`;
  if(f.state=='skipped')b+=`<button class=silbtn onclick="event.stopPropagation();compSkip(${h},${c},'',true,this)" title="alert on this release again">unskip</button>`;
+ const n=f.notes;   /* what the release changes, from its release notes: the assistant's summary, or the notes' first lines */
+ if(n&&(n.summary||n.excerpt))b+=`<details class=relnotes onclick="event.stopPropagation()"><summary>what ${esc(f.latest||'it')} changes</summary><div>${esc(n.summary||n.excerpt).replace(/\n/g,'<br>')}</div><div class=mut>${n.summary?'summary by '+esc(n.model||'the assistant')+' of ':''}<a class=lnk href="${esc(n.url||'#')}" target=_blank rel=noopener>the release notes</a>${n.published?' · '+esc(n.published):''}</div></details>`;
  return b}
 async function compUpgrade(host,component,what,btn){
  if(!confirm(`${what}?\n\nRuns as a job (Jobs / Audit shows it), then checks ${host}'s versions again: the alert clears when it is current.`))return;

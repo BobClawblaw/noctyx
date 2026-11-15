@@ -103,6 +103,8 @@ Admins change the same settings under **Configuration › Assistant LLM** (`/con
 | **Alert triage** | In the background, for each alert Alertmanager posts as firing | Under the alert on the dashboard, in 2-3 sentences | Kept in `alerts.jsonl` in the console state dir |
 | **Explain** a hygiene finding | When someone clicks **explain** next to a finding | Under the finding, in 3-5 sentences | Stored with the finding in `hygiene.json` |
 | **Diagnosis** of a problem self-repair leaves to a person | During the `noctyx heal` run that reports it: once per problem, again when the problem's text changes or after a day, at most two per run | Under the problem on Self-repair, under its alert and on the machine's page; in `noctyx heal`'s output | With the problem in `heal.json` ([self-repair](self-repair.md#diagnosis)) |
+| **Release notes** of a newer component release | During `noctyx versions` (nightly), once per release | Beside the row's *take* and *skip* buttons (*what X changes*), and in `noctyx versions` | `<state>/release-notes.json` ([upgrade](upgrade.md#what-a-release-changes)) |
+| **Log digest**: which of last night's new log lines matter | During the nightly `noctyx log-digest`, when a node logged a kind of warning or error it never had | `noctyx log-digest --show`; Ask's `log_digest` tool; the brief gets the counts | `log-digest.json` in the console state dir ([backups](backups.md#whats-new-in-the-logs)) |
 | **Morning brief** | When the Morning Brief panel loads (it polls every 10 minutes) or someone clicks **refresh** | Dashboard › Morning Brief, 5-8 lines | `digest.json`, regenerated after 1 hour. If a regeneration fails, the last brief is shown with the error. |
 
 The console state dir is `paths.console_state`, `/var/lib/noctyx-console` by default. All three are also available
@@ -147,6 +149,7 @@ It works through read-only tools that read what the panels read:
 | `snapshots`, `find_in_backups` | a host's snapshots, and files in them by name or glob | viewer |
 | `run_log` | the end of a backup, verify, prune or deploy run's log | operator |
 | `containers`, `service_log`, `container_log` | a Linux node's containers, a unit's journal, a container's log (over SSH) | operator |
+| `log_digest` | last night's digest of every node's logs: the kinds of line that are new, with counts | operator |
 | `read_guide` | this guide | viewer |
 | `offer_action` | nothing: it puts a button in the conversation ([below](#buttons-it-can-offer)) | operator |
 
@@ -247,7 +250,7 @@ The console (point only at these; there is nothing else):
 - Dashboard (/):
   - Cluster; Fleet (click a machine); Storage Tiers; Morning Brief; Schedule; Runs; Jobs / Audit; Network.
   - Machine Report (the chosen machine): tabs overview, llm, network, storage, gpu, health, backups; its
-    component versions with upgrade, take (a release newer than the pin) and skip buttons; backup now, verify now; a reboot plan when one is allowed.
+    component versions with upgrade, take (a release newer than the pin) and skip buttons, and what a release changes; backup now, verify now; a reboot plan when one is allowed.
   - Alerts: silence an alert for a while. A component alert has upgrade, "upgrade all N" (one machine first,
     then the rest) and skip-this-release. NoctyxNeedsAttention has "repair now".
   - Hygiene: manual-tier findings have a fix button; `noctyx hygiene-set` says which the daily run fixes itself.
@@ -308,7 +311,7 @@ With console accounts (see [Accounts](accounts.md)):
 |---|---|
 | Read triage, explanations and the brief; refresh the brief | viewer |
 | **Ask**, with the viewer's tools | viewer |
-| **Ask** with the log tools (`run_log`, `containers`, `service_log`, `container_log`) and with offers of actions | operator |
+| **Ask** with the log tools (`run_log`, `containers`, `service_log`, `container_log`, `log_digest`) and with offers of actions | operator |
 | **explain** a finding; **test** an endpoint | operator |
 | Save the assistant settings; set or clear the API key | admin |
 
@@ -338,6 +341,10 @@ Use an `https://` URL if the endpoint is off the trusted network.
 - **Diagnosis:** the problem's text, and from that machine: the named units' state and last 40 journal lines (or
   the last backup's log, or `df`), the changes Noctyx made there in two days, what it already tried, and the
   machine's last ten audit records. Redacted like a tool's output.
+- **Release notes:** the component's name, the version running and the release's published notes (public text),
+  with a fixed description of how Noctyx runs that component.
+- **Log digest:** each machine's name and the new kinds of warning and error lines with their counts, numbers and
+  ids already replaced, redacted like a tool's output.
 - **test:** only a fixed test prompt.
 - **Setup help** (`init`'s `?`, a failing setup step, `noctyx ask`): the question or the error text (the last
   3000 characters), the machine facts listed [above](#help-during-the-install), its address and host name (for

@@ -299,10 +299,28 @@ NAS.
 
 - every day: `hf-harvest`, then `recipe-discover`, then `versions` (every critical component on every
   machine against its pin and the newest release: see [Upgrade](upgrade.md)), then `rehearse --due` (a restore
-  rehearsal on the hosts that are due one: see [Restore](restore.md#rehearse-a-restore))
+  rehearsal on the hosts that are due one: see [Restore](restore.md#rehearse-a-restore)), then `log-digest`
+  ([below](#whats-new-in-the-logs))
 - on Sundays, in addition: `prune` (a dry run) and `verify`
 
 The exit code is 1 if any step failed (`WARN <step> failed (rc=N)`).
+
+## What's new in the logs
+
+```bash
+sudo noctyx log-digest                 # every Linux node: count, compare, keep (the nightly run)
+sudo noctyx log-digest --host gpu-01   # one node: look, and keep nothing
+sudo noctyx log-digest --show          # the last digest
+```
+
+Each node counts its own journal of the last 24 hours (priority warning and worse) by kind: the unit and the
+message with numbers, hex, ids and interface names taken out, so a line that came 38,000 times is one kind. The
+head keeps which kinds each host has shown (`<state>/log-kinds.json`, forgotten after 14 days without them), and a
+kind first seen tonight is new. A host's first night only records. When there are new kinds and an
+[assistant](assistant.md) is set up, it says in a few lines which deserve a look.
+
+The digest holds log lines, so it is an operator's: the command, and Ask's `log_digest` tool. The morning brief
+is told only how many new kinds each machine has. Nothing is alerted on: it is what to read with the brief.
 
 ## Detached jobs and `follow`
 

@@ -99,7 +99,10 @@ Regenerate them with `python3 tools/screenshots.py`.
 - Every critical component on every machine (restic, rest-server, Prometheus, Alertmanager, node_exporter, the
   agent) checked nightly against Noctyx's pin and the latest release, as alerts with an upgrade button. A site
   can take a newer Prometheus, Alertmanager or node_exporter than Noctyx pins (`noctyx versions-pin`, or the
-  alert's *take* button), verified against the release's own SHA-256 sums.
+  alert's *take* button), verified against the release's own SHA-256 sums. Each offered release comes with what
+  it changes, read from its release notes by the site's LLM.
+- A nightly log digest: every node's warnings and errors counted by kind, and the kinds no earlier night had,
+  with the LLM's reading of which matter (`noctyx log-digest`).
 - `noctyx status`: each host's newest path speed, the last actions in plain words.
 - Macs are monitored, not backed up: vitals, GPU power, LLM servers and their Time Machine status.
 

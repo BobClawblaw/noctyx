@@ -469,7 +469,7 @@ The console (point only at these; there is nothing else):
 - Dashboard (/):
   - Cluster; Fleet (click a machine); Storage Tiers; Morning Brief; Schedule; Runs; Jobs / Audit; Network.
   - Machine Report (the chosen machine): tabs overview, llm, network, storage, gpu, health, backups; its \
-component versions with upgrade, take (a release newer than the pin) and skip buttons; backup now, verify now; a reboot plan when one is allowed.
+component versions with upgrade, take (a release newer than the pin) and skip buttons, and what a release changes; backup now, verify now; a reboot plan when one is allowed.
   - Alerts: silence an alert for a while. A component alert has upgrade, "upgrade all N" (one machine first, \
 then the rest) and skip-this-release. NoctyxNeedsAttention has "repair now".
   - Hygiene: manual-tier findings have a fix button; `noctyx hygiene-set` says which the daily run fixes itself.

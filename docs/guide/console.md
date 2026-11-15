@@ -74,7 +74,8 @@ A bare `/#gpu-01` selects a host.
 - **Components:** every critical component Noctyx tracks on that machine (Noctyx itself, restic, rest-server,
   Prometheus, node_exporter, the agent) with the installed version, Noctyx's pin, the latest upstream release, its
   state, and the buttons that act on it: *upgrade* where Noctyx installs it, *take* a release newer than the pin
-  (Prometheus, Alertmanager, node_exporter), *skip* a newer release, *unskip*
+  (Prometheus, Alertmanager, node_exporter), *skip* a newer release, *unskip*, and *what X changes*: the
+  release notes in a few lines
   (see [upgrade](upgrade.md#acting-on-a-component-alert)). The table
   is `noctyx versions`' last run (nightly, or by hand); the line under it says when. See
   [upgrade](upgrade.md#component-versions).
