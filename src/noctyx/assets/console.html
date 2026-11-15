@@ -183,6 +183,7 @@ a.menu-title{text-decoration:none;display:inline-flex;align-items:center;gap:6px
 .askmsg pre{font:12px/1.45 var(--mono);background:var(--bg-0);border:1px solid var(--line-soft);border-radius:var(--radius-sm);padding:8px 10px;overflow:auto;white-space:pre;margin:4px 0}
 .askmsg .by{display:block;font:10px var(--mono);color:var(--fg-faint);margin-top:3px}
 .askmsg.err{color:var(--bad);font-size:12px}
+.askact{border:1px solid var(--line);border-radius:var(--radius-sm);padding:8px 10px;margin:2px 0;display:flex;flex-direction:column;gap:6px;align-items:flex-start} .askact .askwhy{font-size:12px;color:var(--fg-dim)}
 .asktool{font:11.5px var(--mono);color:var(--fg-dim)} .asktool summary{cursor:pointer;list-style:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .asktool summary::before{content:'▸ ';color:var(--fg-faint)}
 .asktool[open] summary::before{content:'▾ '} .asktool.bad summary{color:var(--warn)}
 .asktool pre{max-height:260px;overflow:auto;font:11px/1.4 var(--mono);background:var(--bg-0);border:1px solid var(--line-soft);border-radius:var(--radius-sm);padding:6px 8px;margin:4px 0 0;white-space:pre-wrap;word-break:break-all}
@@ -1281,7 +1282,7 @@ function setClose(){$('setwrap').classList.add('hide')}
 
 /* ── Ask Noctyx (copilot.py): a conversation with the site's assistant, which looks things up with the
    console's own data before it answers. The LLM's text is built as text nodes, never HTML. ── */
-const ASK={sid:null,rev:0,busy:false,timer:null,hi:null,draft:''};
+const ASK={sid:null,rev:0,busy:false,timer:null,hi:null,draft:'',done:{}};
 try{ASK.sid=sessionStorage.getItem('nx_ask_sid')}catch(e){}
 const askEl=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e};
 function askInline(t){const f=document.createDocumentFragment();t.split(/(`[^`\n]+`|\*\*[^*\n]+\*\*)/).forEach(p=>{
@@ -1302,6 +1303,13 @@ function askItem(i){
  if(i.kind=='assistant'){const d=askEl('div','askmsg bot');d.append(askRich(i.text));if(i.model)$('askmodel').textContent=i.model;return d}
  if(i.kind=='tool'){const d=askEl('details','asktool'+(i.ok?'':' bad'));const a=Object.entries(i.args||{}).map(([k,v])=>k+'='+JSON.stringify(v)).join(' ');
   d.append(askEl('summary',null,(i.ok?'looked at ':'could not look at ')+i.tool+(a?' ('+a+')':'')),askEl('pre',null,i.out||''));return d}
+ if(i.kind=='action'){const d=askEl('div','askact');if(i.why)d.append(askEl('div','askwhy',i.why));
+  const b=askEl('button','act',i.label);b.title=`runs the console's ${i.action} action as you (${i.need}); nothing has run yet`;
+  if(ASK.done[i.id]){b.disabled=true;b.textContent=i.label+' · '+ASK.done[i.id]}
+  b.onclick=async()=>{if(!confirm(`${i.label}?\n\nOffered by the assistant${i.why?': '+i.why:''}\n\nIt runs as a job (Jobs / Audit shows it).`))return;
+   b.disabled=true;b.textContent=i.label+' · starting…';const r=await act(i.action,i.params);
+   ASK.done[i.id]=r&&r.error?'refused: '+r.error:'started';b.textContent=i.label+' · '+ASK.done[i.id];if(r&&r.error)b.disabled=false};
+  d.append(b);return d}
  if(i.kind=='error')return askEl('div','askmsg err',i.text);
  return askEl('div','askmsg',i.text||'')}
 function askRender(v){const L=$('asklog');if(!ASK.rev)L.textContent='';

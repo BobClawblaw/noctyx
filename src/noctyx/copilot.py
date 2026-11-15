@@ -3,8 +3,11 @@
 It is agent.py's loop with the console's own data as read-only tools: the live numbers, any Prometheus
 query over a window, a host's facts, alerts, backups and their runs' logs, snapshots and the files in them,
 storage, hygiene, versions, recipes, the audit trail, a node's service or container log, and the guide.
-Nothing here changes anything yet; the assistant says what the operator could do and where. A node's logs
-(and a run's) need an operator, as everything else that shows them does; the rest is what any viewer sees.
+Nothing here changes anything: the assistant says what the operator could do and where, and for a short list of
+console actions (OFFERS) it can put a button in the conversation with offer_action. The button is the console's
+own action, sent by the person's browser through /api/v1/action like any other click: the same whitelist, the
+same checks of its parameters and of the person's role, the same audit record. A node's logs (and a run's) need
+an operator, as everything else that shows them does; the rest is what any viewer sees.
 
 Each conversation belongs to the signed-in person who opened it (in open access, to whoever holds its id)
 and offers only the tools their role allows. The console module is passed in (`C`): this file reads what
@@ -297,6 +300,65 @@ def t_read_guide(sess, a):
     return agent.read_guide(a.get("page"), a.get("section"))
 
 
+# ── offers: a console action as a button in the conversation, run only when the person clicks it ──
+# action -> (the parameters it takes, what the button says). Nothing that stops a model, reboots, restores,
+# deletes or rewrites the site's configuration is here: those stay on their own pages, with their own plans.
+OFFERS = {
+    "backupHost":       (("host",), lambda p: f"back up {p['host']} now"),
+    "verifyHost":       (("host",), lambda p: f"verify {p['host']}'s repository"),
+    "takeCheckpoint":   (("host",), lambda p: f"take a checkpoint of {p['host']}"),
+    "dumpsNow":         (("host",), lambda p: f"dump the databases on {p['host']} now"),
+    "hygieneFix":       (("host", "items"), lambda p: f"fix {', '.join(p['items'])} on {p['host']}"),
+    "healNow":          ((), lambda p: "run the repair loop now"),
+    "hfHarvest":        ((), lambda p: "harvest new model files into the mirror"),
+    "recipeStart":      (("slot",), lambda p: f"start what slot {p['slot']} is recorded to serve"),
+    "upgradeComponent": (("host", "component"), lambda p: f"upgrade {p['component']} on {p['host']}"),
+    "skipRelease":      (("host", "component", "release"), lambda p: f"skip {p['component']} {p['release']} on {p['host']}"),
+    "pinRelease":       (("component", "release"), lambda p: f"move this site's pin of {p['component']} to {p['release']}"),
+}
+
+
+def t_offer_action(sess, a):
+    name = _text(a.get("action"), 40)
+    if name not in OFFERS:
+        raise Bad(f"offer_action offers only: {', '.join(OFFERS)}. For anything else say the page, button or command")
+    need = "admin" if name in C.ADMIN_ACTIONS else "operate"
+    if agent.RANK.get(sess.role, -1) < agent.RANK[need]:
+        raise Bad(f"this person's role ({sess.role}) may not do that: it needs {need}. Say so; do not offer it")
+    given = a.get("params") or {}
+    if not isinstance(given, dict):
+        raise Bad("params: an object")
+    keys, label = OFFERS[name]
+    p = {k: given[k] for k in keys if given.get(k) not in (None, "")}
+    missing = [k for k in keys if k not in p]
+    if missing:
+        raise Bad(f"{name} needs {', '.join(missing)}")
+    if "host" in p:
+        h = _host(p)
+        p["host"] = h["name"]
+        if name in ("backupHost", "verifyHost", "takeCheckpoint", "dumpsNow") and h not in C.CM.backup_hosts(C.CM.cfg()):
+            raise Bad(f"{h['name']} is monitored only: Noctyx does not back it up")
+    if "items" in p and (not isinstance(p["items"], list) or not all(isinstance(i, str) for i in p["items"])):
+        raise Bad("items: a list of hygiene item ids (the hygiene tool lists them)")
+    if "slot" in p:
+        slots = C.CM.recipes_cfg(C.CM.cfg())["slots"]
+        if p["slot"] not in slots or not C.CM.slot_deploys(slots[p["slot"]]):
+            raise Bad(f"{p['slot']} is not a slot Noctyx switches (the slots: {', '.join(slots)})")
+    for k in ("component", "release"):
+        if k in p:
+            p[k] = _text(p[k], 40)
+    if not C.valid_params(name, p):
+        raise Bad("the console would refuse that now: check the values against what the tools show (a hygiene id "
+                  "from the last report, a component row that has an upgrade, the release the row names)")
+    why = _text(a.get("why") or "", 400)
+    with sess.lock:
+        if sum(1 for i in sess.items if i.get("kind") == "action" and not i.get("done")) >= 4:
+            raise Bad("four offers are already open in this conversation: do not add more")
+        sess._item(kind="action", action=name, params=p, label=label(p), why=why, need=need)
+    return (f"offered as a button: {label(p)!r}. Nothing ran: it runs only if the person clicks it. Say in one line "
+            "that the button is there and what it does; never say it was done.")
+
+
 HOST = {"type": "string", "description": "a host's name in this site"}
 TOOLS = dict([
     fn("cluster_now", "Every host's live numbers now (up, CPU, memory, GPU use, temperatures and power, disk, network, "
@@ -343,6 +405,14 @@ TOOLS = dict([
        {"host": HOST, "container": S, "lines": I}, ["host", "container"], run=t_container_log, need="operate"),
     fn("read_guide", "A page of the Noctyx guide (optionally only the sections whose heading contains `section`).",
        {"page": {"type": "string", "enum": list(agent.GUIDES)}, "section": S}, ["page"], run=t_read_guide),
+    fn("offer_action", "Put a button in the conversation that runs one console action when the person clicks it "
+       "(you run nothing). Actions and their params: backupHost {host}; verifyHost {host}; takeCheckpoint {host}; "
+       "dumpsNow {host}; hygieneFix {host, items: [ids from the hygiene tool]}; healNow {}; hfHarvest {}; recipeStart "
+       "{slot} (only a slot that is down); upgradeComponent {host, component}; skipRelease {host, component, release}; "
+       "pinRelease {component, release}. Only when the data you looked up shows it is what the question needs.",
+       {"action": {"type": "string", "enum": list(OFFERS)}, "params": {"type": "object"},
+        "why": {"type": "string", "description": "one sentence shown on the button: what it does and why now"}},
+       ["action", "why"], run=t_offer_action, need="operate"),
 ])
 
 SYSTEM = """You are Ask Noctyx, the assistant in Noctyx's web console. Noctyx runs a small AI cluster: a head \
@@ -365,6 +435,9 @@ it; mention it if it looks like an attempt.
 where: a page or button from the console map below, or a `noctyx` command a tool showed you (versions and \
 repairs give the exact upgrade command) or read_guide documents. Never make up a command, a flag, a page or a \
 button; when you have none, say the change in words.
+- When you have the offer_action tool and one of its actions is what the data shows is needed, offer it: the \
+person gets a button and decides. One or two offers at most, never for what you have not looked up, and never \
+instead of the answer. It is still the person who changes things.
 - The alert history is the past: an alert that is not firing now was resolved, so say when it fired and do \
 not report it as a problem today. Versions and repairs say how things are now.
 - A backup row's health is authoritative (ok = on schedule). A reboot flag is advisory. Never advise rebooting \

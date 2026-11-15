@@ -1,5 +1,5 @@
 """Ask Noctyx: the console's assistant looks things up with read-only tools, within the asker's role, and never
-sees a secret a tool's output carried."""
+sees a secret a tool's output carried. It can offer a console action as a button; it never runs one."""
 import http.server
 import json
 import threading
@@ -98,7 +98,7 @@ def test_redaction():
 
 def test_tools_are_reads_and_a_role_gets_only_its_own(console, monkeypatch):
     assert all(t["readonly"] for t in copilot.TOOLS.values())
-    assert {n for n, t in copilot.TOOLS.items() if t["need"] != "view"} == {"run_log", "containers", "service_log", "container_log"}
+    assert {n for n, t in copilot.TOOLS.items() if t["need"] != "view"} == {"run_log", "containers", "service_log", "container_log", "offer_action"}
     assert "service_log" not in copilot.start("vic", "view").tools()
     monkeypatch.setitem(copilot.Copilot.TOOLS, "restart_it", agent.fn("restart_it", "x", {}, readonly=False,
                                                                      run=lambda s, a: "restarted")[1])
@@ -271,3 +271,80 @@ def test_a_site_may_write_its_own_prompt_and_notes(console, monkeypatch):
     a["ask_prompt"] = "{broken"                      # a stored prompt that no longer checks out: the built-in one
     p = copilot.preview("ana", "view")
     assert not p["custom"] and p["notes"] and p["system"].startswith("You are Ask Noctyx")
+
+
+# ── offers: a console action as a button the person clicks ─────────────────
+@pytest.fixture()
+def offers(console):
+    """The parts of the console an offer is checked against."""
+    cm = console.CM
+    cm.cfg = lambda: {"recipes": {"slots": {"gpu": {"head": "gpu-01", "port": 1}, "mac": {"head": "mac-01", "port": 2, "deploy": False}}}}
+    cm.backup_hosts = lambda c: [console.CFG["hosts"][0]]
+    cm.recipes_cfg = lambda c: {"slots": c["recipes"]["slots"]}
+    cm.slot_deploys = lambda s: s.get("deploy", True) is not False
+    console.ADMIN_ACTIONS = {"upgradeComponent", "pinRelease"}
+    console.valid_params = lambda name, p: not (name == "hygieneFix" and p["items"] != ["journal"])
+    return console
+
+
+def _offer(sess, **a):
+    return copilot.TOOLS["offer_action"]["run"](sess, a)
+
+
+def test_an_offer_is_a_button_and_nothing_runs(offers):
+    _LLM.replies = [_call("offer_action", "c1", action="backupHost", params={"host": "gpu-01", "extra": "x"}, why="its last backup failed"),
+                    {"content": "There is a button to back it up."}]
+    s = copilot.start("olga", "operate")
+    s.say("gpu-01 has no backup since Monday")
+    _settle(s)
+    act, = [i for i in s.items if i["kind"] == "action"]
+    assert act == {**act, "action": "backupHost", "params": {"host": "gpu-01"}, "label": "back up gpu-01 now",
+                   "why": "its last backup failed", "need": "operate"}
+    said = [m for m in _LLM.seen[-1]["messages"] if m["role"] == "tool"][0]["content"]
+    assert "Nothing ran" in said and "only if the person clicks" in said
+    assert not s.props and not s.jobs                                  # no proposal to approve, no job started
+    assert copilot.TOOLS["offer_action"]["readonly"]                   # to the loop it is a read: it changes nothing
+
+
+def test_a_viewer_has_no_offers_and_an_operator_none_of_an_admins(offers):
+    assert "offer_action" not in copilot.start("vic", "view").tools()
+    op = copilot.start("olga", "operate")
+    with pytest.raises(agent.Bad, match="needs admin"):
+        _offer(op, action="pinRelease", params={"component": "prometheus", "release": "9.9.9"}, why="x")
+    _offer(copilot.start("ada", "admin"), action="pinRelease", params={"component": "prometheus", "release": "9.9.9"}, why="x")
+
+
+def test_an_offer_is_checked_like_the_click_would_be(offers):
+    s = copilot.start("olga", "operate")
+    for bad, why in (({"action": "reboot", "params": {"host": "gpu-01"}}, "offers only"),
+                     ({"action": "recipeStop", "params": {"slot": "gpu"}}, "offers only"),
+                     ({"action": "backupHost", "params": {}}, "needs host"),
+                     ({"action": "backupHost", "params": {"host": "nope"}}, "not a host"),
+                     ({"action": "backupHost", "params": {"host": "mac-01"}}, "monitored only"),
+                     ({"action": "backupHost", "params": "gpu-01"}, "an object"),
+                     ({"action": "recipeStart", "params": {"slot": "mac"}}, "not a slot Noctyx switches"),
+                     ({"action": "hygieneFix", "params": {"host": "gpu-01", "items": "journal"}}, "a list"),
+                     ({"action": "hygieneFix", "params": {"host": "gpu-01", "items": ["old-kernels"]}}, "would refuse")):
+        with pytest.raises(agent.Bad, match=why):
+            _offer(s, why="x", **bad)
+    assert not [i for i in s.items if i["kind"] == "action"]
+    _offer(s, action="hygieneFix", params={"host": "gpu-01", "items": ["journal"]}, why="3 GB of journal")
+    _offer(s, action="healNow", why="a unit is down")
+    assert [i["label"] for i in s.items if i["kind"] == "action"] == ["fix journal on gpu-01", "run the repair loop now"]
+    for _ in range(2):
+        _offer(s, action="healNow", why="again")
+    with pytest.raises(agent.Bad, match="four offers"):
+        _offer(s, action="healNow", why="again")
+
+
+def test_every_offer_is_a_console_action_with_those_parameters():
+    import re
+    src = (__import__("pathlib").Path(copilot.__file__).parent / "console.py").read_text()
+    table = src[src.index("\nACTIONS = {"):src.index("\nVALID_PROFILES")]
+    for name, (keys, _) in copilot.OFFERS.items():
+        m = re.search(rf'"{name}":\s*lambda( p)?:', table)
+        assert m, name
+        assert bool(m.group(1)) == bool(keys), name                     # takes params exactly when the action does
+    for never in ("reboot", "restore", "prune", "recipeStop", "recipeDeploy", "recipeRollback", "revertChange",
+                  "setPolicy", "setHeal", "setAssistant", "configRestore"):
+        assert never not in copilot.OFFERS
