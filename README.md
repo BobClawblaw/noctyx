@@ -2,7 +2,7 @@
 
 <p align="center">
   <img alt="status: alpha" src="https://img.shields.io/badge/status-alpha-f5a524">
-  <img alt="version 0.1.0" src="https://img.shields.io/badge/version-0.1.0-38e1ff">
+  <img alt="version 0.9.5" src="https://img.shields.io/badge/version-0.9.5-38e1ff">
   <img alt="license: Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-e16087">
   <img alt="python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-3776ab?logo=python&logoColor=white">
   <img alt="no dependencies" src="https://img.shields.io/badge/dependencies-none%20(stdlib)-2ea043">
@@ -21,7 +21,7 @@ LLM that explains what it sees, and **heals** what breaks. Built for DGX Spark p
 small inference clusters. The head runs on Linux or macOS; the machines it backs up are Linux, and a Mac is
 monitored (Time Machine backs it up).
 
-> **Status: alpha (0.1).** Extracted from a single-site implementation that has run a production GPU
+> **Status: alpha (0.9.5).** Extracted from a single-site implementation that has run a production GPU
 > cluster since 2026-09; that cluster now runs on Noctyx. See [docs/PLAN.md](docs/PLAN.md) for what is built,
 > what was added lately and what is still open.
 
