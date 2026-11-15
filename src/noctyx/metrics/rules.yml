@@ -191,6 +191,16 @@ groups:
     for: 10m
     labels: {severity: warning}
     annotations: {summary: "{{ $labels.engine }} on {{ $labels.host }}:{{ $labels.port }} stopped answering /metrics"}
+  - alert: AssistantDown
+    expr: @METRIC_PREFIX@_assistant_endpoints_up == 0
+    for: 30m
+    labels: {severity: warning}
+    annotations: {summary: "none of the assistant's endpoints answers: no alert triage, morning brief, diagnosis or Ask until a model server is back (Configure › Assistant LLM)"}
+  - alert: AssistantOnFallback
+    expr: @METRIC_PREFIX@_assistant_preferred_up == 0 and on() @METRIC_PREFIX@_assistant_endpoints_up > 0
+    for: 6h
+    labels: {severity: info}
+    annotations: {summary: "the assistant's own endpoint {{ $labels.url }} has not answered for 6 h; it runs on a fallback model server (Configure › Assistant LLM)"}
   - alert: LLMQueueBacklog
     expr: max by(host, model_name)(vllm:num_requests_waiting) > 20
     for: 10m

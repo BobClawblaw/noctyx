@@ -70,6 +70,7 @@ from noctyx import accounts as AC                    # noqa: E402
 from noctyx import hostos                            # noqa: E402
 from noctyx import sshlog as SSHLOG                  # noqa: E402
 from noctyx import copilot as COP                    # noqa: E402
+from noctyx import llm as LLM                        # noqa: E402
 
 NX_HOME = pathlib.Path(__file__).resolve().parent
 CFG_PATH = CONFIG
@@ -1549,19 +1550,7 @@ def assistant_cfg():
 
 def _assistant_endpoints(a):
     """Preferred endpoint first, then any serving endpoint discovery knows."""
-    eps = [(a.get("url"), a.get("model"), a.get("key_host"))] if a.get("url") else []
-    for hn, t in ((llm_topology().get("hosts") or {}) if a.get("fallback", True) else {}).items():
-        for srv in t.get("servers", []):
-            if srv.get("role") == "serving" and srv.get("engine") in ("vllm", "sglang", "llamacpp", "mtplx", "tensorfold"):
-                base = srv.get("upstream") or (f"http://{srv['target']}" if srv.get("target") else None)
-                if base:
-                    eps.append((base + "/v1", srv.get("model"), hn))
-    seen, out = set(), []
-    for e in eps:
-        e = (e[0], e[1], e[2] if len(e) > 2 else None)
-        if e[0] and e[:2] not in seen:
-            seen.add(e[:2]); out.append(e)
-    return out
+    return LLM.endpoints(a, llm_topology())
 
 
 KEY_DIR = pathlib.Path(P["llm_keys"])
@@ -1573,6 +1562,9 @@ def assistant_summary():
     a = dict(CM.cfg().get("assistant") or {})
     a = {k: v for k, v in a.items() if not k.startswith("_")}
     a["has_key"] = bool(a.get("key_host") and _api_key(a["key_host"]))
+    h = LLM.health()               # which endpoint answered last, and how many answer now
+    a["health"] = {k: h.get(k) for k in ("asked", "answered", "model", "fallback", "error", "probed", "up", "total",
+                                         "preferred")}
     eps = []
     for hn, tp in (llm_topology().get("hosts") or {}).items():
         for srv in tp.get("servers", []):
@@ -1650,52 +1642,12 @@ def _api_key(host):
         return None
 
 
-_MODELS = {}
-
-
-def _served_model(url, hdr):
-    """The first model an OpenAI-compatible endpoint lists (cached 10 minutes), or None."""
-    hit = _MODELS.get(url)
-    if hit and hit[0] > time.time() - 600:
-        return hit[1]
-    try:
-        with urllib.request.urlopen(urllib.request.Request(url.rstrip("/") + "/models", headers=hdr), timeout=10) as r:
-            m = next((x.get("id") for x in json.loads(r.read()).get("data", []) if x.get("id")), None)
-    except Exception:
-        m = None
-    _MODELS[url] = (time.time(), m)
-    return m
-
-
 def assistant_ask(user, max_tokens=350, system=SYSTEM_PROMPT):
     """-> (text, model) or (None, reason). Tries the preferred endpoint, then fallbacks."""
     a = assistant_cfg()
     if not a:
         return None, "assistant disabled"
-    last = "no endpoint"
-    for url, model, host in _assistant_endpoints(a):
-        body = {"model": model, "temperature": 0.2, "max_tokens": max_tokens,
-                "chat_template_kwargs": {"enable_thinking": False},
-                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
-        hdr = {"Content-Type": "application/json"}
-        # the assistant's key goes to the assistant's own url only; a discovered server gets its own key file
-        key = _api_key(a.get("key_host")) if url == a.get("url") else _api_key(host)
-        if key:
-            hdr["Authorization"] = f"Bearer {key}"
-        if not model:                    # "empty = the endpoint's first": what /v1/models lists first
-            model = body["model"] = _served_model(url, hdr)
-        try:
-            req = urllib.request.Request(url.rstrip("/") + "/chat/completions", data=json.dumps(body).encode(), headers=hdr)
-            with urllib.request.urlopen(req, timeout=int(a.get("timeout_seconds", 60))) as r:
-                d = json.loads(r.read())
-            m = (d.get("choices") or [{}])[0].get("message") or {}
-            text = (m.get("content") or "").strip() or (m.get("reasoning_content") or "").strip()
-            if text:
-                return text, model
-            last = f"{model}: empty answer"
-        except Exception as e:
-            last = f"{model}: {str(e)[:80]}"
-    return None, last
+    return LLM.ask_any(a, system, user, max_tokens=max_tokens, topo=llm_topology())
 
 
 def explain_hygiene(host, item_id):
@@ -1978,8 +1930,23 @@ def metrics_text():
         for (chk, host), k in n.items():
             out.append(f"noctyx_heal_repairs_24h{_lbl(check=chk, host=host)} {k}")
 
+    def assistant():
+        a = assistant_cfg()
+        if not a:
+            return
+        h = LLM.probe(a, topo=llm_topology())
+        out.append("# HELP noctyx_assistant_endpoints_up The assistant's endpoints (its own, then the fallbacks) that list a model.")
+        out.append(f"noctyx_assistant_endpoints_up {h.get('up', 0)}")
+        out.append(f"noctyx_assistant_endpoints {h.get('total', 0)}")
+        if h.get("preferred") is not None:
+            out.append(f"noctyx_assistant_preferred_up{_lbl(url=a.get('url') or '')} {int(bool(h['preferred']))}")
+        if h.get("asked"):
+            out.append(f"noctyx_assistant_last_asked_timestamp_seconds {h['asked']}")
+            out.append(f"noctyx_assistant_last_ask_ok {int(bool(h.get('answered')))}")
+
     sources = [("schedule", schedule), ("snapshots", snapshots), ("storage", storage), ("endpoint", endpoint),
-               ("runs", jobs), ("hygiene", hygiene), ("components", components), ("heal", repairs)]
+               ("runs", jobs), ("hygiene", hygiene), ("components", components), ("heal", repairs),
+               ("assistant", assistant)]
     if CM.cfg()["server"].get("nas_ssh"):        # RAID state needs ssh to the NAS; a site without it has none
         sources.append(("nas_raid", raid))
     for name, fn in sources:

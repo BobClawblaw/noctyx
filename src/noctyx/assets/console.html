@@ -2959,6 +2959,7 @@ function hftFiles(out,row,sk,s,depth){
 function asSection(A){
  const eps=(A.endpoints||[]).map((e,i)=>`<option value="${i}">${esc(e.host)} · ${esc(e.model||'?')} · ${esc(e.engine||'')} — ${esc(e.url)}</option>`).join('');
  return `<div class=cfgsec id=sec-assistant><h4>Assistant LLM</h4><p class=gnote>The model Noctyx asks to explain findings, triage alerts and write the morning brief. Text only: it never runs anything.</p>
+  ${asHealth(A)}
   <div class=setrow><label>Use the assistant</label><div><input type=checkbox class=sw id=as-on${A.enabled===true?' checked':''} onchange="cfgDirty()"></div></div>
   <div class=setrow><label>Endpoint</label><div><input id=as-url class=asin value="${esc(A.url||'')}" placeholder="http://host:port/v1" oninput="cfgDirty()">
     ${eps?`<select id=as-pick onchange="asPick(this.value)" style="margin-top:6px"><option value="">or pick one Noctyx sees serving…</option>${eps}</select>`:''}</div>
@@ -3026,6 +3027,11 @@ function asPick(i){const A=(PANELS.find(x=>x.id=='config')._data||{}).assistant|
  $('as-url').value=e.url;$('as-model').value=e.model||'';cfgDirty()}
 function asVals(){return {enabled:$('as-on').checked,url:$('as-url').value.trim(),model:$('as-model').value.trim(),
  timeout_seconds:Number($('as-to').value)||60,fallback:$('as-fb').checked,ask_notes:$('as-notes').value,ask_prompt:$('as-prompt').value}}
+/* which endpoint answered the assistant's last request, and how many of its endpoints answer now */
+function asHealth(A){const h=A.health||{};if(!A.enabled||(!h.asked&&h.up==null))return '';
+ const now=h.up==null?'':h.up===0?`<b class=bad>no endpoint answers now</b>`:h.preferred===false?`<b class=warn>its own endpoint does not answer</b>: ${esc(h.up)} fallback${h.up==1?'':'s'} do`:`<b class=ok>${esc(h.up)} of ${esc(h.total)} endpoints answer</b>`;
+ const last=!h.asked?'':h.answered?`last answer ${esc(agoS(h.asked))} from <b>${esc(h.model||'?')}</b> (${esc(h.answered)})${h.fallback?' <span class=warn>a fallback</span>':''}`:`<span class=bad>last request ${esc(agoS(h.asked))} got no answer</span>: ${esc(h.error||'')}`;
+ return `<div class=setrow><label>Now</label><div>${[now,last].filter(Boolean).join(' · ')}</div></div>`}
 function asBuiltin(){const A=(PANELS.find(x=>x.id=='config')._data||{}).assistant||{};$('as-prompt').value=A.ask_builtin||'';cfgDirty()}
 /* downloads need an operator. Signed in (or open access): the link just works. Token mode: a browser
    link cannot carry the bearer token, so ask for a 60 s signed ticket and follow the link with it. */

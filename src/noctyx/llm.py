@@ -116,6 +116,109 @@ def discover(addresses=("127.0.0.1",), ports=COMMON_PORTS, timeout=1.5):
     return sorted(found, key=lambda r: r["ms"])
 
 
+# ── every endpoint the assistant may use, and asking the first that answers ──
+TOPO = pathlib.Path(P["console_state"]) / "llm-topology.json"       # what llm-discover found serving
+HEALTH = pathlib.Path(P["console_state"]) / "assistant-health.json"  # which endpoints answered, last asked
+SERVING_ENGINES = ("vllm", "sglang", "llamacpp", "mtplx", "tensorfold")
+PROBE_EVERY = 300
+
+
+def endpoints(a, topo=None):
+    """[(url, model, key name)]: the assistant's own endpoint first, then (unless "fallback" is false) every
+    serving model server discovery knows. A discovered server's key is the file named after its host."""
+    eps = [(a.get("url"), a.get("model") or None, a.get("key_host"))] if a.get("url") else []
+    if a.get("fallback", True):
+        if topo is None:
+            try:
+                topo = json.loads(TOPO.read_text())
+            except (OSError, ValueError):
+                topo = {}
+        for hn, t in (topo.get("hosts") or {}).items():
+            for srv in t.get("servers", []):
+                if srv.get("role") == "serving" and srv.get("engine") in SERVING_ENGINES:
+                    base = srv.get("upstream") or (f"http://{srv['target']}" if srv.get("target") else None)
+                    if base:
+                        eps.append((base + "/v1", srv.get("model"), hn))
+    seen, out = set(), []
+    for e in eps:
+        if e[0] and e[:2] not in seen:
+            seen.add(e[:2])
+            out.append(e)
+    return out
+
+
+def _save_health(d):
+    try:
+        HEALTH.parent.mkdir(parents=True, exist_ok=True)
+        tmp = HEALTH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(d))
+        os.replace(tmp, HEALTH)
+    except OSError:
+        pass
+
+
+def health():
+    try:
+        return json.loads(HEALTH.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def ask_any(a, system, user, max_tokens=350, temperature=0.2, topo=None):
+    """-> (text, the model that answered) from the first endpoint that answers, or (None, why). An endpoint that
+    refuses the configured model name (the model behind it was swapped) is asked again for whatever it serves.
+    Which endpoint answered goes to the health file: the console says when the assistant runs on a fallback."""
+    eps = endpoints(a, topo)
+    last = "no endpoint"
+    msgs = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    timeout = int(a.get("timeout_seconds", 60))
+    for i, (url, model, key_name) in enumerate(eps):
+        key = _key(key_name)
+        for name in ([model, None] if model else [None]):
+            try:
+                m, used = complete(url, msgs, model=name, key=key, timeout=timeout, max_tokens=max_tokens,
+                                   temperature=temperature)
+            except urllib.error.HTTPError as e:
+                last = f"{name or url}: HTTP {e.code}"
+                if e.code in (400, 404) and name:
+                    continue                    # the name is not served there: ask for what is
+                break
+            except Exception as e:
+                last = f"{name or url}: {str(getattr(e, 'reason', e))[:80]}"
+                break
+            text = (m.get("content") or "").strip() or (m.get("reasoning_content") or "").strip()
+            if text:
+                _save_health({**health(), "asked": time.time(), "answered": url, "model": used, "fallback": i > 0,
+                              "error": None})
+                return text, used
+            last = f"{used}: empty answer"
+            break
+    _save_health({**health(), "asked": time.time(), "answered": None, "error": last})
+    return None, last
+
+
+def probe(a, max_age=PROBE_EVERY, topo=None):
+    """Which of the assistant's endpoints list a model right now (cheap: /models, no completion), cached in the
+    health file -> {"probed", "preferred": bool or None, "up": n, "total": n}."""
+    h = health()
+    if time.time() - h.get("probed", 0) < max_age and "up" in h:
+        return h
+    eps = endpoints(a, topo)
+
+    def one(e):
+        try:
+            return bool(models(e[0], _key(e[2]), timeout=4))
+        except Exception:
+            return False
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, min(8, len(eps)))) as ex:
+        ok = list(ex.map(one, eps))
+    h = {**health(), "probed": time.time(), "total": len(eps), "up": sum(ok),
+         "preferred": ok[0] if eps and a.get("url") else None,
+         "serving": [e[0] for e, o in zip(eps, ok) if o]}
+    _save_health(h)
+    return h
+
+
 def configured(config=CONFIG):
     """The site's assistant block, or None when there is no config yet or it is off."""
     try:
@@ -175,13 +278,7 @@ def ask(question, system=None, max_tokens=500, a=None):
     a = a or configured()
     if not a:
         return None, "no assistant configured (noctyx init sets one up)"
-    try:
-        return chat(a["url"], [{"role": "system", "content": system or SETUP_PROMPT},
-                               {"role": "user", "content": question}],
-                    model=a.get("model") or None, key=_key(a.get("key_host")),
-                    timeout=int(a.get("timeout_seconds", 60)), max_tokens=max_tokens)
-    except Exception as e:
-        return None, str(getattr(e, "reason", e))[:160]
+    return ask_any(a, system or SETUP_PROMPT, question, max_tokens=max_tokens)
 
 
 def setup_help(step, error, context=""):
