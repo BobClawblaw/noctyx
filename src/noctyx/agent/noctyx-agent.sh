@@ -343,6 +343,55 @@ cmd_verify() {
   return $rc
 }
 
+# ── restore rehearsal: a few small files out of the newest system snapshot, compared with the live ones ──
+# Proves the path a real restore takes (the endpoint, this node's key, the repository, restic restore) end to
+# end, without touching the live tree: the files go to a scratch directory that is removed afterwards. A file
+# that differs from the live one is a failure only if the live one is older than the snapshot.
+cmd_rehearse() {
+  local dir="$STATE/rehearsal" t0 rc snap sid stime
+  local -a files=( /etc/hostname /etc/fstab /etc/passwd /etc/group ) inc=()   # regular files every Linux has
+  t0=$(date +%s)
+  snap=$("${RESTIC[@]}" snapshots --no-lock --host "$(hostname -s)" --tag "profile-system" --latest 1 --json 2>/dev/null \
+         | python3 -c 'import json,sys
+s=json.load(sys.stdin)
+print(s[-1]["id"], s[-1]["time"]) if s else print("")' 2>/dev/null)
+  read -r sid stime <<<"$snap"
+  if [[ ! $sid =~ ^[0-9a-f]{8,64}$ ]]; then
+    emit "{\"event\":\"rehearsal\",\"host\":\"$(hostname -s)\",\"repo\":\"$REPO_ID\",\"rc\":3,\"error\":\"no system snapshot to restore from\",\"ts\":\"$(date -u -Is)\"}"
+    return 3
+  fi
+  rm -rf "$dir"; mkdir -p "$dir"; chmod 700 "$dir"
+  for f in "${files[@]}"; do inc+=( --include "$f" ); done
+  log "rehearsal: restoring ${files[*]} from $sid into $dir"
+  "${RESTIC[@]}" restore "$sid" --target "$dir" "${inc[@]}" > "$STATE/last-rehearsal.log" 2>&1; rc=$?
+  tail -2 "$STATE/last-rehearsal.log" >&2
+  python3 - "$dir" "$stime" "$rc" "$sid" "$(hostname -s)" "$REPO_ID" "$(( $(date +%s) - t0 ))" "${files[@]}" <<'PY' > "$STATE/rehearsal.json"
+import datetime, hashlib, json, os, re, sys
+d, stime, rc, sid, host, repo, secs, files = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4], sys.argv[5], sys.argv[6], int(sys.argv[7]), sys.argv[8:]
+t = datetime.datetime.fromisoformat(re.sub(r"(\.\d{6})\d+", r"\1", stime).replace("Z", "+00:00")).timestamp()
+sha = lambda p: hashlib.sha256(open(p, "rb").read()).hexdigest()
+same, changed, missing, differs = [], [], [], []
+for f in files:
+    r = d + f
+    if not os.path.isfile(r):
+        missing.append(f)
+    elif os.path.isfile(f) and sha(f) == sha(r):
+        same.append(f)
+    elif not os.path.isfile(f) or os.path.getmtime(f) > t:
+        changed.append(f)                 # the live file changed after the snapshot: nothing to compare with
+    else:
+        differs.append(f)
+ok = rc == 0 and bool(same or changed) and not differs
+print(json.dumps({"event": "rehearsal", "host": host, "repo": repo, "snapshot": sid[:8], "snapshot_time": stime[:19],
+                  "rc": 0 if ok else (rc or 1), "restored": len(same) + len(changed) + len(differs), "same": len(same),
+                  "changed_since": len(changed), "missing": missing, "differs": differs, "seconds": secs,
+                  "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}))
+PY
+  rm -rf "$dir"
+  emit "$(cat "$STATE/rehearsal.json")"
+  python3 -c 'import json,sys; sys.exit(json.load(open(sys.argv[1]))["rc"])' "$STATE/rehearsal.json"
+}
+
 # ── checkpoints: a known state of this machine before something changes it ──
 # A system snapshot younger than --max-age is the checkpoint as it is (it costs nothing); else a new one
 # is taken, tagged "checkpoint" and "before-<reason>" (a fixed set of tags, so retention, which groups by
@@ -593,6 +642,7 @@ case "${1:-backup}" in
     emit "{\"event\":\"checkpoint-after\",\"host\":\"$(hostname -s)\",\"reason\":\"$2\",\"ts\":\"$(date -u -Is)\"}";;
   fs-meta) take_job_lock; fs_meta "$META/$(date -u +%Y%m%dT%H%M%SZ)";;
   verify) shift; take_job_lock; cmd_verify "$@";;
+  rehearse) shift; take_job_lock; cmd_rehearse;;
   retention) shift; take_job_lock; cmd_retention "$@";;
   # NOTE the ordering bug this replaced: `shift` then `"${1:-snapshots}"` meant
   # `--json` became the subcommand and `snapshots` was passed as a path.

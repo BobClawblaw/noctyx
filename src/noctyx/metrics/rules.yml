@@ -29,6 +29,16 @@ groups:
     for: 5m
     labels: {severity: warning}
     annotations: {summary: "a {{ $labels.cmd }} job{{ if $labels.host }} on {{ $labels.host }}{{ end }} ended without an exit record (killed?)"}
+  - alert: RestoreRehearsalFailed
+    expr: @METRIC_PREFIX@_restore_rehearsal_ok == 0
+    for: 1h
+    labels: {severity: warning}
+    annotations: {summary: "{{ $labels.host }}: the restore rehearsal failed — files restored from its newest snapshot were missing or differ from the live ones (sudo noctyx rehearse --host {{ $labels.host }})"}
+  - alert: RestoreRehearsalOverdue
+    expr: @METRIC_PREFIX@_restore_rehearsal_overdue == 1
+    for: 36h
+    labels: {severity: warning}
+    annotations: {summary: "{{ $labels.host }}: no restore rehearsal within the site's interval: its backups are unproven (the nightly run does it: sudo noctyx rehearse --host {{ $labels.host }})"}
   - alert: RepoUnreadable
     expr: @METRIC_PREFIX@_repo_unreadable == 1
     for: 30m

@@ -596,6 +596,82 @@ def cmd_verify(a):
         print(f"{h['name']:<12} verify rc={res.get('rc')} (subset {subset})")
 
 
+# ── restore rehearsal: every node restores a few files from its newest snapshot and compares them ──
+REHEARSAL_FILE = STATE_DIR / "rehearsal.json"
+REHEARSAL_EVERY = {"daily": 86400, "weekly": 7 * 86400, "monthly": 30 * 86400}
+
+
+def rehearsal_every(c):
+    """Seconds between rehearsals (verification.restore_rehearsal: daily, weekly, monthly; "off": None)."""
+    v = (c.get("verification") or {}).get("restore_rehearsal", "monthly")
+    return REHEARSAL_EVERY.get(str(v).lower())
+
+
+def rehearsals():
+    try:
+        return json.loads(REHEARSAL_FILE.read_text())
+    except (OSError, ValueError):
+        return {"hosts": {}}
+
+
+def rehearsal_due(c, state=None, now=None):
+    """The backed-up hosts whose last rehearsal is older than the site's interval, or that never had one."""
+    gap = rehearsal_every(c)
+    if gap is None:
+        return []
+    now = now or time.time()
+    seen = (state or rehearsals()).get("hosts") or {}
+    return [h["name"] for h in backup_hosts(c) if now - (seen.get(h["name"]) or {}).get("ts", 0) >= gap]
+
+
+def cmd_rehearse(a):
+    """noctyx rehearse [--host H] [--due]: each node restores a few small files from its newest system snapshot
+    into a scratch directory and compares them with the live ones: the path a real restore takes, proven
+    regularly. --due: only the hosts whose last rehearsal is older than verification.restore_rehearsal (the
+    nightly run)."""
+    c = cfg()
+    targets = [host_by_name(c, a.host)] if a.host else backup_hosts(c)
+    if a.host and targets[0] not in backup_hosts(c):
+        sys.exit(f"{a.host} is monitored only: there is no backup of it to restore from")
+    state = rehearsals()
+    if a.due:
+        due = set(rehearsal_due(c, state))
+        targets = [h for h in targets if h["name"] in due]
+        if not targets:
+            print("rehearse: no host is due" + ("" if rehearsal_every(c) else " (verification.restore_rehearsal is off)"))
+            return
+    bad = 0
+    for h in targets:
+        try:
+            r = ssh(c, h, f"{AGENT} rehearse", timeout=1800)
+            line = result_lines(r.stdout or "")
+            res = json.loads(line[-1]) if line else {"event": "rehearsal", "host": h["name"], "rc": r.returncode or 1,
+                                                     "error": (r.stderr or "no result").strip()[-200:]}
+        except subprocess.TimeoutExpired:
+            res = {"event": "rehearsal", "host": h["name"], "rc": 124, "error": "no answer in 30 minutes"}
+        res["host"] = h["name"]
+        ok = res.get("rc") == 0
+        bad += not ok
+        audit(**res)
+        state.setdefault("hosts", {})[h["name"]] = {"ts": time.time(), "ok": ok, **{k: res.get(k) for k in (
+            "snapshot", "snapshot_time", "same", "changed_since", "missing", "differs", "seconds", "error")}}
+        if ok:
+            print(f"  ✓ {h['name']:<12} snapshot {res.get('snapshot')} ({res.get('snapshot_time')}): {res.get('same')} file(s) "
+                  f"restored identical" + (f", {res['changed_since']} changed since" if res.get("changed_since") else "")
+                  + f" in {res.get('seconds')}s")
+        else:
+            why = res.get("error") or (f"differs from the live file: {', '.join(res['differs'])}" if res.get("differs")
+                                       else f"nothing restored (missing: {', '.join(res.get('missing') or [])})")
+            print(f"  ✗ {h['name']:<12} {why}")
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = REHEARSAL_FILE.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state, indent=1))
+    os.chmod(tmp, 0o644)
+    os.replace(tmp, REHEARSAL_FILE)
+    print(f"rehearse: {len(targets) - bad}/{len(targets)} restored and matched")
+    sys.exit(1 if bad else 0)
+
+
 def _repo_env(repo):
     """env for a restic run as the repository owner on repo (key via environment, never argv)."""
     env = {k: v for k, v in os.environ.items() if not k.startswith("RESTIC_")}
@@ -3737,11 +3813,12 @@ def cmd_versions(a):
 
 # ── head-node setup and the nightly run ─────────────────────────────────────
 def cmd_nightly(a):
-    """Maintenance after the backup window: mirror harvest, recipe discovery; on Sundays the retention
-    dry-run and verify. Each step runs in its own process so one failure never skips the rest."""
+    """Maintenance after the backup window: mirror harvest, recipe discovery, the versions check, a restore
+    rehearsal on the hosts that are due one; on Sundays the retention dry-run and verify. Each step runs in its
+    own process so one failure never skips the rest."""
     me = [sys.executable, str(pathlib.Path(__file__).resolve())]
     env = {**os.environ, "NOCTYX_FOREGROUND": "1"}
-    steps = [["hf-harvest"], ["recipe-discover"], ["versions"]]
+    steps = [["hf-harvest"], ["recipe-discover"], ["versions"], ["rehearse", "--due"]]
     if datetime.datetime.now().isoweekday() == 7:
         steps += [["prune"], ["verify"]]
     print(f"=== noctyx nightly {datetime.datetime.now().isoformat(timespec='seconds')} ===", flush=True)
@@ -3930,6 +4007,8 @@ def main():
     b.add_argument("--dry-run", action="store_true"); b.add_argument("--force-low-net", action="store_true")
     s = sub.add_parser("snapshots"); s.add_argument("--host"); s.add_argument("--limit", type=int)
     v = sub.add_parser("verify"); v.add_argument("--host"); v.add_argument("--subset")
+    rh = sub.add_parser("rehearse", help="each node restores a few files from its newest snapshot and compares them (a restore, proven)")
+    rh.add_argument("--host"); rh.add_argument("--due", action="store_true", help="only hosts whose last rehearsal is older than verification.restore_rehearsal")
     pr = sub.add_parser("prune", help="retention on the NAS repos (dry-run unless --apply)")
     pr.add_argument("--host"); pr.add_argument("--apply", action="store_true")
     pr.add_argument("--forget", action="append", metavar="ID",
@@ -4086,7 +4165,7 @@ def main():
                                          and not (a.yes or getattr(a, "prepare_only", False)))):
         detach(a)
     handler = {"status": cmd_status, "hosts": cmd_hosts, "backup": cmd_backup, "snapshots": cmd_snapshots,
-               "verify": cmd_verify, "prune": cmd_prune, "copy": cmd_copy, "capacity": cmd_capacity,
+               "verify": cmd_verify, "rehearse": cmd_rehearse, "prune": cmd_prune, "copy": cmd_copy, "capacity": cmd_capacity,
                "probe": cmd_probe, "install-agent": cmd_install_agent, "directory": cmd_directory,
                "tick": cmd_tick, "follow": cmd_follow, "schedule-set": cmd_schedule_set,
                "nas-rest": cmd_nas_rest, "restore": cmd_restore, "hygiene": cmd_hygiene, "hygiene-set": cmd_hygiene_set,

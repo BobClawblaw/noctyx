@@ -1930,6 +1930,21 @@ def metrics_text():
         for (chk, host), k in n.items():
             out.append(f"noctyx_heal_repairs_24h{_lbl(check=chk, host=host)} {k}")
 
+    def rehearsal():
+        c = CM.cfg()
+        gap = CM.rehearsal_every(c)
+        if gap is None:
+            return
+        seen = CM.rehearsals().get("hosts") or {}
+        out.append("# HELP noctyx_restore_rehearsal_ok 1: the host's last restore rehearsal restored files that match the live ones.")
+        for h in CM.backup_hosts(c):
+            r = seen.get(h["name"])
+            l = _lbl(host=h["name"])
+            if r:
+                out.append(f"noctyx_restore_rehearsal_ok{l} {int(bool(r.get('ok')))}")
+                out.append(f"noctyx_restore_rehearsal_timestamp_seconds{l} {r.get('ts', 0)}")
+            out.append(f"noctyx_restore_rehearsal_overdue{l} {int(now - (r or {}).get('ts', 0) > gap + 3 * 86400)}")
+
     def assistant():
         a = assistant_cfg()
         if not a:
@@ -1946,7 +1961,7 @@ def metrics_text():
 
     sources = [("schedule", schedule), ("snapshots", snapshots), ("storage", storage), ("endpoint", endpoint),
                ("runs", jobs), ("hygiene", hygiene), ("components", components), ("heal", repairs),
-               ("assistant", assistant)]
+               ("assistant", assistant), ("rehearsal", rehearsal)]
     if CM.cfg()["server"].get("nas_ssh"):        # RAID state needs ssh to the NAS; a site without it has none
         sources.append(("nas_raid", raid))
     for name, fn in sources:
