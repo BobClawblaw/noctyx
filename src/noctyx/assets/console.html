@@ -3027,6 +3027,11 @@ function asPick(i){const A=(PANELS.find(x=>x.id=='config')._data||{}).assistant|
  $('as-url').value=e.url;$('as-model').value=e.model||'';cfgDirty()}
 function asVals(){return {enabled:$('as-on').checked,url:$('as-url').value.trim(),model:$('as-model').value.trim(),
  timeout_seconds:Number($('as-to').value)||60,fallback:$('as-fb').checked,ask_notes:$('as-notes').value,ask_prompt:$('as-prompt').value}}
+/* a slot's answer check: do its model's replies to the fixed prompts still match the recorded ones */
+function ansLine(n,a){if(!a||!a.state)return '';
+ if(a.state=='changed'||a.state=='wrong')return `<div class=drift title="${esc(a.detail||'')}">⚠ answers ${esc(a.state)} ${esc(agoS(a.ts))}: ${esc((a.prompts||[]).length)} fixed prompt${(a.prompts||[]).length==1?'':'s'} <span class=mut>· <code>noctyx slot-check --slot ${esc(n)}</code></span></div>`;
+ if(a.state=='ok'||a.state=='recorded')return `<div class=mut style="font-size:11px" title="a few fixed prompts, asked greedily, compared with the replies recorded for this deployment">answers ${a.state=='ok'?'<span class=ok>as recorded</span>':'recorded'} · checked ${esc(agoS(a.ts))}</div>`;
+ return `<div class=mut style="font-size:11px">answers not checked: ${esc(a.state)} ${esc(a.detail||'')}</div>`}
 /* which endpoint answered the assistant's last request, and how many of its endpoints answer now */
 function asHealth(A){const h=A.health||{};if(!A.enabled||(!h.asked&&h.up==null))return '';
  const now=h.up==null?'':h.up===0?`<b class=bad>no endpoint answers now</b>`:h.preferred===false?`<b class=warn>its own endpoint does not answer</b>: ${esc(h.up)} fallback${h.up==1?'':'s'} do`:`<b class=ok>${esc(h.up)} of ${esc(h.total)} endpoints answer</b>`;
@@ -3112,6 +3117,7 @@ function rRecipes(d){
   <div>deployment <b>${esc(rcLabel(c))}</b>${c&&c.deployed_ts?` <span class=mut>${esc(agoS(c.deployed_ts))}</span>`:''}${c&&c.adopted?' <span class=mut>(adopted: from before Noctyx; '+esc(c.unit)+')</span>':''}${c&&c.state=='stopped'?' <span class=warn>stopped</span>':''}</div>
   <div class=rm>${L.ok?`<span class=ok>serving</span> ${esc((L.models||[]).join(', '))}${L.connections!=null?` <span class=mut>· ${esc(L.connections)} connected</span>`:''}`:`<span class=bad>not serving</span> <span class=mut>${esc(L.error||L.status||'')}</span>`}</div>
   ${s.drift?`<div class=drift>⚠ ${esc(s.drift)}${L.ok?` <span class=mut>· swapped by hand? <code>noctyx recipe-adopt --slot ${esc(n)} --unit UNIT</code> records it</span>`:''}</div>`:s.unrecorded?`<div class=mut style="font-size:11px">no record of which models this serves, so a swap goes unnoticed: <code>noctyx recipe-adopt --slot ${esc(n)}</code> records what answers now</div>`:''}
+  ${ansLine(n,s.answers)}
   ${s.deploy===false?`<div class=mut style="font-size:11px">watch-only: Noctyx reports this slot and never switches it</div>`:''}
   ${prep?`<div class=mut style="font-size:11px">prepared: ${prep}</div>`:''}
   <div class=ract>

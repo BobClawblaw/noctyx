@@ -241,7 +241,8 @@ def slot(cluster, monkeypatch):
                     "catalog": {"new": {"repo": "https://example.org/new.git", "kind": "systemd", "slots": ["gpu"]}}}
     open(o.CFG_PATH, "w").write(json.dumps(c, indent=2))
     o._save_recipe_state({"slots": {"gpu": {"current": dict(OLD)}}})
-    sw = {"calls": [], "rc": {}}                         # rc per target recipe; default 0
+    sw = {"calls": [], "rc": {}, "answers": 0}           # rc per target recipe; default 0
+    monkeypatch.setattr(o, "_answers_after", lambda c, s: sw.__setitem__("answers", sw["answers"] + 1))
 
     def switch(c, slot, frm, to, wait_lock=0):
         sw["calls"].append((o.rec_label(frm), o.rec_label(to)))
@@ -276,7 +277,9 @@ def test_a_deploy_switches_and_keeps_the_old_one_to_go_back_to(slot):
     assert prev["recipe"] == "old" and hist[0]["event"] == "deploy" and hist[0]["rc"] == 0
     assert slot["calls"] == [("old@aaaaaaaaaaaa", "new@bbbbbbbbbbbb")]
     assert events()[-1]["event"] == "recipe-deploy" and events()[-1]["replaced"] == "old@aaaaaaaaaaaa"
+    assert slot["answers"] == 1                                          # what came up is asked the fixed prompts
     assert op("rollback") == 0                                           # and back
+    assert slot["answers"] == 2
     cur, prev, _ = o.slot_records(o.cfg(), "gpu")
     assert cur["recipe"] == "old" and prev["recipe"] == "new" and slot["calls"][-1] == ("new@bbbbbbbbbbbb", "old@aaaaaaaaaaaa")
 
@@ -296,7 +299,7 @@ def test_a_deploy_that_does_not_come_up_switches_back(slot, capsys):
     slot["rc"]["new"] = 79
     with pytest.raises(SystemExit) as e:
         deploy()
-    assert e.value.code == 79
+    assert e.value.code == 79 and slot["answers"] == 0
     assert slot["calls"] == [("old@aaaaaaaaaaaa", "new@bbbbbbbbbbbb"), ("new@bbbbbbbbbbbb", "old@aaaaaaaaaaaa")]
     cur, prev, hist = o.slot_records(o.cfg(), "gpu")
     assert cur["recipe"] == "old" and prev is None and hist[0]["rolled_back"] is True and hist[0]["rc"] == 79
@@ -324,12 +327,12 @@ def test_stop_and_start_keep_the_deployment_and_its_state(slot, monkeypatch):
     assert op("stop", yes=False) == 2 and slot["calls"] == []
     assert op("stop") == 0 and slot["calls"] == [("old@aaaaaaaaaaaa", "nothing")]
     cur, prev, _ = o.slot_records(o.cfg(), "gpu")
-    assert cur["recipe"] == "old" and cur["state"] == "stopped" and prev is None
+    assert cur["recipe"] == "old" and cur["state"] == "stopped" and prev is None and slot["answers"] == 0
     o._slot_op(argparse.Namespace(slot="gpu", yes=False, wait_lock=0), "start")   # still answering: nothing to do
     assert len(slot["calls"]) == 1
     monkeypatch.setattr(o, "recipe_live", lambda c, n, timeout=3: {"ok": False, "models": []})
     assert op("start", yes=False) == 0 and slot["calls"][-1] == ("nothing", "old@aaaaaaaaaaaa")
-    assert o.slot_records(o.cfg(), "gpu")[0]["state"] == "serving"
+    assert o.slot_records(o.cfg(), "gpu")[0]["state"] == "serving" and slot["answers"] == 1
     with pytest.raises(SystemExit, match="nothing to roll back to"):
         o._slot_op(argparse.Namespace(slot="gpu", yes=True, wait_lock=0), "rollback")
 

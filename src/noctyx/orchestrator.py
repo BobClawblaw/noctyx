@@ -2678,6 +2678,22 @@ def _llm_refresh(wait=False):
                        env={**os.environ, "PYTHONPATH": str(NX_HOME.parent)})
 
 
+def _answers_after(c, slot):
+    """After a switch that came up: ask the fixed prompts (noctyx.answers). A new deployment's replies become
+    its baseline; the same deployment started again must answer as recorded. Never fails the switch."""
+    try:
+        from noctyx import answers
+        if answers.every(c) is None:
+            return
+        rec = answers.check_slot(c, slot)
+        print("  answers  " + answers.describe(slot, rec), flush=True)
+        last = rec.get("last") or {}
+        audit("slot-check", slot=slot, state=last.get("state"), model=last.get("model"), prompts=last.get("prompts"),
+              after="switch")
+    except Exception as e:
+        print(f"  (the answer check did not run: {str(e)[:120]})")
+
+
 def recipe_plan(c, slot, name=None, ref=None):
     s = recipe_slot(c, slot)
     cur, prev, _ = slot_records(c, slot)
@@ -2752,6 +2768,7 @@ def cmd_recipe_deploy(a):
                       replaced=rec_label(cur), down_s=round(time.time() - t1))
                 print(f"✓ {a.slot}: {rec_label(new)} serving {', '.join(models)} "
                       f"(switch took {fmt_duration(time.time() - t1)})")
+                _answers_after(c, a.slot)
                 _llm_refresh()
                 return
             if rc == 75:
@@ -2804,6 +2821,8 @@ def _slot_op(a, what):
                 _record(a.slot, event={"event": what, "to": rec_label(to or cur), "rc": rc})
             audit(f"recipe-{what}", slot=a.slot, rc=rc, target=rec_label(to or cur), models=models)
             print(("✓ " if rc == 0 else "✗ ") + f"{what} {a.slot}: rc={rc}" + (f", serving {', '.join(models)}" if models else ""))
+            if rc == 0 and what != "stop":
+                _answers_after(cfg(), a.slot)
             _llm_refresh()
             sys.exit(rc)
     except SpindleBusy:
@@ -2823,10 +2842,17 @@ def cmd_recipe_rollback(a):
     _slot_op(a, "rollback")
 
 
+def _slot_check(a):
+    from noctyx import answers
+    return answers.cmd_slot_check(a)
+
+
 def recipe_summary(c, live=True):
     """Slots (config, current/previous/history, live answer) and the catalog — CLI status and the UI."""
     rc_ = recipes_cfg(c)
     st = _recipe_state()["slots"]
+    from noctyx import answers
+    ans = answers.summary()
     slots = {}
     for n, s in rc_["slots"].items():
         cur, prev, hist = slot_records(c, n)
@@ -2840,7 +2866,7 @@ def recipe_summary(c, live=True):
         unrecorded = bool(lv.get("ok") and not exp and (cur is None or cur.get("adopted")))
         slots[n] = {"head": s["head"], "worker": s.get("worker"), "port": s["port"], "lock": s.get("lock"),
                     "current": cur, "previous": prev, "history": hist[:10], "live": lv, "drift": drift,
-                    "unrecorded": unrecorded, "deploy": slot_deploys(s),
+                    "unrecorded": unrecorded, "deploy": slot_deploys(s), "answers": ans.get(n),
                     "prepared": {k: {x: v.get(x) for x in ("sha", "ref", "prepared_ts")} for k, v in
                                  ((st.get(n) or {}).get("prepared") or {}).items()},
                     "recipes": [k for k, v in rc_["catalog"].items() if n in (v.get("slots") or [])],
@@ -2876,6 +2902,11 @@ def cmd_recipe_status(a):
                   f"`noctyx recipe-adopt --slot {n}` records what answers now")
         if not s["deploy"]:
             print("          watch-only (deploy: false): Noctyx reports it and never switches it")
+        an = s.get("answers") or {}
+        if an.get("state") in ("changed", "wrong"):
+            print(f"          ! answers {an['state']}: {an.get('detail')}  (`noctyx slot-check --slot {n}`)")
+        elif an.get("state"):
+            print(f"          answers {an['state']}, checked {fmt_duration(time.time() - (an.get('ts') or 0))} ago")
         if s["busy"]:
             print(f"          busy: {s['busy']}")
     print("catalog:")
@@ -3959,6 +3990,9 @@ def main():
     rad.add_argument("--name", help="what to call it (default: the model ids)")
     rad.add_argument("--spark-dir", help="a spark recipe's checkout, so a later switch runs `spark down` there")
     rad.add_argument("--yes", action="store_true", help="really record it (without: print what would change)")
+    sck = sub.add_parser("slot-check", help="ask each slot's model a few fixed prompts and compare with the replies recorded for it")
+    sck.add_argument("--slot"); sck.add_argument("--json", action="store_true")
+    sck.add_argument("--accept", action="store_true", help="record the present replies as the baseline (a change that was meant)")
     rcat = sub.add_parser("recipe-catalog", help="add/replace (--json) or --remove a catalog recipe")
     rcat.add_argument("--name", required=True); g2 = rcat.add_mutually_exclusive_group(required=True)
     g2.add_argument("--json"); g2.add_argument("--remove", action="store_true")
@@ -4060,7 +4094,7 @@ def main():
                "policy-show": cmd_policy_show, "dumps": cmd_dumps, "hf-harvest": cmd_hf_harvest,
                "recipe-deploy": cmd_recipe_deploy, "recipe-stop": cmd_recipe_stop, "recipe-start": cmd_recipe_start,
                "recipe-rollback": cmd_recipe_rollback, "recipe-status": cmd_recipe_status,
-               "recipe-catalog": cmd_recipe_catalog, "recipe-adopt": cmd_recipe_adopt, "recipe-discover": discover.cmd_recipe_discover, "nightly": cmd_nightly, "install-head": cmd_install_head, "console-set": cmd_console_set, "user": cmd_user, "setup": cmd_setup, "assistant-set": cmd_assistant_set, "versions": cmd_versions,
+               "recipe-catalog": cmd_recipe_catalog, "recipe-adopt": cmd_recipe_adopt, "slot-check": _slot_check, "recipe-discover": discover.cmd_recipe_discover, "nightly": cmd_nightly, "install-head": cmd_install_head, "console-set": cmd_console_set, "user": cmd_user, "setup": cmd_setup, "assistant-set": cmd_assistant_set, "versions": cmd_versions,
                "upgrade": cmd_upgrade, "versions-skip": cmd_versions_skip, "versions-pin": cmd_versions_pin, "heal": cmd_heal, "heal-set": cmd_heal_set,
                "changes": cmd_changes, "ssh-log": lambda a: __import__("noctyx.sshlog").sshlog.cmd(a), "revert": cmd_revert, "checkpoint": cmd_checkpoint, "checkpoints": cmd_checkpoints,
                "checkpoint-set": cmd_checkpoint_set, "config-history": cmd_config_history, "signals-set": cmd_signals_set,

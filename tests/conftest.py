@@ -34,7 +34,10 @@ def site_config():
 
 @pytest.fixture(autouse=True, scope="session")
 def no_site_pins():
-    """The pins are the table's own: never a real site's version-pins.json on the machine that runs the tests."""
+    """The pins are the table's own: never a real site's state on the machine that runs the tests."""
     from noctyx import components
     components.SITE_PINS_FILE = _SITE_FILE.parent / "version-pins.json"
     components.apply_site_pins({})
+    from noctyx import answers, llm
+    answers.FILE = _SITE_FILE.parent / "slot-answers.json"          # nor its slots' recorded replies
+    llm.HEALTH = _SITE_FILE.parent / "assistant-health.json"

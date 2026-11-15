@@ -24,6 +24,9 @@ playbook (PLAYBOOKS):
              component is older than Noctyx's pin             run, waiting soak_minutes between machines
   serving    a slot answers with other models than its        none: somebody swapped the model by hand. For a
              recorded deployment's, for 15 min                person: noctyx recipe-adopt records it
+  answers    a slot's model answers fixed prompts differently none: what is behind the port changed (an engine
+             from the replies recorded for it, or wrongly     build, a cache setting, weights, hardware). For a
+             (asked hourly: noctyx.answers)                   person: noctyx slot-check --accept if it was meant
 
 Safety, on top of each playbook's own checks (site config "heal", validate_policy):
   - each thing is repaired at most 3 times in 6 hours; then it needs a person (NoctyxNeedsAttention);
@@ -82,6 +85,7 @@ PLAYBOOKS = {
     "slots":    ("on", "a model server listed in restart_slots, down 15 min: start it again"),
     "upgrades": ("on", "upgrades.auto only: a component older than Noctyx's pin, upgraded in the window"),
     "serving":  ("on", "a slot serves other models than the recorded deployment's: for a person (recipe-adopt)"),
+    "answers":  ("on", "a slot's model no longer answers fixed prompts as recorded, or answers wrongly: for a person"),
 }
 MODES = ("on", "shadow", "off")
 # which playbook an alert wakes (the console's alert webhook runs `noctyx heal --host H` for these)
@@ -824,6 +828,37 @@ def check_serving(c, st):
     return out
 
 
+# ── what each slot's model answers (noctyx.answers), asked every recipes.answer_check_every ────
+def check_answers(c, st):
+    """Ask each serving slot the fixed prompts when its last check is old enough, and report a slot whose
+    replies changed or are wrong. Between checks the last result stands."""
+    from noctyx import answers
+    cm = _cm()
+    out = []
+    gap = answers.every(c)
+    if gap is None:
+        return out
+    seen = answers.load()
+    for n, s in cm.recipes_cfg(c)["slots"].items():
+        last = (seen.get(n) or {}).get("last") or {}
+        if time.time() - last.get("ts", 0) >= gap and not cm.spindle_holder(f"recipe-{n}"):
+            last = answers.check_slot(c, n).get("last") or {}
+            _note("note", answers.describe(n, {"last": last}), s["head"])
+            cm.audit("slot-check", slot=n, state=last.get("state"), model=last.get("model"), prompts=last.get("prompts"))
+        if last.get("state") == "changed":
+            out.append(Finding("answers", s["head"], f"slot {n}: {last.get('model')} no longer answers the fixed "
+                               "prompts as recorded", detail=str(last.get("detail"))[:300],
+                               why="what is behind the port changed (an engine build, a cache or precision setting, "
+                                   f"weights, hardware). Meant? `noctyx slot-check --slot {n} --accept` records the "
+                                   "new replies; otherwise put the recorded deployment back"))
+        elif last.get("state") == "wrong":
+            out.append(Finding("answers", s["head"], f"slot {n}: {last.get('model')} answers simple prompts wrongly",
+                               detail=str(last.get("detail"))[:300],
+                               why=f"the model is up and its output is broken: `noctyx slot-check --slot {n}` asks "
+                                   "again; restart or roll back the deployment"))
+    return out
+
+
 # ── model servers (only the slots in heal.restart_slots) ────────────────────
 def check_slots(c, st, pol):
     cm = _cm()
@@ -1056,6 +1091,7 @@ def _run_locked(c, dry, log, only):
         found += check("backups", check_backups, c)
         found += check("slots", check_slots, c, st, pol)
         found += check("serving", check_serving, c, st)
+        found += check("answers", check_answers, c, st)
     found += check("upgrades", check_upgrades, c, st, pol, only)
     tries = {k: [t for t in v if now - t < WINDOW] for k, v in (st.get("tries") or {}).items()}
     old = {p["key"]: p for p in st.get("problems") or []}
