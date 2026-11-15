@@ -62,6 +62,9 @@ def test_endpoints_are_the_assistants_own_then_what_discovery_found(health):
     a = {"url": "http://192.0.2.21:8000/v1", "model": "m1", "key_host": "assistant"}
     assert llm.endpoints(a, t) == [("http://192.0.2.21:8000/v1", "m1", "assistant"),       # listed once
                                    ("http://192.0.2.22:9502/v1", "m2", "gpu-02")]
+    stale = {**a, "model": "an-old-name"}                           # the model behind its own url was swapped
+    assert [e[:2] for e in llm.endpoints(stale, t)] == [("http://192.0.2.21:8000/v1", "an-old-name"),
+                                                        ("http://192.0.2.22:9502/v1", "m2")]   # still one per url
     assert llm.endpoints({**a, "fallback": False}, t) == [("http://192.0.2.21:8000/v1", "m1", "assistant")]
     assert llm.endpoints({"fallback": True}, t)[0] == ("http://192.0.2.21:8000/v1", "m1", "gpu-01")
     (health / "llm-topology.json").write_text(json.dumps(t))                               # read from the file too

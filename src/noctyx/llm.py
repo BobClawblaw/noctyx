@@ -140,9 +140,9 @@ def endpoints(a, topo=None):
                     if base:
                         eps.append((base + "/v1", srv.get("model"), hn))
     seen, out = set(), []
-    for e in eps:
-        if e[0] and e[:2] not in seen:
-            seen.add(e[:2])
+    for e in eps:                       # one entry per URL: the assistant's own stays first, with its model name
+        if e[0] and e[0] not in seen:
+            seen.add(e[0])
             out.append(e)
     return out
 
