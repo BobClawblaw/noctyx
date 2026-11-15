@@ -248,6 +248,15 @@ def t_repairs(sess, a):
                         for r in change.ledger(200) if r.get("ts_epoch", 0) >= since][::-1][:30]}
 
 
+def t_log_digest(sess, a):
+    from noctyx import logdigest
+    d = logdigest.load(logdigest.DIGEST)
+    if not d:
+        return "no digest yet: the nightly run makes one (noctyx log-digest)"
+    return {"made": time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(d.get("ts", 0))), "hosts": d.get("hosts"),
+            "the_assistants_reading": d.get("summary")}
+
+
 def t_recipes(sess, a):
     r = C.CM.recipe_summary(C.CM.cfg())
     slots = {n: {"head": s["head"], "worker": s.get("worker"), "port": s["port"], "live": s.get("live"), "drift": s.get("drift"),
@@ -405,6 +414,8 @@ TOOLS = dict([
        {"host": HOST, "unit": S, "lines": I, "since_minutes": I}, ["host", "unit"], run=t_service_log, need="operate"),
     fn("container_log", "The end of a Docker container's log on a Linux host.",
        {"host": HOST, "container": S, "lines": I}, ["host", "container"], run=t_container_log, need="operate"),
+    fn("log_digest", "Last night's digest of every Linux node's logs: how many warning and error lines, in how many "
+       "kinds, and the kinds that appeared on no earlier night, with counts.", {}, run=t_log_digest, need="operate"),
     fn("read_guide", "A page of the Noctyx guide (optionally only the sections whose heading contains `section`).",
        {"page": {"type": "string", "enum": list(agent.GUIDES)}, "section": S}, ["page"], run=t_read_guide),
     fn("offer_action", "Put a button in the conversation that runs one console action when the person clicks it "

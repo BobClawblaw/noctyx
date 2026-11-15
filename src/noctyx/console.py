@@ -1723,17 +1723,22 @@ def digest(force=False):
     healed = [f"{r['host']}: {r['what']} -> {r['how']} ({'repaired' if r['ok'] else 'failed: ' + r['detail']})" for r in hl["repairs"]]
     open_ = [f"{x['host']}: {x['what']}" for x in hl["problems"] if x.get("needs_person")]
     nodes = {h: {k: d.get(k) for k in ("up", "gpu_util", "gpu_temp", "root_pct", "failed_units", "reboot")} for h, d in (fm.get("hosts") or {}).items()}
+    from noctyx import logdigest
+    newlog = logdigest.counts()            # numbers only: what the lines say is for an operator (noctyx log-digest)
     ctx = ("Write the operator's morning brief for the cluster as 5-8 short lines (no headings, no markdown tables). "
            "Lead with anything wrong; then backups, then the LLM servers, then housekeeping; end with one line on what deserves attention today, if anything.\n"
            "Rules: the backup 'health' field is authoritative (ok = on schedule; do not call an ok host late or behind). "
            "'reboot' on a node is an advisory package flag that may lag by 15 minutes and is NOT a reason to reboot a node serving a model; mention it at most as 'flagged'. "
            "Housekeeping 'info' items are routine; only 'warning' items deserve attention. "
-           "Self-repairs are what Noctyx fixed on its own: mention them in one line; problems it could not repair need the operator.\n"
+           "Self-repairs are what Noctyx fixed on its own: mention them in one line; problems it could not repair need the operator. "
+           "New log kinds are warning or error lines a machine logged last night and on no earlier night: if any, say which "
+           "machines and how many in one line, and that `noctyx log-digest --show` lists them.\n"
            f"UTC now: {_utcnow()}\nBackups (health vs schedule): {json.dumps(rows)}\n"
            f"Active alerts: {json.dumps(al.get('active'))}\nNodes: {json.dumps(nodes)}\nLLM servers: {json.dumps(llm)}\n"
            f"Last 24 h: {json.dumps({k: I.get(k) for k in ('tokens_24h', 'requests_24h', 'gpu_wh_24h', 'nas_free', 'backups_ok', 'backups_total')})}\n"
            f"NAS RAID: {json.dumps(I.get('raid'))} sync: {json.dumps(I.get('raid_sync'))}\nOpen hygiene findings: {json.dumps(hyg)}\n"
-           f"Self-repairs in the last 24 h: {json.dumps(healed)}\nProblems Noctyx could not repair: {json.dumps(open_)}")
+           f"Self-repairs in the last 24 h: {json.dumps(healed)}\nProblems Noctyx could not repair: {json.dumps(open_)}\n"
+           f"New log kinds per machine: {json.dumps(newlog)}")
     text, model = assistant_ask(ctx, max_tokens=420)
     out = {"ts": time.time(), "text": text, "model": model if text else None, "error": None if text else model}
     if text or not cur:

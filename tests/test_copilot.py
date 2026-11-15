@@ -98,7 +98,7 @@ def test_redaction():
 
 def test_tools_are_reads_and_a_role_gets_only_its_own(console, monkeypatch):
     assert all(t["readonly"] for t in copilot.TOOLS.values())
-    assert {n for n, t in copilot.TOOLS.items() if t["need"] != "view"} == {"run_log", "containers", "service_log", "container_log", "offer_action"}
+    assert {n for n, t in copilot.TOOLS.items() if t["need"] != "view"} == {"run_log", "containers", "service_log", "container_log", "offer_action", "log_digest"}
     assert "service_log" not in copilot.start("vic", "view").tools()
     monkeypatch.setitem(copilot.Copilot.TOOLS, "restart_it", agent.fn("restart_it", "x", {}, readonly=False,
                                                                      run=lambda s, a: "restarted")[1])

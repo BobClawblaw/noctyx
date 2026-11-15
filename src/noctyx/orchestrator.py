@@ -2981,6 +2981,11 @@ def cmd_recipe_rollback(a):
     _slot_op(a, "rollback")
 
 
+def _log_digest(a):
+    from noctyx import logdigest
+    return logdigest.cmd_log_digest(a)
+
+
 def _slot_check(a):
     from noctyx import answers
     return answers.cmd_slot_check(a)
@@ -3878,11 +3883,11 @@ def cmd_versions(a):
 # ── head-node setup and the nightly run ─────────────────────────────────────
 def cmd_nightly(a):
     """Maintenance after the backup window: mirror harvest, recipe discovery, the versions check, a restore
-    rehearsal on the hosts that are due one; on Sundays the retention dry-run and verify. Each step runs in its
+    rehearsal on the hosts that are due one, what is new in the logs; on Sundays the retention dry-run and verify. Each step runs in its
     own process so one failure never skips the rest."""
     me = [sys.executable, str(pathlib.Path(__file__).resolve())]
     env = {**os.environ, "NOCTYX_FOREGROUND": "1"}
-    steps = [["hf-harvest"], ["recipe-discover"], ["versions"], ["rehearse", "--due"]]
+    steps = [["hf-harvest"], ["recipe-discover"], ["versions"], ["rehearse", "--due"], ["log-digest"]]
     if datetime.datetime.now().isoweekday() == 7:
         steps += [["prune"], ["verify"]]
     print(f"=== noctyx nightly {datetime.datetime.now().isoformat(timespec='seconds')} ===", flush=True)
@@ -4136,6 +4141,9 @@ def main():
     sck = sub.add_parser("slot-check", help="ask each slot's model a few fixed prompts and compare with the replies recorded for it")
     sck.add_argument("--slot"); sck.add_argument("--json", action="store_true")
     sck.add_argument("--accept", action="store_true", help="record the present replies as the baseline (a change that was meant)")
+    ldg = sub.add_parser("log-digest", help="what is new in each node's warnings and errors since earlier nights (the nightly run)")
+    ldg.add_argument("--host", help="one host: look, and keep nothing"); ldg.add_argument("--json", action="store_true")
+    ldg.add_argument("--show", action="store_true", help="print the last digest instead of making one")
     rcat = sub.add_parser("recipe-catalog", help="add/replace (--json) or --remove a catalog recipe")
     rcat.add_argument("--name", required=True); g2 = rcat.add_mutually_exclusive_group(required=True)
     g2.add_argument("--json"); g2.add_argument("--remove", action="store_true")
@@ -4237,7 +4245,7 @@ def main():
                "policy-show": cmd_policy_show, "dumps": cmd_dumps, "hf-harvest": cmd_hf_harvest,
                "recipe-deploy": cmd_recipe_deploy, "recipe-stop": cmd_recipe_stop, "recipe-start": cmd_recipe_start,
                "recipe-rollback": cmd_recipe_rollback, "recipe-status": cmd_recipe_status,
-               "recipe-catalog": cmd_recipe_catalog, "recipe-adopt": cmd_recipe_adopt, "slot-check": _slot_check, "recipe-discover": discover.cmd_recipe_discover, "nightly": cmd_nightly, "install-head": cmd_install_head, "console-set": cmd_console_set, "user": cmd_user, "setup": cmd_setup, "assistant-set": cmd_assistant_set, "versions": cmd_versions,
+               "recipe-catalog": cmd_recipe_catalog, "recipe-adopt": cmd_recipe_adopt, "slot-check": _slot_check, "log-digest": _log_digest, "recipe-discover": discover.cmd_recipe_discover, "nightly": cmd_nightly, "install-head": cmd_install_head, "console-set": cmd_console_set, "user": cmd_user, "setup": cmd_setup, "assistant-set": cmd_assistant_set, "versions": cmd_versions,
                "upgrade": cmd_upgrade, "versions-skip": cmd_versions_skip, "versions-pin": cmd_versions_pin, "heal": cmd_heal, "heal-set": cmd_heal_set,
                "changes": cmd_changes, "ssh-log": lambda a: __import__("noctyx.sshlog").sshlog.cmd(a), "revert": cmd_revert, "checkpoint": cmd_checkpoint, "checkpoints": cmd_checkpoints,
                "checkpoint-set": cmd_checkpoint_set, "config-history": cmd_config_history, "signals-set": cmd_signals_set,
