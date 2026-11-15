@@ -2057,7 +2057,7 @@ def alerts_view():
         for a in active:
             p = hp.get((heal.ALERT_CHECKS.get(a["name"]), a.get("host")))
             if p:
-                a["selfrepair"] = {k: p.get(k) for k in ("state", "why", "detail", "how", "check")}
+                a["selfrepair"] = {k: p.get(k) for k in ("state", "why", "detail", "how", "check", "diagnosis")}
     except Exception:
         pass
     sev = {"critical": 0, "warning": 1}
@@ -2505,7 +2505,8 @@ def machines_view():
             "snapshots": (((ov.get("snapshots") or {}).get("hosts") or {}).get(n) or {}).get("count"),
             "behind": behind, "newer": newer, "hygiene": hy, "reboot": M.get("reboot"), "failed_units": fu,
             "ssh": ssh, "fabric": fabric, "nfs": nfs, "nfs_hung_s": hung,
-            "repairs": [{"what": p["what"], "state": p.get("state"), "why": p.get("why")} for p in mine],
+            "repairs": [{"what": p["what"], "state": p.get("state"), "why": p.get("why"), "diagnosis": p.get("diagnosis")}
+                        for p in mine],
             "alerts": alerts})
     order = [x["name"] for x in ov["hosts"]]
     out.sort(key=lambda m: (rank[m["status"]], order.index(m["name"])))

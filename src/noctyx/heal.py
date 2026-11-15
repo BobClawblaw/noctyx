@@ -1186,6 +1186,12 @@ def _run_locked(c, dry, log, only):
     if only:
         problems += [p for k, p in old.items() if p["check"] != "heal" and
                      (p["host"] != only or p["check"] not in ran) and k not in {x["key"] for x in problems}]
+    if not dry:                     # a likely cause and a next step for what is a person's turn (noctyx.diagnose)
+        try:
+            from noctyx import diagnose
+            diagnose.attach(c, problems, old, repairs, log=log, note=rl.step)
+        except Exception as e:
+            rl.step("error", f"the diagnosis did not run: {type(e).__name__}: {e}")
     if not found:
         log("✓ everything Noctyx manages is as expected" + (f" on {only}" if only else ""))
     st.update(ts=now, problems=problems, repairs=repairs[-200:], tries={k: v for k, v in tries.items() if v},
