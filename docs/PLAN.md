@@ -2,7 +2,7 @@
 
 **Status:** pre-alpha. This tree is the clean home of the product; the code is being extracted from
 a private, single-site implementation that has run a real GPU cluster in production since 2026-09.
-**Date:** 2026-10-19 (status updated 2026-10-20)
+**Date:** 2026-10-19 (status updated 2026-11-15)
 
 ## Decisions taken
 
@@ -173,6 +173,24 @@ through the privacy check, none of its history. Order: config + inventory → jo
 protect (restic, schedule, dumps) → cache → deploy → watch → console API → web UI split out of
 Python → agent. Exit: a fresh site goes from `pip install` + `noctyx init` to nightly backups,
 a working model cache and one deployed recipe, with zero edits to code.
+
+**Added 2026-11-14 and 15, on the reference cluster first:**
+- *Deploy:* a model swapped by hand is recorded (`recipe-adopt`) and a later swap alerts; watch-only slots; an
+  answer check per slot (`slot-check`: fixed prompts, greedy, compared with the replies recorded for the
+  deployment, after every switch and hourly); who is on each slot's GPU and who holds its lock.
+- *Protect:* restore rehearsals (`rehearse`: every node restores a few files from its newest snapshot and compares
+  them, monthly, with alerts); a backup's retry after a stale repository lock now runs in the same tick.
+- *Watch:* a site's own pins for Prometheus, Alertmanager and node_exporter (`versions-pin`) with each release's
+  notes summarised; the daily hygiene run fixes the space items a site hands to it; a nightly log digest of what
+  is new in every node's warnings and errors; panels scroll sideways with a visible scrollbar.
+- *The assistant:* one client for every caller with fallback to any model server, its health shown and alerted;
+  a diagnosis under each problem self-repair leaves to a person; Ask can offer a console action as a button the
+  person clicks.
+- *Tests:* the schedule, the tick, backup refusals and recipe deploys run against a simulated cluster in CI
+  (stand-in nodes; not yet containers as nodes).
+
+Still open from these weeks: a second backup target, alerts routed to a phone, a slot actually deployed by Noctyx
+on the reference cluster (all three serve adopted, hand-started models), a bare-metal restore on real hardware.
 
 **Phase 2 — Harden (3–4 weeks). Started 2026-10-19:** console accounts (scrypt passwords, viewer /
 operator / admin, signed HttpOnly SameSite=Strict session cookies, sign-in lockout, Origin check on every

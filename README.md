@@ -22,7 +22,8 @@ small inference clusters. The head runs on Linux or macOS; the machines it backs
 monitored (Time Machine backs it up).
 
 > **Status: alpha (0.1).** Extracted from a single-site implementation that has run a production GPU
-> cluster since 2026-09; that cluster now runs on Noctyx. See [docs/PLAN.md](docs/PLAN.md).
+> cluster since 2026-09; that cluster now runs on Noctyx. See [docs/PLAN.md](docs/PLAN.md) for what is built,
+> what was added lately and what is still open.
 
 | | |
 |---|---|
