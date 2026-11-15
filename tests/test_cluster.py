@@ -399,6 +399,7 @@ def test_gpu_use_names_the_holder_the_waiters_and_the_gpus_processes():
     assert "could not read" in o.gpu_use_line({"error": "ssh timed out"})
 
 
+@pytest.mark.skipif(not __import__("os").path.exists("/proc/locks"), reason="the lock table is Linux's /proc/locks: slots are Linux hosts")
 def test_the_gpu_snippet_is_valid_shell_and_reads_the_real_lock_table(tmp_path, cluster):
     c = cluster.config()
     lock = tmp_path / "gpu.lock"
