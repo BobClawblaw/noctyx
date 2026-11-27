@@ -12,6 +12,16 @@ jobs:
         run: python3 tools/privacy_check.py
         env:
           NOCTYX_PRIVACY_PATTERNS: /var/lib/gh-runner/privacy-patterns
+      - name: shell and JS syntax checks
+        run: |
+          for f in $(find src -name '*.sh' | sort); do bash -n "$f" || exit 1; done
+          if command -v shellcheck >/dev/null; then
+            find src -name '*.sh' -print0 | xargs -0 shellcheck -S error
+          fi
+          if command -v node >/dev/null; then
+            node --check src/noctyx/assets/theme.js
+            node --check src/noctyx/assets/console.js
+          fi
       - name: tests
         run: PYTHONPATH=src python3 -m pytest -q -p no:cacheprovider
       - name: the package builds
@@ -27,6 +37,16 @@ jobs:
           python-version: "3.12"
       - name: privacy check (generic patterns)
         run: python3 tools/privacy_check.py
+      - name: shell and JS syntax checks
+        run: |
+          for f in $(find src -name '*.sh' | sort); do bash -n "$f" || exit 1; done
+          if command -v shellcheck >/dev/null; then
+            find src -name '*.sh' -print0 | xargs -0 shellcheck -S error
+          fi
+          if command -v node >/dev/null; then
+            node --check src/noctyx/assets/theme.js
+            node --check src/noctyx/assets/console.js
+          fi
       - name: tests
         run: python3 -m pip install -q pytest && PYTHONPATH=src python3 -m pytest -q -p no:cacheprovider
       - name: the package builds
