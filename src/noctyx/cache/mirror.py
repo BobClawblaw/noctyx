@@ -18,10 +18,12 @@ Local first, upstream for everything else:
 
 Read-only on the store; stdlib only. Plain HTTP on the trusted LAN.
 """
+import hashlib
 import http.client
 import json
 import os
 import re
+import secrets
 import sys
 import threading
 import time
@@ -31,12 +33,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 STORE = os.environ.get("NOCTYX_HF_STORE", "/srv/noctyx/hf-mirror/hub")
 PORT = int(os.environ.get("NOCTYX_HF_PORT", "20995"))
 UP_HOST = os.environ.get("NOCTYX_HF_UPSTREAM", "huggingface.co")
+WRITE_THROUGH = os.environ.get("NOCTYX_HF_WRITE_THROUGH", "0").lower() in ("1", "true", "yes")
 CHUNK = 4 << 20
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 KINDS = {"models": "models", "datasets": "datasets", "spaces": "spaces"}
 HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers",
        "transfer-encoding", "upgrade", "host", "content-length"}
-STATS = {"hit": 0, "miss": 0, "fallback": 0, "hit_bytes": 0, "miss_bytes": 0, "errors": 0}
+STATS = {"hit": 0, "miss": 0, "fallback": 0, "hit_bytes": 0, "miss_bytes": 0, "errors": 0,
+         "write_through": 0, "write_through_bytes": 0}
 SLOCK = threading.Lock()
 _UPC, _UPL = {}, threading.Lock()     # (kind, repo, rev, authed) -> (ts, sha|None)
 
@@ -188,9 +192,13 @@ class H(BaseHTTPRequestHandler):
 
     def resolve(self, kind, repo, rev, path, head):
         rd = repo_dir(kind, repo)
-        if not os.path.isdir(rd) or ".." in path.split("/"):
+        if ".." in path.split("/"):
             return self.proxy()
         auth = self.headers.get("Authorization")
+        if not os.path.isdir(rd):
+            if WRITE_THROUGH and not head and not self.headers.get("Range"):
+                return self.write_through(kind, repo, rev, path, auth)
+            return self.proxy()
         commit = upstream_sha(kind, repo, rev, auth) or local_ref(rd, rev)
         if commit and not HEX40.match(commit):
             commit = None                 # it becomes a path below and a response header
@@ -204,6 +212,8 @@ class H(BaseHTTPRequestHandler):
             blob = self.upstream_etag(kind, repo, commit, path, auth) if commit else None
             f = os.path.join(rd, "blobs", blob) if blob else None
             if not f or not os.path.isfile(f):
+                if WRITE_THROUGH and not head and not self.headers.get("Range"):
+                    return self.write_through(kind, repo, rev, path, auth, known_commit=commit)
                 return self.proxy()
         size = os.stat(f).st_size
         start, end, status = 0, size - 1, 200
@@ -304,6 +314,138 @@ class H(BaseHTTPRequestHandler):
                                "likes": 0, "cardData": {}, "siblings": sib, "noctyx_mirror": "offline-fallback"}, commit)
 
     # ── plumbing ──
+    def _open_url(self, url_or_path, headers, timeout=60):
+        """Open upstream path or absolute redirect URL -> (conn, resp)."""
+        if url_or_path.startswith(("http://", "https://")):
+            u = urllib.parse.urlsplit(url_or_path)
+            cls = http.client.HTTPSConnection if u.scheme == "https" else http.client.HTTPConnection
+            c = cls(u.netloc, timeout=timeout)
+            p = u.path + (f"?{u.query}" if u.query else "")
+            h = {k: v for k, v in headers.items() if k.lower() not in HOP}
+            h["Host"] = u.netloc
+            c.request("GET", p, headers=h)
+            return c, c.getresponse()
+        return upstream("GET", url_or_path, headers, timeout=timeout)
+
+    def _commit_blob(self, rd, commit, rev, rel_path, tmp_path, blob_name):
+        """Atomically publish a written-through blob into HF cache layout (blobs/, snapshots/, refs/)."""
+        blobs_dir = os.path.join(rd, "blobs")
+        os.makedirs(blobs_dir, exist_ok=True)
+        dst_blob = os.path.join(blobs_dir, blob_name)
+        if not os.path.exists(dst_blob):
+            os.replace(tmp_path, dst_blob)
+        else:
+            os.unlink(tmp_path)
+        snap_file = os.path.join(rd, "snapshots", commit, rel_path)
+        os.makedirs(os.path.dirname(snap_file), exist_ok=True)
+        rel_target = os.path.relpath(dst_blob, os.path.dirname(snap_file))
+        tmp_link = f"{snap_file}.wt.{secrets.token_hex(6)}"
+        try:
+            os.symlink(rel_target, tmp_link)
+            os.replace(tmp_link, snap_file)
+        except OSError:
+            if os.path.lexists(tmp_link):
+                os.unlink(tmp_link)
+            raise
+        if REV.match(rev) and not HEX40.match(rev):
+            refs_dir = os.path.join(rd, "refs")
+            os.makedirs(refs_dir, exist_ok=True)
+            tmp_ref = os.path.join(refs_dir, f".{rev}.{secrets.token_hex(6)}")
+            with open(tmp_ref, "w") as rf:
+                rf.write(commit)
+            os.replace(tmp_ref, os.path.join(refs_dir, rev))
+
+    def write_through(self, kind, repo, rev, path, auth, known_commit=None):
+        """Fetch from upstream (following redirects), stream to client AND cache atomically into STORE."""
+        headers = {"Authorization": auth} if auth else {}
+        target = self.path
+        commit = known_commit if (known_commit and HEX40.match(known_commit)) else None
+        etag = None
+        c = r = None
+        try:
+            for _ in range(4):
+                c, r = self._open_url(target, headers, timeout=60)
+                hdr_commit = (r.getheader("X-Repo-Commit") or "").strip()
+                if HEX40.match(hdr_commit):
+                    commit = hdr_commit
+                hdr_etag = (r.getheader("X-Linked-Etag") or r.getheader("ETag") or "").replace("W/", "").strip('"')
+                if re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", hdr_etag):
+                    etag = hdr_etag
+                if r.status in (301, 302, 303, 307, 308) and r.getheader("Location"):
+                    loc = r.getheader("Location")
+                    c.close(); c = r = None
+                    if loc.startswith("/"):
+                        target = loc
+                    else:
+                        target = loc
+                        headers = {}        # never forward HF auth header to third-party CDN hosts
+                    continue
+                break
+        except Exception as e:
+            if c:
+                c.close()
+            count("errors")
+            return self.json(502, {"error": f"huggingface.co unreachable: {e}"})
+
+        if r.status != 200 or not commit or not all(safe_part(p) for p in path.split("/")):
+            return self.relay(c, r)
+
+        rd = repo_dir(kind, repo)
+        blobs_dir = os.path.join(rd, "blobs")
+        os.makedirs(blobs_dir, exist_ok=True)
+        tmp_path = os.path.join(blobs_dir, f".wt.{os.getpid()}.{secrets.token_hex(8)}.tmp")
+        want_len = r.getheader("Content-Length")
+        want_len_i = int(want_len) if (want_len and want_len.isdigit()) else None
+
+        self.send_response(r.status, r.reason)
+        for k, v in r.getheaders():
+            if k.lower() in HOP:
+                continue
+            self.send_header(k, v)
+        if want_len:
+            self.send_header("Content-Length", want_len)
+        self.send_header("X-Repo-Commit", commit)
+        self.send_header("X-CM-Mirror", "write-through")
+        self.end_headers()
+        count("miss")
+
+        h_sha256 = hashlib.sha256()
+        n = 0
+        ok = False
+        try:
+            with open(tmp_path, "wb") as tf:
+                while True:
+                    b = r.read(CHUNK)
+                    if not b:
+                        break
+                    tf.write(b)
+                    h_sha256.update(b)
+                    self.wfile.write(b)
+                    n += len(b)
+                    if want_len_i is not None and n >= want_len_i:
+                        break
+            self.wfile.flush()
+            ok = (want_len_i is None or n == want_len_i)
+            digest = h_sha256.hexdigest()
+            if ok and etag and len(etag) == 64 and etag != digest:
+                ok = False
+            blob_id = etag or digest
+            if ok:
+                self._commit_blob(rd, commit, rev, path, tmp_path, blob_id)
+                count("write_through")
+                count("write_through_bytes", n)
+        except Exception:
+            ok = False
+            raise
+        finally:
+            c.close()
+            count("miss_bytes", n)
+            if not ok and os.path.exists(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+
     def proxy(self):
         body = None
         if self.command == "POST":
@@ -358,10 +500,11 @@ class H(BaseHTTPRequestHandler):
             s = dict(STATS)
         pfx = os.environ.get("NOCTYX_PATH_METRIC_PREFIX") or "noctyx"
         lines = ["# TYPE noctyx_hfmirror_requests_total counter"]
-        lines += [f'noctyx_hfmirror_requests_total{{result="{k}"}} {s[k]}' for k in ("hit", "miss", "fallback", "errors")]
+        lines += [f'noctyx_hfmirror_requests_total{{result="{k}"}} {s[k]}' for k in ("hit", "miss", "fallback", "errors", "write_through")]
         lines += ["# TYPE noctyx_hfmirror_bytes_total counter",
                   f'noctyx_hfmirror_bytes_total{{result="hit"}} {s["hit_bytes"]}',
-                  f'noctyx_hfmirror_bytes_total{{result="miss"}} {s["miss_bytes"]}']
+                  f'noctyx_hfmirror_bytes_total{{result="miss"}} {s["miss_bytes"]}',
+                  f'noctyx_hfmirror_bytes_total{{result="write_through"}} {s["write_through_bytes"]}']
         b = ("\n".join(lines) + "\n").replace("noctyx_", pfx + "_").encode()
         self.send_response(200); self.send_header("Content-Type", "text/plain; version=0.0.4")
         self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
