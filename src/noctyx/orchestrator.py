@@ -904,232 +904,10 @@ def _active_job_units(timer_jobs=False):
     return [u for u in names if _JOB_UNIT.match(u) or (timer_jobs and u in _TIMER_JOBS)]
 
 
-def reboot_pending(name=None):
-    """Pending reboot records ({host: rec}); a record older than an hour is a waiter that died."""
-    out = {}
-    for f in (REBOOT_DIR.glob("*.json") if REBOOT_DIR.is_dir() else []):
-        try:
-            rec = json.loads(f.read_text())
-        except Exception:
-            continue
-        rec["stale"] = time.time() - rec.get("ts", 0) > 3600
-        out[rec.get("host", f.stem)] = rec
-    return out.get(name) if name else out
-
-
-def _llm_on(topo, name):
-    return (topo.get("hosts", {}).get(name) or {}).get("servers", [])
-
-
-def llm_impact(c, h):
-    """What stops serving if h goes down: its own servers and the other half of a TP pair."""
-    try:
-        topo = json.loads(LLM_TOPO.read_text())
-    except Exception:
-        return [], []
-    lines, models = [], []
-    for s_ in _llm_on(topo, h["name"]):
-        if s_.get("role") == "serving":
-            lines.append(f"serves {s_.get('model') or '?'} ({s_['engine']}, port {s_.get('port')})")
-            models.append({"host": h["name"], "model": s_.get("model"), "engine": s_["engine"]})
-            for wn, d in topo.get("hosts", {}).items():
-                for w in d.get("servers", []):
-                    if w.get("role") == "worker" and w.get("worker_for") == h["name"]:
-                        lines.append(f"{wn} is its tensor-parallel worker: idle until {h['name']} is back")
-        elif s_.get("role") == "worker" and s_.get("worker_for"):
-            hd = s_["worker_for"]
-            lines.append(f"tensor-parallel worker for {hd}: {s_.get('model') or '?'} stops on {hd} too"
-                         f" (it may need both ranks restarted)")
-            models.append({"host": hd, "model": s_.get("model"), "engine": s_["engine"]})
-    au = urllib.parse.urlparse((c.get("assistant") or {}).get("url") or "")
-    if au.hostname and any(s_.get("target") == f"{au.hostname}:{au.port}" for s_ in _llm_on(topo, h["name"])):
-        lines.append("the Noctyx assistant (explain / brief) falls back to another model while it is down")
-    return lines, models
-
-
-def reboot_plan(c, name):
-    """{host, head, allowed, blockers, warnings, impact} — the UI's confirm dialog and the
-    CLI's last check before rebooting both read this."""
-    h = next((x for x in hosts(c) if x["name"] == name), None)
-    if not h:
-        return {"host": name, "allowed": False, "blockers": [f"unknown host {name}"], "warnings": [], "impact": []}
-    head = is_head(c, h)
-    plan = {"host": name, "head": head, "allowed": False, "blockers": [], "warnings": [], "impact": []}
-    B, W = plan["blockers"], plan["warnings"]
-    if h.get("os") == "macos":
-        B.append("macOS host: monitored only, Noctyx does not reboot it")
-    if not h.get("address"):
-        B.append("no reachable address / not a managed Linux host")
-    if B:
-        return plan
-    pend = reboot_pending(name)
-    if pend and not pend.get("stale"):
-        B.append(f"a reboot of {name} is already in progress (requested {pend.get('requested', '?')})")
-    try:
-        r = _on(c, h, f"fuser {P['node_lib']}/agent.lock 2>/dev/null; echo '|';"
-                      " fuser /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock 2>/dev/null; echo '|';"
-                      f" {hostos.BOOT_ID_CMD}", timeout=25)
-        parts = (r.stdout or "").split("|")
-        if r.returncode != 0 or len(parts) < 3:
-            raise RuntimeError((r.stderr or f"rc={r.returncode}").strip()[-120:])
-        if parts[0].strip():
-            B.append(f"a backup/restore is writing on {name} right now (agent.lock held)")
-        if parts[1].strip():
-            B.append(f"the package manager is running on {name} (dpkg lock held): a reboot mid-upgrade can leave it unbootable")
-        plan["boot_id"] = parts[2].strip()
-    except Exception as e:
-        B.append(f"cannot reach {name}: {str(e)[:120]}")
-    units = [u for u in _active_job_units(timer_jobs=head) if not u.startswith(f"{UNIT}-reboot-")]
-    mine = [u for u in units if f"-{name}-" in u]
-    if mine:
-        B.append(f"Noctyx job running for {name}: {', '.join(mine)}")
-    if head:
-        others = [u for u in units if u not in mine]
-        if others:
-            B.append(f"a Noctyx job is running on the head node and would be killed: {', '.join(others)}"
-                     f" — try again when it ends (Runs shows it)")
-        plan["impact"] += ["the Noctyx console, Prometheus and Alertmanager go down until it is back",
-                           "scheduled backups pause; anything due runs on the first tick after boot",
-                           "this page reconnects by itself"]
-    else:
-        fleet = [u for u in units if not _JOB_UNIT.match(u).group(2)]
-        if fleet:
-            W.append(f"a fleet-wide job is running ({', '.join(fleet)}): if it reaches {name} while it is down, "
-                     f"{name} is skipped and retried on the next tick")
-    lines, _ = llm_impact(c, h)
-    plan["impact"] = lines + plan["impact"]
-    plan["allowed"] = not B
-    return plan
-
-
-def _wait_llm(c, models, budget=600):
-    """Rerun discovery until every model that was serving is serving again, or the budget ends."""
-    if not models:
-        return [], []
-    t0 = time.time()
-    while True:
-        _llm_refresh(wait=True)
-        try:
-            topo = json.loads(LLM_TOPO.read_text())
-        except Exception:
-            topo = {}
-        back = [m for m in models if any(s_.get("role") == "serving" and s_.get("target") and s_.get("model") == m["model"]
-                                          for s_ in _llm_on(topo, m["host"]))]
-        missing = [m for m in models if m not in back]
-        if not missing or time.time() - t0 > budget:
-            return back, missing
-        print(f"  waiting for {', '.join(m['host'] + ' ' + str(m['model']) for m in missing)} "
-              f"({int(time.time() - t0)}s)", flush=True)
-        time.sleep(60)
-
-
-def _reboot_finish(c, h, rec):
-    """Everything after the host is back: LLMs, a Hygiene rescan, the audit line."""
-    back, missing = _wait_llm(c, rec.get("models") or [])
-    for m in back:
-        print(f"  ✓ {m['host']} serving {m['model']} again")
-    for m in missing:
-        print(f"  ✗ {m['host']} {m['model']} NOT serving after 10 min — check its service (TP pairs may need both ranks restarted)")
-    print("hygiene rescan:")
-    try:
-        cmd_hygiene(argparse.Namespace(host=h["name"], fix=None))
-    except SystemExit:
-        pass
-    except Exception as e:
-        print(f"  hygiene rescan failed: {e}")
-    audit("reboot", host=h["name"], rc=0 if not missing else 1, requested=rec.get("requested"),
-          down_s=rec.get("down_s"), back_s=rec.get("back_s"),
-          llm_back=[m["model"] for m in back], llm_missing=[m["model"] for m in missing])
-    try:
-        (REBOOT_DIR / f"{h['name']}.json").unlink()
-    except FileNotFoundError:
-        pass
-    print(f"reboot {h['name']}: done" + (f" — {len(missing)} model(s) not back" if missing else ""))
-    if missing:
-        sys.exit(1)
-
-
-def cmd_reboot(a):
-    """Reboot a host — refused while anything Noctyx cares about is in flight there.
-
-    --plan     print what blocks it and what goes down with it (JSON), change nothing
-    --yes      do it (re-checks the plan first); remote: waits for the new boot and checks LLMs
-    --finish   the head node's post-boot half (the UI runs this when it starts on a new boot)
-    """
-    c = cfg()
-    h = host_by_name(c, a.host)
-    if a.plan:
-        print(json.dumps(reboot_plan(c, h["name"]), indent=1))
-        return
-    if a.finish:
-        rec = reboot_pending(h["name"])
-        if not rec:
-            sys.exit(f"no pending reboot for {h['name']}")
-        now_id = boot_id(c, h)
-        if now_id and now_id == rec.get("boot_id"):
-            sys.exit(f"{h['name']} has not rebooted yet (same boot_id)")
-        try:
-            booted = hostos.boot_time() if is_head(c, h) else None
-        except Exception:
-            booted = None
-        if booted and booted >= rec["ts"]:
-            rec["down_s"] = round(booted - rec["ts"])
-            print(f"{h['name']} booted {datetime.datetime.fromtimestamp(booted, datetime.timezone.utc):%H:%M:%SZ}, "
-                  f"{rec['down_s']}s after the reboot was requested")
-        _reboot_finish(c, h, rec)
-        return
-    if not a.yes:
-        sys.exit("reboot takes the host down; add --yes if you mean it (see --plan first)")
-    plan = reboot_plan(c, h["name"])
-    for w in plan["warnings"]:
-        print(f"  ! {w}")
-    if not plan["allowed"]:
-        for b in plan["blockers"]:
-            print(f"  REFUSED: {b}")
-        audit("reboot-refused", host=h["name"], blockers=plan["blockers"])
-        sys.exit(2)
-    for line in plan["impact"]:
-        print(f"  · {line}")
-    _, models = llm_impact(c, h)
-    head = plan["head"]
-    delay = REBOOT_DELAY["head" if head else "remote"]
-    rec = {"host": h["name"], "head": head, "ts": time.time(), "requested": datetime.datetime.now(
-           datetime.timezone.utc).isoformat(timespec="seconds"), "boot_id": plan.get("boot_id"), "models": models}
-    REBOOT_DIR.mkdir(parents=True, exist_ok=True)
-    (REBOOT_DIR / f"{h['name']}.json").write_text(json.dumps(rec, indent=1))
-    unit = f"{UNIT}-host-reboot-{int(time.time())}"
-    r = _on(c, h, f"systemd-run --quiet --collect --unit={unit} --on-active={delay} "
-                  f"--description='Noctyx: reboot requested from the console/CLI' systemctl reboot", timeout=30)
-    if r.returncode != 0:
-        (REBOOT_DIR / f"{h['name']}.json").unlink()
-        audit("reboot", host=h["name"], rc=1, error=(r.stderr or "").strip()[-200:])
-        sys.exit(f"could not schedule the reboot on {h['name']}: {(r.stderr or '').strip()[-200:]}")
-    audit("reboot-requested", host=h["name"], head=head, delay_s=delay, impact=plan["impact"])
-    print(f"{h['name']}: reboot in {delay}s", flush=True)
-    if head:
-        print("the head node cannot watch itself reboot: the UI finishes this job (LLMs, hygiene, audit) "
-              "when it starts on the new boot")
-        return
-    # remote: down (ssh fails or boot_id changes) then up with a new boot_id
-    t0, down_at, old = time.time(), None, rec["boot_id"]
-    while time.time() - t0 < 1500:
-        time.sleep(10)
-        bid = boot_id(c, h, timeout=12)
-        if bid is None:
-            if down_at is None:
-                down_at = time.time()
-                print(f"  down after {int(down_at - t0)}s", flush=True)
-            continue
-        if bid != old:
-            rec["down_s"] = int((down_at or time.time()) - t0)
-            rec["back_s"] = int(time.time() - t0)
-            print(f"  back after {rec['back_s']}s (new boot)", flush=True)
-            break
-    else:
-        audit("reboot", host=h["name"], rc=1, error="not back with a new boot after 25 min")
-        sys.exit(f"{h['name']} is not back with a new boot after 25 min — check its console/BMC")
-    _reboot_finish(c, h, rec)
-
+# ── reboot (extracted to noctyx.reboot; re-exported for compatibility) ─────────
+from noctyx.reboot import (  # noqa: E402
+    reboot_pending, _llm_on, llm_impact, reboot_plan, _wait_llm, _reboot_finish, cmd_reboot,
+)
 
 def cmd_restore(a):
     """Restore a path from a snapshot — never in place unless --in-place.
@@ -1201,10 +979,34 @@ def cmd_copy(a):
     actually shipped once, caught by the very test it was meant to protect).
     """
     c = cfg()
+    tname = getattr(a, "target", None)
+    from noctyx import targets as bt
+    sec_targets = bt.configured_targets(c)
+    if tname:
+        if tname not in sec_targets:
+            sys.exit(f"unknown backup target: {tname} (configured: {', '.join(sorted(sec_targets)) or 'none'})")
+        try:
+            ok, total = bt.copy_to_target(c, tname, sec_targets[tname], host=a.host, dry_run=a.dry_run, audit_fn=audit)
+        except RuntimeError as e:
+            sys.exit(str(e))
+        print(f"copy ({tname}): {ok}/{total} repos done")
+        sys.exit(0 if ok == total else 1)
     nas_root = repo_root(c)
     hot = c["server"].get("hot_root")
     if not hot:
-        sys.exit("no retired hot tier in the site config — the migration to the NAS is complete; nothing to copy")
+        if sec_targets:
+            all_ok = True
+            for tn, tcfg in sorted(sec_targets.items()):
+                try:
+                    ok, total = bt.copy_to_target(c, tn, tcfg, host=a.host, dry_run=a.dry_run, audit_fn=audit)
+                    print(f"copy ({tn}): {ok}/{total} repos done")
+                    if ok != total:
+                        all_ok = False
+                except RuntimeError as e:
+                    print(f"SKIP target {tn}: {e}")
+                    all_ok = False
+            sys.exit(0 if all_ok else 1)
+        sys.exit("no retired hot tier or backup_targets in the site config — nothing to copy")
     if os.path.realpath(nas_root) == os.path.realpath(hot):
         sys.exit("repo_root IS the hot root — nothing to migrate")
     if not os.path.isdir(c["spindles"].get(nas_name(c), {}).get("mount", "")):
@@ -1993,35 +1795,6 @@ def cmd_dumps(a):
 # The store is a plain HF hub cache: models--org--name/{blobs,snapshots,refs}, so it
 # also works read-only as HF_HUB_CACHE. Blobs are content-addressed (sha256 for LFS
 # files, git sha1 otherwise), so the same model on five hosts is stored once.
-HF_DEFAULTS = {"store": "/srv/noctyx/hf-mirror", "port": 20995, "harvest": True, "scan_roots": ["/"],
-               "exclude_hosts": [], "bwlimit_mb": 0}
-HF_UPSTREAM = "https://huggingface.co"
-HF_LOCAL_TRIES = 8               # search results asked for a --local-dir download's commit, per search
-HF_LOCAL_BUDGET = 24             # commit checks per --local-dir download and harvest
-HF_LOCAL_RETRY = 7 * 86400       # a --local-dir download whose repo was not found is asked again after this
-
-
-def hf_cfg(c):
-    return {**HF_DEFAULTS, **(c.get("hf_mirror") or {})}
-
-
-def hf_skip(c):
-    """Never scan the NAS mount (the store and the repositories live there) nor configured extras."""
-    hc = hf_cfg(c)
-    roots = [str(pathlib.Path(hc["store"]))] + ([repo_root(c)] if c.get("server", {}).get("repo_root") else [])
-    try:
-        common = os.path.commonpath(roots)
-    except ValueError:
-        common = "/"
-    return ([common] if common not in ("/", "") else roots) + list(hc.get("skip") or [])
-
-
-def hf_sources(c):
-    ex = set(hf_cfg(c)["exclude_hosts"])
-    return [h for h in c["hosts"] if h.get("enabled", True) is not False and h.get("address")
-            and h["name"] not in ex]
-
-
 def _run_on(c, h, cmd, stdin=None, timeout=600):
     """Root shell snippet on h with optional stdin: locally on the head node, else ssh + sudo."""
     if is_head(c, h):
@@ -2030,300 +1803,12 @@ def _run_on(c, h, cmd, stdin=None, timeout=600):
     return subprocess.run(["ssh", *SSH_OPTS, "-i", s_["key"], f"{h.get('ssh_user') or s_['user']}@{addr(h)}",
                            f"sudo -n {cmd}"], input=stdin, capture_output=True, text=True, timeout=timeout)
 
-
-def _hf_hash_ok(path, name):
-    """True/False against the blob's own name; None when the name is not a hash we know."""
-    import hashlib
-    if re.fullmatch(r"[0-9a-f]{64}", name):
-        h = hashlib.sha256()
-    elif re.fullmatch(r"[0-9a-f]{40}", name):
-        h = hashlib.sha1(b"blob %d\0" % os.path.getsize(path))   # git blob id
-    else:
-        return None
-    with open(path, "rb") as f:
-        for b in iter(lambda: f.read(8 << 20), b""):
-            h.update(b)
-    return h.hexdigest() == name
-
-
-def _hf_wait(c, a):
-    """Yield to backups: never start a copy inside the backup window (from 15 min
-    before it) or while anything holds the NAS spindle."""
-    if a.ignore_window:
-        return
-    win = ((c.get("schedule") or {}).get("defaults") or {}).get("system", {}).get("window")
-    said = False
-    while True:
-        now = datetime.datetime.now()
-        busy = spindle_holder(nas_name(c))
-        inwin = win and (in_window(now, win) or in_window(now + datetime.timedelta(minutes=15), win))
-        if not busy and not inwin:
-            return
-        if not said:
-            print(f"  paused: {'backup window ' + win if inwin else nas_name(c) + ' busy: ' + str(busy.get('what'))}"
-                  " — resuming when clear", flush=True)
-            said = True
-        time.sleep(60)
-
-
-def _hf_link(hub_repo, commit, rel, blob):
-    p = hub_repo / "snapshots" / commit / rel
-    if p.is_symlink() or p.exists():
-        return False
-    p.parent.mkdir(parents=True, exist_ok=True)
-    os.symlink(os.path.relpath(hub_repo / "blobs" / blob, p.parent), p)
-    return True
-
-
-def _hf_api(path):
-    with urllib.request.urlopen(HF_UPSTREAM + path, timeout=20) as r:
-        return json.load(r)
-
-
-def _hf_local_repo(hub, d, memo):
-    """The store's name (models--org--name) for the repo a --local-dir download came from, or None.
-    huggingface_hub's metadata there records each file's commit but not the repo, and the Hub cannot look a
-    commit up; a commit names one history, so the repo is a candidate that has it. Candidates, in order: a
-    store repo holding that snapshot (the one named like the directory, if several are); the repos the
-    lister found named in the directory (README links, config.json's _name_or_path); then the Hub's top
-    search results for the directory's name and for that name less its last word or two ("-src", "-fp8"),
-    models then datasets, an exact name first. A candidate counts only if the Hub answers for that commit.
-    A private repo, or one nothing names, stays unresolved and is asked again after HF_LOCAL_RETRY
-    (memo["neg"]: when each was last asked). The Hub allows an address few API calls, and the mirror needs
-    them too: once it refuses (429) or cannot be reached, nothing more is asked this harvest."""
-    commit = max(d["files"], key=lambda k: len(d["files"][k]))
-    name = d["name"].lower()
-    hints = list(d.get("hints") or ())
-    have = sorted(p.parent.parent.name for p in hub.glob(f"*/snapshots/{commit}"))
-    pick = [r for r in have if r.lower().endswith("--" + name)] or have
-    if pick:
-        return pick[0]
-    key = f"{commit} {name} {' '.join(hints)}"
-    if key in memo:
-        return memo[key]
-    neg = memo.setdefault("neg", {})
-    if memo.get("offline") or time.time() - neg.get(key, 0) < HF_LOCAL_RETRY:
-        return None
-    tried = set()
-
-    def ask(path):                                   # (json, None) | (None, "no") | (None, "offline")
-        try:
-            return _hf_api(path), None
-        except urllib.error.HTTPError as e:
-            return None, "offline" if e.code == 429 or e.code >= 500 else "no"
-        except Exception:
-            return None, "offline"
-
-    def has(kind, rid):                              # the store's name, "" if not this repo, None if offline
-        if (kind, rid.lower()) in tried or len(tried) >= HF_LOCAL_BUDGET:
-            return ""
-        tried.add((kind, rid.lower()))
-        info, err = ask(f"/api/{kind}/{rid}/revision/{commit}")
-        if err:
-            return None if err == "offline" else ""
-        rid = (info.get("id") or rid) if isinstance(info, dict) else rid
-        return f"{kind}--{rid.replace('/', '--')}"
-
-    def search():
-        for h in hints:
-            kind, _, rid = h.partition("/")
-            if kind in ("models", "datasets") and "/" in rid:
-                yield kind, rid
-        words = re.split(r"[-_ ]", d["name"])
-        names = [d["name"]] + ["-".join(words[:n]) for n in range(len(words) - 1, max(len(words) - 3, 0), -1)]
-        for q in dict.fromkeys(names):
-            for kind in ("models", "datasets"):
-                if len(tried) >= HF_LOCAL_BUDGET:
-                    return
-                found, err = ask(f"/api/{kind}?search={urllib.parse.quote(q)}&limit=100")
-                if err == "offline":
-                    yield kind, None
-                    return
-                ids = [m.get("id", "") for m in found or []]
-                for rid in sorted(ids, key=lambda i: i.split("/")[-1].lower() not in (name, q.lower()))[:HF_LOCAL_TRIES]:
-                    yield kind, rid
-
-    repo = ""
-    for kind, rid in search():
-        repo = has(kind, rid) if rid else None
-        if repo is None:
-            memo["offline"] = True                   # try again next harvest
-            return None
-        if repo:
-            break
-    if repo:
-        neg.pop(key, None)
-    else:
-        neg[key] = time.time()
-    memo[key] = repo or None
-    return memo[key]
-
-
-def hf_harvest_host(c, h, a, hub):
-    hc = hf_cfg(c)
-    starts = "~" if h.get("os") == "macos" else " ".join(shlex.quote(r) for r in hf_cfg(c)["scan_roots"])
-    lst = (NX_HOME / "cache" / "lister.py").read_text()
-    skip = " ".join(shlex.quote(f"--skip={s}") for s in hf_skip(c))
-    r = _run_on(c, h, f"python3 - {skip} {starts}", stdin=lst, timeout=900)
-    try:
-        repos = json.loads(r.stdout)
-    except Exception:
-        raise RuntimeError(f"lister failed: {(r.stderr or r.stdout).strip()[:200]}")
-    st = {"repos": 0, "new_blobs": 0, "new_bytes": 0, "bad_hash": 0, "unverified": 0, "skipped": [],
-          "unresolved": []}
-    s_ = c["server"]["ssh"]
-    nf = hub.parent / "unresolved.json"              # --local-dir downloads asked about and not found, and when
-    try:
-        neg = {k: t for k, t in json.loads(nf.read_text()).items() if time.time() - t < HF_LOCAL_RETRY}
-    except Exception:
-        neg = {}
-    memo = {"neg": neg}
-    for d in repos:
-        if d.get("local"):
-            d["repo"] = _hf_local_repo(hub, d, memo)
-            if not d["repo"]:
-                st["unresolved"].append(d["root"])
-                continue
-        if a.repo and a.repo not in d["repo"]:
-            continue
-        st["repos"] += 1
-        hr = hub / d["repo"]
-        want = {b for files in d["files"].values() for b in files.values()}
-        have = {p.name for p in (hr / "blobs").glob("*")} if (hr / "blobs").is_dir() else set()
-        # a --local-dir file is copied by its path and stored under its blob name
-        rel = {b: d["paths"][b] if d.get("local") else b for b in want}
-        need = sorted(b for b in want - have if ".." not in rel[b].split("/"))
-        if need:
-            if any(ch in d["root"] for ch in " '\"\\$`"):
-                st["skipped"].append(d["root"])
-                continue
-            _hf_wait(c, a)
-            inc = hub.parent / ".incoming" / h["name"] / d["repo"]
-            inc.mkdir(parents=True, exist_ok=True)
-            src = f"{d['root']}/" if d.get("local") else f"{d['root']}/{d['repo']}/blobs/"
-            cmd = ["rsync", "-t", "--copy-links", "--partial", "--files-from=-"]   # a blob may link to a shared store
-            if hc["bwlimit_mb"]:
-                cmd.append(f"--bwlimit={int(hc['bwlimit_mb'] * 1000)}")
-            if is_head(c, h):
-                cmd += [src, str(inc) + "/"]
-            else:
-                cmd += ["-e", f"ssh -i {s_['key']} -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new"
-                              " -o ServerAliveInterval=60",
-                        "--rsync-path=sudo -n rsync", f"{h.get('ssh_user') or s_['user']}@{addr(h)}:{src}", str(inc) + "/"]
-            gb = sum(d["blobs"][b] for b in need) / 1e9
-            print(f"  {h['name']}: {d['repo']} — {len(need)} file(s), {gb:.1f} GB", flush=True)
-            rr = subprocess.run(cmd, input="\n".join(rel[b] for b in need) + "\n", capture_output=True, text=True)
-            if rr.returncode not in (0, 23, 24):     # 23/24: some files vanished/partial — checked below
-                print(f"    rsync rc={rr.returncode}: {rr.stderr.strip()[-200:]}", flush=True)
-            (hr / "blobs").mkdir(parents=True, exist_ok=True)
-            for b in need:
-                f = inc / rel[b]
-                if not f.is_file() or f.stat().st_size != d["blobs"][b]:
-                    continue
-                ok = _hf_hash_ok(f, b)
-                if ok is False:
-                    st["bad_hash"] += 1
-                    print(f"    hash MISMATCH, dropped: {d['repo']}/{b}", flush=True)
-                    f.unlink()
-                    continue
-                st["unverified"] += ok is None
-                os.replace(f, hr / "blobs" / b)
-                st["new_blobs"] += 1
-                st["new_bytes"] += d["blobs"][b]
-            shutil.rmtree(inc, ignore_errors=True)
-        have = {p.name for p in (hr / "blobs").glob("*")} if (hr / "blobs").is_dir() else set()
-        for commit, files in d["files"].items():
-            for rel, b in files.items():
-                if b in have and ".." not in rel.split("/"):
-                    _hf_link(hr, commit, rel, b)
-        # which hosts hold it, and when each was last seen with it (the console's mirror tree)
-        sf_ = hr / ".nx-seen.json"
-        try:
-            seen = json.loads(sf_.read_text())
-        except Exception:
-            seen = {}
-        seen[h["name"]] = round(time.time())
-        if hr.is_dir():
-            sf_.write_text(json.dumps(seen))
-        # refs: newest wins across hosts (a host that pulled later saw a later main). Kept in .nx-refs.json;
-        # a store written before the rename has .cm-refs.json, read once and replaced
-        mf, old = hr / ".nx-refs.json", hr / ".cm-refs.json"
-        try:
-            meta = json.loads((mf if mf.exists() else old).read_text())
-        except Exception:
-            meta = {}
-        changed = old.exists() and not mf.exists()
-        for name, (commit, mtime) in d["refs"].items():
-            if not (hr / "snapshots" / commit).is_dir() or ".." in name.split("/"):
-                continue
-            if name not in meta or mtime > meta[name]["mtime"]:
-                meta[name] = {"commit": commit, "mtime": mtime, "host": h["name"]}
-                (hr / "refs" / name).parent.mkdir(parents=True, exist_ok=True)
-                (hr / "refs" / name).write_text(commit)
-                changed = True
-        if changed:
-            mf.write_text(json.dumps(meta))
-            old.unlink(missing_ok=True)
-    nf.write_text(json.dumps(memo["neg"]))
-    st["hub_offline"] = bool(memo.get("offline"))
-    return st
-
-
-def hf_totals(hub):
-    repos = blobs = size = 0
-    for r in hub.iterdir() if hub.is_dir() else []:
-        if not r.name.startswith(("models--", "datasets--", "spaces--")):
-            continue
-        repos += 1
-        for b in (r / "blobs").glob("*") if (r / "blobs").is_dir() else []:
-            blobs += 1
-            size += b.stat().st_size
-    return {"repos": repos, "blobs": blobs, "bytes": size}
-
-
-def cmd_hf_harvest(a):
-    c = cfg()
-    hc = hf_cfg(c)
-    if not hc["harvest"] and not a.host:
-        print("hf_mirror.harvest is off in the site config")
-        return
-    hub = pathlib.Path(hc["store"]) / "hub"
-    hub.mkdir(parents=True, exist_ok=True)
-    sf = hub.parent / "status.json"
-    try:
-        status = json.loads(sf.read_text())
-    except Exception:
-        status = {"hosts": {}}
-    try:
-        with spindle_lock("hf-harvest", what="hf-harvest"):
-            bad = 0
-            for h in hf_sources(c):
-                if a.host and h["name"] != a.host:
-                    continue
-                t0 = time.time()
-                try:
-                    st = hf_harvest_host(c, h, a, hub)
-                    st.update(ts=time.time(), seconds=round(time.time() - t0))
-                    print(f"{h['name']}: {st['repos']} repos, {st['new_blobs']} new files "
-                          f"({st['new_bytes'] / 1e9:.1f} GB){', ' + str(st['bad_hash']) + ' bad hash' if st['bad_hash'] else ''}"
-                          f"{', skipped roots ' + ', '.join(st['skipped']) if st['skipped'] else ''}"
-                          f"{', repo not found for ' + ', '.join(st['unresolved']) if st['unresolved'] else ''}"
-                          f"{' (huggingface.co refused or unreachable: the rest are asked next time)' if st['hub_offline'] else ''}",
-                          flush=True)
-                except Exception as e:
-                    bad += 1
-                    st = {"ts": time.time(), "error": str(e)[:300]}
-                    print(f"{h['name']}: FAILED {e}", flush=True)
-                status["hosts"][h["name"]] = st
-                status.update(ts=time.time(), totals=hf_totals(hub))
-                sf.write_text(json.dumps(status))
-            t = status.get("totals") or hf_totals(hub)
-            print(f"store: {t['repos']} repos, {t['blobs']} files, {t['bytes'] / 1e12:.2f} TB")
-            audit("hf-harvest", host=a.host or "*", failed=bad, totals=t)
-            sys.exit(1 if bad else 0)
-    except SpindleBusy:
-        print(f"hf-harvest already running ({spindle_holder('hf-harvest').get('since')}) — skipped")
-
+# ── HF harvest (extracted to noctyx.harvest; re-exported for compatibility) ────
+from noctyx.harvest import (  # noqa: E402
+    HF_DEFAULTS, HF_UPSTREAM, HF_LOCAL_TRIES, HF_LOCAL_BUDGET, HF_LOCAL_RETRY,
+    hf_cfg, hf_skip, hf_sources, _hf_hash_ok, _hf_wait, _hf_link, _hf_api,
+    _hf_local_repo, hf_harvest_host, hf_totals, cmd_hf_harvest,
+)
 
 # ── recipe deployment ─────────────────────────────────────────────────────────
 # A slot (one GPU box, or a TP pair's head + worker) serves one recipe at a time on a
@@ -2332,653 +1817,18 @@ def cmd_hf_harvest(a):
 # pinned commit. Switching = disable the old unit(s), enable the new one, wait for
 # /health and /v1/models; a start that does not come up switches back.
 RECIPE_STATE = STATE_DIR / "recipes.json"
-RECIPE_KINDS = ("spark", "systemd", "script")   # python3 -m spark | setup.sh + serve.sh | start.sh + stop.sh
-_RNAME = re.compile(r"^[a-z0-9][a-z0-9.-]{0,47}$")
-_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$")
-_SHA = re.compile(r"^[0-9a-f]{40}$")
-_REPO = re.compile(r"^(https://|ssh://)[A-Za-z0-9@._:/-]+$")
-_ENVK = re.compile(r"^[A-Z_][A-Z0-9_]{0,63}$")
-PREBUILD_MIN_GIB = 40      # a pair head builds the next image while serving only with this much free
-
-
-def recipes_cfg(c):
-    r = c.get("recipes") or {}
-    return {"root": r.get("root") or P["recipe_root"], "hf_mirror": r.get("hf_mirror", True),
-            "slots": r.get("slots") or {}, "catalog": r.get("catalog") or {}}
-
-
-def recipe_slot(c, name):
-    s = recipes_cfg(c)["slots"].get(name)
-    if not s:
-        sys.exit(f"unknown slot: {name} (slots: {', '.join(recipes_cfg(c)['slots']) or 'none'})")
-    return s
-
-
-def slot_deploys(s):
-    """False for a watch-only slot ("deploy": false): Noctyx shows what it serves and says when that changes,
-    and never deploys to it, stops it or starts it (a server it has no unit for, a Mac's launchd job)."""
-    return s.get("deploy", True) is not False
-
-
-def _recipe_state():
-    try:
-        return json.loads(RECIPE_STATE.read_text())
-    except Exception:
-        return {"slots": {}}
-
-
-def _save_recipe_state(st):
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = RECIPE_STATE.with_suffix(".tmp")
-    tmp.write_text(json.dumps(st, indent=1))
-    os.replace(tmp, RECIPE_STATE)
-
-
-def _adopted(s):
-    a = s.get("adopt") or {}
-    if not a.get("unit") and not a.get("models"):      # a watch-only slot's record has models and no unit
-        return None
-    return {"recipe": None, "name": a.get("name") or a["unit"], "adopted": True, "unit": a.get("unit"),
-            "spark_dir": a.get("spark_dir"), **({"models": list(a["models"])} if a.get("models") else {})}
-
-
-def slot_records(c, slot):
-    """(current, previous, history) of a slot; before any deploy, current is the adopted unit."""
-    st = _recipe_state()["slots"].get(slot) or {}
-    return st.get("current") or _adopted(recipe_slot(c, slot)), st.get("previous"), st.get("history") or []
-
-
-def _record(slot, current=None, previous=None, event=None, keep_previous=False):
-    st = _recipe_state()
-    s = st["slots"].setdefault(slot, {})
-    if current is not None:
-        if not keep_previous:
-            s["previous"] = s.get("current") or previous
-        s["current"] = current
-    if event:
-        s["history"] = ([{"ts": time.time(), **event}] + (s.get("history") or []))[:30]
-    _save_recipe_state(st)
-
-
-def rec_label(r):
-    if not r:
-        return "nothing"
-    return r.get("name") if r.get("adopted") else f"{r['recipe']}@{r['sha'][:12]}"
-
-
-def recipe_live(c, slot, timeout=3):
-    """What the slot's port answers right now, asked from here: {ok, models, error}."""
-    s = recipe_slot(c, slot)
-    h = host_by_name(c, s["head"])
-    base = f"http://{addr(h)}:{s['port']}"
-    out = {"ok": False, "models": [], "url": base}
-    try:
-        with urllib.request.urlopen(base + "/health", timeout=timeout) as r:
-            hj = json.loads(r.read() or b"{}")
-        out["status"] = hj.get("status")
-        with urllib.request.urlopen(base + "/v1/models", timeout=timeout) as r:
-            out["models"] = [m.get("id") for m in json.loads(r.read()).get("data", []) if m.get("id")]
-        out["ok"] = hj.get("status", "ok") == "ok" and bool(out["models"])
-        for k in ("max_batch_size", "warming"):
-            if k in hj:
-                out[k] = hj[k]
-        if isinstance(hj.get("live"), dict):
-            out["connections"] = hj["live"].get("connections")
-    except Exception as e:
-        out["error"] = str(getattr(e, "reason", e))[:120]
-    return out
-
-
-def _slot_user(c, h):
-    return h.get("ssh_user") or c["server"]["ssh"]["user"]
-
-
-def _root_stream(c, h, script):
-    """A bash script as root on h, fed on stdin (nothing secret or quoted on a command line),
-    its output streamed into ours. Returns (rc, output)."""
-    if is_head(c, h):
-        argv = ["bash", "-s"]
-    else:
-        s_ = c["server"]["ssh"]
-        argv = ["ssh", *SSH_OPTS, "-i", s_["key"], f"{_slot_user(c, h)}@{addr(h)}", "sudo -n bash -s"]
-    p = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    p.stdin.write(script.encode())
-    p.stdin.close()
-    out = []
-    for raw in iter(p.stdout.readline, b""):
-        line = raw.decode("utf-8", "replace").replace("\r", "\n")
-        out.append(line)
-        if len(out) > 4000:
-            out = out[-2000:]
-        sys.stdout.write("  " + line if not line.startswith("NX_") else "")
-        sys.stdout.flush()
-    return p.wait(), "".join(out)
-
-
-def _home(c, h, user):
-    r = _run_on(c, h, f"getent passwd {shlex.quote(user)}", timeout=30)
-    home = (r.stdout or "").strip().split(":")[5:6]
-    if r.returncode != 0 or not home or not home[0].startswith("/"):
-        raise RuntimeError(f"cannot find {user}'s home on {h['name']}: {(r.stderr or '').strip()[:120]}")
-    return home[0]
-
-
-def _tilde(p, home):
-    return home + p[1:] if p == "~" or p.startswith("~/") else p
-
-
-def _resolve_ref(repo, ref):
-    """A branch, tag or full sha -> the commit sha (git ls-remote from the head node)."""
-    if _SHA.match(ref):
-        return ref
-    r = subprocess.run(["git", "ls-remote", repo, ref, f"refs/heads/{ref}", f"refs/tags/{ref}", f"refs/tags/{ref}^{{}}"],
-                       capture_output=True, text=True, timeout=60, env={**os.environ, "GIT_TERMINAL_PROMPT": "0"})
-    refs = dict(reversed(l.split("\t", 1)) for l in (r.stdout or "").splitlines() if "\t" in l)
-    for k in (f"refs/tags/{ref}^{{}}", f"refs/tags/{ref}", f"refs/heads/{ref}", ref):
-        if k in refs:
-            return refs[k]
-    raise RuntimeError(f"{repo}: no branch or tag {ref!r}" + (f" ({r.stderr.strip()[:160]})" if r.stderr.strip() else ""))
-
-
-def _sh_env(env):
-    return " ".join(f"{k}={shlex.quote(str(v))}" for k, v in env.items())
-
-
-def _toml(sections):
-    def val(v):
-        if isinstance(v, bool):
-            return "true" if v else "false"
-        if isinstance(v, (int, float)):
-            return str(v)
-        return json.dumps(str(v))
-    out = ["# written by `noctyx recipe-deploy` (slot settings + catalog overrides); redeploy to change"]
-    for sec, kv in sections.items():
-        out.append(f"\n[{sec}]")
-        out += [f"{k} = {val(v)}" for k, v in kv.items()]
-    return "\n".join(out) + "\n"
-
-
-def health_timeout(s):
-    """How long a slot's new deployment may take to answer before the switch rolls back (health_timeout_s).
-    Its unit's start timeout is this plus 5 minutes, so systemd never gives up first."""
-    return int(s.get("health_timeout_s", 1800))
-
-
-def _unit_text(rec, slot, s, env):
-    d, user = rec["dir"], rec["user"]
-    envl = "".join(f"Environment={shlex.quote(f'{k}={v}')}\n" for k, v in env.items())
-    if rec["kind"] == "script":
-        return (f"# Noctyx recipe deployment: {rec['recipe']}@{rec['sha'][:12]} on slot {slot}. Written by\n"
-                f"# `noctyx recipe-deploy`; rewritten on every switch, so do not edit by hand.\n"
-                f"[Unit]\nDescription=Noctyx recipe {rec['recipe']}@{rec['sha'][:12]} (slot {slot}, start.sh)\n"
-                f"After=network-online.target docker.service\nWants=network-online.target\n\n"
-                f"[Service]\nType=oneshot\nRemainAfterExit=yes\nUser={user}\nWorkingDirectory={d}\n"
-                f"Environment=HOME={rec['home']}\nEnvironment=PATH={rec['home']}/.local/bin:/usr/local/bin:/usr/bin:/bin\n"
-                f"{envl}ExecStart={d}/start.sh\nExecStop={d}/{rec.get('stop') or 'stop.sh'}\n"
-                f"TimeoutStartSec={health_timeout(s) + 300}\nTimeoutStopSec=300\n\n"
-                f"[Install]\nWantedBy=multi-user.target\n")
-    if rec["kind"] == "spark":
-        return (f"# Noctyx recipe deployment: {rec['recipe']}@{rec['sha'][:12]} on slot {slot}. Written by\n"
-                f"# `noctyx recipe-deploy`; rewritten on every switch, so do not edit by hand.\n"
-                f"[Unit]\nDescription=Noctyx recipe {rec['recipe']}@{rec['sha'][:12]} (slot {slot}, TP pair)\n"
-                f"After=network-online.target docker.service\nWants=network-online.target\n\n"
-                f"[Service]\nType=oneshot\nRemainAfterExit=yes\nUser={user}\nWorkingDirectory={d}\n"
-                f"Environment=HOME={rec['home']}\nEnvironment=PATH={rec['home']}/.local/bin:/usr/local/bin:/usr/bin:/bin\n"
-                f"{envl}ExecStart=/usr/bin/python3 -m spark up\nExecStop=/usr/bin/python3 -m spark down\n"
-                f"TimeoutStartSec={health_timeout(s) + 300}\nTimeoutStopSec=300\n\n"
-                f"[Install]\nWantedBy=multi-user.target\n")
-    return (f"# Noctyx recipe deployment: {rec['recipe']}@{rec['sha'][:12]} on slot {slot}. Written by\n"
-            f"# `noctyx recipe-deploy`; rewritten on every switch, so do not edit by hand.\n"
-            f"[Unit]\nDescription=Noctyx recipe {rec['recipe']}@{rec['sha'][:12]} (slot {slot})\n"
-            f"After=network-online.target\nWants=network-online.target\n\n"
-            f"[Service]\nType=simple\nUser={user}\nWorkingDirectory={d}\nEnvironment=HOME={rec['home']}\n"
-            f"{envl}ExecStart={d}/serve.sh\nRestart=on-failure\nRestartSec=10\nTimeoutStopSec=60\n"
-            f"StandardOutput=append:{d}/serve.log\nStandardError=append:{d}/serve.log\n\n"
-            f"[Install]\nWantedBy=multi-user.target\n")
-
-
-def _spark_info(c, h, user, home, d):
-    """The settings a spark recipe's checkout resolves to (cluster.toml + recipe.toml), or {}."""
-    py = ("import json; from spark import config; s = config.load(); print('NX_INFO ' + json.dumps({"
-          "'tf_cache': str(s.tf_cache), 'container': s.container, 'served': getattr(s, 'served_name', None),"
-          "'port': s.port}))")
-    r = _run_on(c, h, f"sudo -u {shlex.quote(user)} -H bash -lc "
-                      + shlex.quote(f"cd {shlex.quote(d)} && python3 -c {shlex.quote(py)}"), timeout=60)
-    m = re.search(r"^NX_INFO (.+)$", r.stdout or "", re.M)
-    return json.loads(m.group(1)) if m else {}
-
-
-# weights for the next recipe while the old one serves; never the folder the server reads
-_SPARK_PREP = r'''
-import sys
-from spark import config, weights
-from spark.nodes import Node
-s = config.load(); head = Node("head"); worker = Node("worker", s.worker); sync = sys.argv[1] == "1"
-if hasattr(weights, "ensure_converted"):
-    if s.converted_repo or weights.converted_ready(s, head):
-        weights.ensure_converted(s, head)
-        if sync and hasattr(weights, "sync_converted"):
-            weights.sync_converted(s, head, worker)
-    else:
-        weights.ensure_snapshot(s)
-        print("the conversion needs the GPU: it runs during the switch (`spark up`)")
-else:
-    weights.ensure_snapshot(s)
-    dfl = getattr(s, "drafts", False) and getattr(s, "drafter", "") == "dflash2" and hasattr(weights, "ensure_dflash2")
-    if dfl:
-        weights.ensure_dflash2(s)
-    if sync and hasattr(weights, "sync_snapshot"):
-        weights.sync_snapshot(s, head, worker)
-        if dfl and hasattr(weights, "sync_dflash2"):
-            weights.sync_dflash2(s, head, worker)
-print("weights ready")
-'''
-
-
-def recipe_prepare(c, slot, name, ref=None):
-    """Check out, configure, build and download — the old deployment keeps serving. Returns the record."""
-    rc_ = recipes_cfg(c)
-    s = recipe_slot(c, slot)
-    cat = rc_["catalog"].get(name)
-    if not cat:
-        raise RuntimeError(f"unknown recipe: {name} (catalog: {', '.join(rc_['catalog'])})")
-    if slot not in (cat.get("slots") or []):
-        raise RuntimeError(f"{name} does not run on slot {slot} (its slots: {', '.join(cat.get('slots') or [])})")
-    ref = ref or cat.get("ref") or "main"
-    sha = _resolve_ref(cat["repo"], ref)
-    h = host_by_name(c, s["head"])
-    user = _slot_user(c, h)
-    home = _home(c, h, user)
-    root = _tilde(s.get("root") or rc_["root"], home)
-    d = f"{root}/{name}/{sha[:12]}"
-    rec = {"recipe": name, "kind": cat["kind"], "repo": cat["repo"], "ref": ref, "sha": sha, "dir": d,
-           "user": user, "home": home, "unit": f"{P['recipe_unit_prefix']}-{slot}.service", "host": h["name"]}
-    env = {**(s.get("env") or {}), **(cat.get("env") or {})}
-    hfe = {}
-    if rc_["hf_mirror"] and (c.get("hf_mirror") or {}).get("port"):
-        hfe = {"HF_ENDPOINT": f"http://{c['server']['address']}:{hf_cfg(c)['port']}"}
-    files = {}
-    if cat["kind"] == "spark":
-        sec = {k: dict(v) for k, v in (cat.get("overrides") or {}).items()}
-        sec.setdefault("cluster", {}).update({**(s.get("cluster") or {}), "port": s["port"]})
-        files["cluster.toml"] = _toml(sec)
-        env = {**env, **hfe}
-    elif cat["kind"] == "script":
-        # start.sh recipes read their settings from the environment / ./.env (Mia-AiLab's convention)
-        senv = {**(s.get("script_env") or {}), **(cat.get("env") or {}), "PORT": str(s["port"]), **hfe}
-        files[".env"] = "# written by `noctyx recipe-deploy` (slot script_env + catalog env)\n" + \
-            "".join(f"{k}={shlex.quote(str(v))}\n" for k, v in senv.items())
-        env = {**env, **senv}
-    else:
-        env = {"PORT": str(s["port"]), "MODELS": f"{root}/{name}/models", "TF_SRC": f"{d}/engine", **env}
-    rec["unit_text"] = _unit_text(rec, slot, s, env)
-    print(f"prepare {name}@{sha[:12]} ({ref}) on {h['name']}:{d}", flush=True)
-
-    q = shlex.quote
-    put = "".join(f"echo {__import__('base64').b64encode(t.encode()).decode()} | base64 -d > {q(d + '/' + f)}\n"
-                  for f, t in files.items())
-    script = f"""set -uo pipefail
-cd /
-asu() {{ sudo -u {q(user)} -H env HOME={q(home)} {_sh_env(hfe)} bash -lc "$1"; }}
-D={q(d)}
-if [ ! -d "$D/.git" ]; then
-  echo "clone {cat['repo']} -> $D"
-  asu {q(f'rm -rf {q(d)}.partial && mkdir -p {q(os.path.dirname(d))} && git clone -q --filter=blob:none {q(cat["repo"])} {q(d)}.partial && git -C {q(d)}.partial -c advice.detachedHead=false checkout -q {sha} && mv {q(d)}.partial {q(d)}')} || exit 10
-fi
-[ "$(sudo -u {q(user)} git -C "$D" rev-parse HEAD)" = {sha} ] || {{ echo "checkout $D is not at {sha}"; exit 11; }}
-sudo -u {q(user)} bash -c {q(put)} || exit 12
-"""
-    if cat["kind"] == "spark":
-        r1, _ = _root_stream(c, h, script + f"asu {q(f'cd {q(d)} && python3 -m spark validate')} || exit 13\n")
-        if r1:
-            raise RuntimeError(f"checkout/validate failed (rc={r1})")
-        info = _spark_info(c, h, user, home, d)
-        rec["expect"] = [info["served"]] if info.get("served") else []
-        cur, _, _ = slot_records(c, slot)
-        cd = (cur or {}).get("spark_dir") or ((cur or {}).get("dir") if (cur or {}).get("kind") == "spark" else None)
-        cinfo = _spark_info(c, h, user, home, _tilde(cd, home)) if cd else {}
-        # the server reads its own tf_cache: re-downloading or syncing into that folder under it is never safe
-        shared = bool(cinfo) and cinfo.get("tf_cache") == info.get("tf_cache")
-        mem = _run_on(c, h, "awk '/MemAvailable/{print int($2/1048576)}' /proc/meminfo", timeout=20)
-        free_gib = int((mem.stdout or "0").strip() or 0)
-        steps = []
-        if free_gib >= PREBUILD_MIN_GIB:
-            steps.append(f"asu {q(f'cd {q(d)} && python3 -m spark image')} || exit 14")
-        else:
-            print(f"  {h['name']} has {free_gib} GiB free (< {PREBUILD_MIN_GIB}): the image builds during the switch")
-        if shared:
-            print(f"  {name} shares {info.get('tf_cache')} with what serves now: weights update during the switch")
-        else:
-            steps.append(f"asu {q(f'cd {q(d)} && python3 - 1 <<' + chr(39) + 'PYEOF' + chr(39) + chr(10) + _SPARK_PREP + 'PYEOF')} || exit 15")
-        r2, _ = _root_stream(c, h, script + "\n".join(steps) + "\n") if steps else (0, "")
-        if r2:
-            raise RuntimeError(f"prepare failed (rc={r2})")
-    elif cat["kind"] == "script":
-        chk = (f"cd {q(d)} && test -x start.sh && test -x stop.sh"
-               f" && if grep -q DRY_RUN start.sh; then set -a; . ./.env; set +a; DRY_RUN=1 ./start.sh; fi")
-        r1, _ = _root_stream(c, h, script + f"asu {q(chk)} || exit 17\n")
-        if r1:
-            raise RuntimeError(f"start.sh check failed (rc={r1}): needs start.sh + stop.sh, and its DRY_RUN must pass")
-        rec["expect"] = []
-    else:
-        bld = f"cd {q(d)} && test -x setup.sh -a -x serve.sh && {_sh_env({k: v for k, v in env.items() if k != 'PORT'})} ./setup.sh"
-        r1, _ = _root_stream(c, h, script + f"asu {q(bld)} || exit 16\n")
-        if r1:
-            raise RuntimeError(f"setup.sh failed (rc={r1})")
-        rec["expect"] = []
-    rec["prepared_ts"] = time.time()
-    st = _recipe_state()
-    st["slots"].setdefault(slot, {}).setdefault("prepared", {})[name] = rec
-    _save_recipe_state(st)
-    audit("recipe-prepare", slot=slot, recipe=name, sha=sha, host=h["name"])
-    return rec
-
-
-def _switch(c, slot, frm, to, wait_lock=0):
-    """Under the slot's GPU lock on its head: stop frm (and every conflicting unit), check the port
-    and GPU are free, start to, wait until it serves. rc 0 + models, or rc>0 (75: lock busy, nothing done)."""
-    s = recipe_slot(c, slot)
-    h = host_by_name(c, s["head"])
-    user = _slot_user(c, h)
-    home = (to or frm or {}).get("home") or _home(c, h, user)
-    q = shlex.quote
-    lock = _tilde(s.get("lock") or P["gpu_lock"], home)
-    port = int(s["port"])
-    stop = list(dict.fromkeys([*(s.get("conflicts") or []), f"{P['recipe_unit_prefix']}-{slot}.service"] + ([frm["unit"]] if frm else [])))
-    downs = [x for x in {(frm or {}).get("spark_dir"), (frm or {}).get("dir") if (frm or {}).get("kind") == "spark" else None} if x]
-    sdowns = [(frm or {})["dir"]] if (frm or {}).get("kind") == "script" else []
-    ht = health_timeout(s)
-    lines = [f"""set -uo pipefail
-cd /
-x() {{ echo "+ $*"; "$@"; }}
-asu() {{ sudo -u {q(user)} -H env HOME={q(home)} bash -lc "$1"; }}
-LOCK={q(lock)}
-[ -e "$LOCK" ] || sudo -u {q(user)} sh -c 'mkdir -p "$(dirname "$1")" && touch "$1"' _ "$LOCK"
-exec 9>>"$LOCK"
-if ! flock -n 9; then
-  echo "GPU lock $LOCK is held:"; ps -o pid=,etime=,args= -p "$(fuser "$LOCK" 2>/dev/null | tr -s ' ' ',' | sed 's/^,//')" 2>/dev/null | cut -c1-160
-  {f'echo "waiting up to {wait_lock}s"; flock -w {wait_lock} 9 ||' if wait_lock else ''} exit 75
-fi
-alive() {{ curl -s -m 3 http://127.0.0.1:{port}/health 2>/dev/null | grep -q '"status"'; }}
-echo "== stop ({rec_label(frm)})"
-for u in {' '.join(q(u) for u in stop)}; do
-  if systemctl is-enabled -q "$u" 2>/dev/null || systemctl is-active -q "$u" 2>/dev/null; then x systemctl disable --now "$u"; fi
-done"""]
-    for dd in downs:
-        dd = _tilde(dd, home)
-        lines.append(f"[ -d {q(dd)} ] && asu {q(f'cd {q(dd)} && python3 -m spark down')}")
-    for dd in sdowns:
-        lines.append(f"[ -x {q(dd)}/stop.sh ] && asu {q(f'cd {q(dd)} && set -a && . ./.env && set +a && ./stop.sh')}")
-    lines.append(f"""for i in $(seq 120); do alive || break; sleep 1; done
-if alive; then echo "port {port} still answers after the stop: a server Noctyx does not manage holds it"; exit 76; fi""")
-    if s.get("gpu_idle_check"):
-        lines.append("""for i in $(seq 120); do [ -z "$(nvidia-smi --query-compute-apps=pid --format=csv,noheader 2>/dev/null)" ] && break; sleep 1; done
-busy=$(nvidia-smi --query-compute-apps=pid,process_name,used_memory --format=csv,noheader 2>/dev/null)
-if [ -n "$busy" ]; then echo "the GPU is still in use:"; echo "$busy"; exit 77; fi""")
-    if not to:
-        lines.append('echo "== stopped"; exit 0')
-        rc, _ = _root_stream(c, h, "\n".join(lines) + "\n")
-        return rc, []
-    lines.append(f"sleep {int(s.get('settle_s', 5))}")
-    lines.append(f'echo "== start ({rec_label(to)})"')
-    unit = to["unit"]
-    if not to.get("adopted"):
-        b64 = __import__("base64").b64encode(to["unit_text"].encode()).decode()
-        lines.append(f"[ -d {q(to['dir'])} ] || {{ echo 'checkout {to['dir']} is gone: prepare again'; exit 78; }}")
-        lines.append(f"echo {b64} | base64 -d > /etc/systemd/system/{unit} && systemctl daemon-reload || exit 78")
-    lines.append(f"""x systemctl enable {q(unit)} >/dev/null 2>&1; x systemctl start --no-block {q(unit)} || exit 78
-t0=$(date +%s); n=0
-while :; do
-  if alive && curl -s -m 3 http://127.0.0.1:{port}/health | grep -q '"status": *"ok"' && curl -s -m 3 http://127.0.0.1:{port}/v1/models | grep -q '"id"'; then break; fi
-  st=$(systemctl show -p ActiveState --value {q(unit)})
-  if [ "$st" = failed ] || {{ [ "$st" = inactive ] && [ $(( $(date +%s) - t0 )) -gt 20 ]; }}; then
-    echo "{unit} is $st:"; journalctl -u {q(unit)} -n 40 --no-pager -o cat; exit 79; fi
-  if [ $(( $(date +%s) - t0 )) -gt {ht} ]; then echo "not serving after {ht}s"; journalctl -u {q(unit)} -n 20 --no-pager -o cat; exit 79; fi
-  n=$((n+1)); [ $((n % 12)) -eq 0 ] && echo "  loading… $(( $(date +%s) - t0 ))s ($st)"
-  sleep 5
-done
-echo "== serving after $(( $(date +%s) - t0 ))s"
-echo "NX_MODELS $(curl -s -m 5 http://127.0.0.1:{port}/v1/models | python3 -c 'import json,sys; print(" ".join(m["id"] for m in json.load(sys.stdin)["data"]))')"
-""")
-    rc, out = _root_stream(c, h, "\n".join(lines) + "\n")
-    m = re.findall(r"^NX_MODELS (.*)$", out, re.M)
-    return rc, (m[-1].split() if m else [])
-
-
-def _llm_refresh(wait=False):
-    if shutil.which("systemctl"):
-        subprocess.run(["systemctl", "start", *([] if wait else ["--no-block"]), "llm-discover.service"],
-                       capture_output=True, timeout=300)
-    else:
-        subprocess.run([sys.executable, "-m", "noctyx.cli", "llm-discover"], capture_output=True, timeout=300,
-                       env={**os.environ, "PYTHONPATH": str(NX_HOME.parent)})
-
-
-# ── who is on a slot's GPU: the lock's holder and waiters, and the processes using the GPU ──
-_GPU_SNIPPET = r"""f=%(lock)s
-case "$f" in "~/"*) f="$(getent passwd %(user)s | cut -d: -f6)/${f#\~/}";; esac
-if [ -e "$f" ]; then
-  key=$(printf '%%02x:%%02x:%%s' $(stat -c '%%Hd %%Ld %%i' "$f"))
-  awk -v k="$key" '$0 ~ k {print ($2=="->" ? "W " $6 : "H " $5)}' /proc/locks
-else echo "N"; fi
-echo "=="
-nvidia-smi --query-compute-apps=pid,used_memory --format=csv,noheader,nounits 2>/dev/null
-echo "=="
-ps -eo pid=,etimes=,user=,args= 2>/dev/null
-"""
-
-
-def parse_gpu_use(text):
-    """The snippet's output -> {"lock": "free"|"held"|"none", "holder": {...}|None, "waiting": [...], "gpu": [...]}.
-    A process: {pid, seconds, user, cmd} (cmd redacted and cut); a GPU process adds its MiB."""
-    from noctyx import agent
-    locks, gpu, ps = (text.split("==\n") + ["", ""])[:3]
-    procs = {}
-    for line in ps.splitlines():
-        m = re.match(r"\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)", line)
-        if m:
-            procs[int(m.group(1))] = {"pid": int(m.group(1)), "seconds": int(m.group(2)), "user": m.group(3),
-                                      "cmd": agent.redact(m.group(4))[:160]}
-    who = lambda pid: procs.get(pid) or {"pid": pid, "seconds": None, "user": None, "cmd": "(a process in another namespace)"}
-    held = [int(l.split()[1]) for l in locks.splitlines() if l.startswith("H ") and l.split()[1].isdigit()]
-    wait = [int(l.split()[1]) for l in locks.splitlines() if l.startswith("W ") and l.split()[1].isdigit()]
-    out = {"lock": "none" if locks.strip() == "N" else "held" if held else "free",
-           "holder": who(held[0]) if held else None, "waiting": [who(p) for p in wait], "gpu": []}
-    for line in gpu.splitlines():
-        m = re.match(r"\s*(\d+)\s*,\s*(\d+)", line)
-        if m:
-            out["gpu"].append({**who(int(m.group(1))), "mib": int(m.group(2))})
-    return out
-
-
-def slot_gpu_use(c, slot, timeout=12):
-    """Who holds the slot's GPU lock, who waits for it, and which processes use its GPU, read on the slot's head."""
-    s = recipe_slot(c, slot)
-    h = host_by_name(c, s["head"])
-    if h.get("os", "linux") != "linux":
-        return {"lock": "none", "holder": None, "waiting": [], "gpu": [], "note": "not a Linux host"}
-    snippet = _GPU_SNIPPET % {"lock": shlex.quote(s.get("lock") or P["gpu_lock"]), "user": shlex.quote(_slot_user(c, h))}
-    try:
-        r = _on(c, h, snippet, timeout=timeout)
-    except Exception as e:
-        return {"error": str(e)[:120]}
-    if r.returncode not in (0,) and not (r.stdout or "").strip():
-        return {"error": (r.stderr or f"rc {r.returncode}").strip()[-120:]}
-    return {**parse_gpu_use(r.stdout or ""), "path": s.get("lock") or P["gpu_lock"]}
-
-
-def gpu_use_line(u):
-    """One line for a slot's GPU use (recipe-status)."""
-    if u.get("error"):
-        return f"GPU: could not read ({u['error']})"
-    d = lambda p: f"{p['cmd'][:70]} (pid {p['pid']}" + (f", {fmt_duration(p['seconds'])}" if p.get("seconds") is not None else "") + ")"
-    gpu = "; ".join(f"{p['cmd'].split()[0].rsplit('/', 1)[-1]} {p['mib'] / 1024:.1f} GiB" for p in u.get("gpu") or []) or "idle"
-    lock = ("lock held by " + d(u["holder"]) if u.get("holder") else "lock free" if u.get("lock") == "free" else "no lock file yet")
-    return f"GPU: {gpu} · {lock}" + (f" · {len(u['waiting'])} waiting: " + "; ".join(d(p) for p in u["waiting"]) if u.get("waiting") else "")
-
-
-def _answers_after(c, slot):
-    """After a switch that came up: ask the fixed prompts (noctyx.answers). A new deployment's replies become
-    its baseline; the same deployment started again must answer as recorded. Never fails the switch."""
-    try:
-        from noctyx import answers
-        if answers.every(c) is None:
-            return
-        rec = answers.check_slot(c, slot)
-        print("  answers  " + answers.describe(slot, rec), flush=True)
-        last = rec.get("last") or {}
-        audit("slot-check", slot=slot, state=last.get("state"), model=last.get("model"), prompts=last.get("prompts"),
-              after="switch")
-    except Exception as e:
-        print(f"  (the answer check did not run: {str(e)[:120]})")
-
-
-def recipe_plan(c, slot, name=None, ref=None):
-    s = recipe_slot(c, slot)
-    cur, prev, _ = slot_records(c, slot)
-    live = recipe_live(c, slot)
-    hosts_ = [s["head"]] + ([s["worker"]] if s.get("worker") else [])
-    plan = {"slot": slot, "hosts": hosts_, "port": s["port"], "current": cur, "previous": prev, "live": live,
-            "impact": [], "blockers": []}
-    if not slot_deploys(s):
-        plan["blockers"].append(f"{slot} is watch-only (deploy: false in the site config): Noctyx does not switch it")
-    if live["ok"]:
-        plan["impact"].append(f"{', '.join(live['models'])} on {'+'.join(hosts_)}:{s['port']} stops serving during the switch")
-    if name:
-        cat = recipes_cfg(c)["catalog"].get(name)
-        if not cat:
-            plan["blockers"].append(f"unknown recipe {name}")
-        elif slot not in (cat.get("slots") or []):
-            plan["blockers"].append(f"{name} does not run on {slot}")
-        else:
-            try:
-                plan["sha"] = _resolve_ref(cat["repo"], ref or cat.get("ref") or "main")
-            except Exception as e:
-                plan["blockers"].append(str(e)[:200])
-    try:
-        holder = spindle_holder(f"recipe-{slot}")
-        if holder:
-            plan["blockers"].append(f"another recipe job holds slot {slot}: {holder.get('what')} since {holder.get('since')}")
-    except Exception:
-        pass
-    return plan
-
-
-def _print_plan(p, what):
-    print(f"{what} on slot {p['slot']} ({'+'.join(p['hosts'])}, port {p['port']})")
-    print(f"  now:  {rec_label(p['current'])}  — " + (f"serving {', '.join(p['live']['models'])}" if p["live"]["ok"]
-                                                   else f"not serving ({p['live'].get('error') or p['live'].get('status')})"))
-    for i in p["impact"]:
-        print(f"  ! {i}")
-    for b in p["blockers"]:
-        print(f"  ✗ {b}")
-
-
-def cmd_recipe_deploy(a):
-    c = cfg()
-    p = recipe_plan(c, a.slot, a.recipe, a.ref)
-    _print_plan(p, f"deploy {a.recipe}" + (f"@{p['sha'][:12]}" if p.get("sha") else ""))
-    if p["blockers"]:
-        sys.exit(1)
-    if not (a.yes or a.prepare_only):
-        print("\nnothing changed: add --yes to deploy (or --prepare-only to check out and build without switching)")
-        sys.exit(2)
-    try:
-        with spindle_lock(f"recipe-{a.slot}", what=f"recipe-deploy {a.recipe} on {a.slot}"):
-            t0 = time.time()
-            try:
-                new = recipe_prepare(c, a.slot, a.recipe, a.ref)
-            except Exception as e:
-                print(f"prepare FAILED: {e} — nothing was stopped")
-                audit("recipe-deploy", slot=a.slot, recipe=a.recipe, rc=1, stage="prepare", error=str(e)[:200])
-                sys.exit(1)
-            print(f"prepared in {fmt_duration(time.time() - t0)}", flush=True)
-            if a.prepare_only:
-                return
-            cur, _, _ = slot_records(c, a.slot)
-            t1 = time.time()
-            rc, models = _switch(c, a.slot, cur, new, wait_lock=a.wait_lock * 60)
-            if rc == 0:
-                new.update(models=models, deployed_ts=time.time(), state="serving")
-                _record(a.slot, current=new, previous=cur,
-                        event={"event": "deploy", "to": rec_label(new), "from": rec_label(cur), "rc": 0,
-                               "down_s": round(time.time() - t1)})
-                audit("recipe-deploy", slot=a.slot, recipe=a.recipe, sha=new["sha"], rc=0, models=models,
-                      replaced=rec_label(cur), down_s=round(time.time() - t1))
-                print(f"✓ {a.slot}: {rec_label(new)} serving {', '.join(models)} "
-                      f"(switch took {fmt_duration(time.time() - t1)})")
-                _answers_after(c, a.slot)
-                _llm_refresh()
-                return
-            if rc == 75:
-                print("✗ the GPU lock is held (a harness run or another job): nothing was stopped — try again later"
-                      " or pass --wait-lock MINUTES")
-                audit("recipe-deploy", slot=a.slot, recipe=a.recipe, rc=75, stage="lock")
-                sys.exit(75)
-            print(f"✗ {rec_label(new)} did not come up (rc={rc}): switching back to {rec_label(cur)}", flush=True)
-            back = 1
-            if cur:
-                back, models = _switch(c, a.slot, new, cur, wait_lock=600)
-            _record(a.slot, event={"event": "deploy", "to": rec_label(new), "from": rec_label(cur), "rc": rc,
-                                   "rolled_back": back == 0})
-            audit("recipe-deploy", slot=a.slot, recipe=a.recipe, sha=new["sha"], rc=rc, rolled_back=back == 0)
-            print(f"{'✓ rolled back: ' + rec_label(cur) + ' serving ' + ', '.join(models) if back == 0 else '✗ ROLLBACK FAILED: slot ' + a.slot + ' is serving nothing — check ' + new['host']}")
-            _llm_refresh()
-            sys.exit(rc)
-    except SpindleBusy:
-        print(f"✗ slot {a.slot} is busy: {spindle_holder(f'recipe-{a.slot}').get('what')}")
-        sys.exit(1)
-
-
-def _slot_op(a, what):
-    c = cfg()
-    p = recipe_plan(c, a.slot)
-    cur, prev = p["current"], p["previous"]
-    _print_plan(p, what)
-    if p["blockers"]:
-        sys.exit(1)
-    if what == "rollback" and not prev:
-        sys.exit("nothing to roll back to")
-    if what == "start" and p["live"]["ok"]:
-        print("already serving — nothing to do")
-        return
-    if what != "start" and not a.yes:
-        print(f"\nnothing changed: add --yes to {what}" + (f" (back to {rec_label(prev)})" if what == "rollback" else ""))
-        sys.exit(2)
-    try:
-        with spindle_lock(f"recipe-{a.slot}", what=f"recipe-{what} {a.slot}"):
-            frm, to = {"stop": (cur, None), "start": (None, cur), "rollback": (cur, prev)}[what]
-            rc, models = _switch(c, a.slot, frm, to, wait_lock=a.wait_lock * 60)
-            if rc == 0 and what == "rollback":
-                _record(a.slot, current={**prev, "models": models, "state": "serving"}, previous=cur,
-                        event={"event": "rollback", "to": rec_label(prev), "from": rec_label(cur), "rc": 0})
-            elif rc == 0 and cur:
-                _record(a.slot, current={**cur, "state": "stopped" if what == "stop" else "serving",
-                                         **({"models": models} if models else {})}, keep_previous=True,
-                        event={"event": what, "to": rec_label(cur), "rc": 0})
-            else:
-                _record(a.slot, event={"event": what, "to": rec_label(to or cur), "rc": rc})
-            audit(f"recipe-{what}", slot=a.slot, rc=rc, target=rec_label(to or cur), models=models)
-            print(("✓ " if rc == 0 else "✗ ") + f"{what} {a.slot}: rc={rc}" + (f", serving {', '.join(models)}" if models else ""))
-            if rc == 0 and what != "stop":
-                _answers_after(cfg(), a.slot)
-            _llm_refresh()
-            sys.exit(rc)
-    except SpindleBusy:
-        print(f"✗ slot {a.slot} is busy: {spindle_holder(f'recipe-{a.slot}').get('what')}")
-        sys.exit(1)
-
-
-def cmd_recipe_stop(a):
-    _slot_op(a, "stop")
-
-
-def cmd_recipe_start(a):
-    _slot_op(a, "start")
-
-
-def cmd_recipe_rollback(a):
-    _slot_op(a, "rollback")
+# ── recipe deployment (extracted to noctyx.recipes; re-exported for compatibility)
+from noctyx.recipes import (  # noqa: E402
+    RECIPE_KINDS, _RNAME, _REF, _SHA, _REPO, _ENVK, _UNIT, PREBUILD_MIN_GIB,
+    recipes_cfg, recipe_slot, slot_deploys, _recipe_state, _save_recipe_state,
+    _adopted, slot_records, _record, rec_label, recipe_live, _slot_user,
+    _root_stream, _home, _tilde, _resolve_ref, _sh_env, _toml, health_timeout,
+    _unit_text, _spark_info, _SPARK_PREP, recipe_prepare, _switch, _llm_refresh,
+    _GPU_SNIPPET, parse_gpu_use, slot_gpu_use, gpu_use_line, _answers_after,
+    recipe_plan, _print_plan, cmd_recipe_deploy, _slot_op, cmd_recipe_stop,
+    cmd_recipe_start, cmd_recipe_rollback, recipe_summary, cmd_recipe_status,
+    cmd_recipe_adopt, validate_catalog_entry, cmd_recipe_catalog,
+)
 
 
 def _log_digest(a):
@@ -2989,191 +1839,6 @@ def _log_digest(a):
 def _slot_check(a):
     from noctyx import answers
     return answers.cmd_slot_check(a)
-
-
-def recipe_summary(c, live=True):
-    """Slots (config, current/previous/history, live answer) and the catalog — CLI status and the UI."""
-    rc_ = recipes_cfg(c)
-    st = _recipe_state()["slots"]
-    from noctyx import answers
-    ans = answers.summary()
-    slots = {}
-    for n, s in rc_["slots"].items():
-        cur, prev, hist = slot_records(c, n)
-        lv = recipe_live(c, n) if live else {}
-        exp = (cur or {}).get("models") or (cur or {}).get("expect") or []
-        drift = None
-        if lv.get("ok") and exp and not set(exp) & set(lv["models"]):
-            drift = f"serving {', '.join(lv['models'])}, but Noctyx last started {rec_label(cur)} ({', '.join(exp)})"
-        elif not lv.get("ok") and (cur or {}).get("state") == "serving":
-            drift = f"{rec_label(cur)} should be serving but the port does not answer"
-        unrecorded = bool(lv.get("ok") and not exp and (cur is None or cur.get("adopted")))
-        slots[n] = {"head": s["head"], "worker": s.get("worker"), "port": s["port"], "lock": s.get("lock"),
-                    "current": cur, "previous": prev, "history": hist[:10], "live": lv, "drift": drift,
-                    "unrecorded": unrecorded, "deploy": slot_deploys(s), "answers": ans.get(n),
-                    "prepared": {k: {x: v.get(x) for x in ("sha", "ref", "prepared_ts")} for k, v in
-                                 ((st.get(n) or {}).get("prepared") or {}).items()},
-                    "recipes": [k for k, v in rc_["catalog"].items() if n in (v.get("slots") or [])],
-                    "busy": spindle_holder(f"recipe-{n}").get("what")}
-    for r in slots.values():
-        for k in ("current", "previous"):
-            if r[k]:
-                r[k] = {x: v for x, v in r[k].items() if x != "unit_text"}
-    try:
-        disc = json.loads(DISCOVER_FILE.read_text())
-    except Exception:
-        disc = {}
-    return {"slots": slots, "catalog": rc_["catalog"], "kinds": list(RECIPE_KINDS), "discover": disc}
-
-
-def cmd_recipe_status(a):
-    c = cfg()
-    d = recipe_summary(c)
-    if a.json:
-        print(json.dumps(d, indent=1, default=str))
-        return
-    for n, s in d["slots"].items():
-        lv = s["live"]
-        print(f"{n:<9} {s['head']}{'+' + s['worker'] if s['worker'] else ''}:{s['port']}  {rec_label(s['current'])}")
-        print(f"          {'serving ' + ', '.join(lv['models']) if lv.get('ok') else 'NOT serving (' + str(lv.get('error') or lv.get('status')) + ')'}"
-              + (f"  · previous: {rec_label(s['previous'])}" if s["previous"] else ""))
-        if s["drift"]:
-            print(f"          ! {s['drift']}")
-            if lv.get("ok"):
-                print(f"            a swap made by hand? `noctyx recipe-adopt --slot {n} --unit UNIT` records it")
-        elif s["unrecorded"]:
-            print(f"          · Noctyx has no record of which models this serves, so it cannot tell a swap: "
-                  f"`noctyx recipe-adopt --slot {n}` records what answers now")
-        if not s["deploy"]:
-            print("          watch-only (deploy: false): Noctyx reports it and never switches it")
-        print("          " + gpu_use_line(slot_gpu_use(c, n)))
-        an = s.get("answers") or {}
-        if an.get("state") in ("changed", "wrong"):
-            print(f"          ! answers {an['state']}: {an.get('detail')}  (`noctyx slot-check --slot {n}`)")
-        elif an.get("state"):
-            print(f"          answers {an['state']}, checked {fmt_duration(time.time() - (an.get('ts') or 0))} ago")
-        if s["busy"]:
-            print(f"          busy: {s['busy']}")
-    print("catalog:")
-    for k, v in d["catalog"].items():
-        print(f"  {k:<24} {v['kind']:<8} {v.get('ref', 'main'):<10} {', '.join(v.get('slots') or [])}  {v['repo']}")
-
-
-_UNIT = re.compile(r"^[A-Za-z0-9@._:-]{1,120}\.service$")
-
-
-def cmd_recipe_adopt(a):
-    """Record what a slot serves now as its deployment: a model somebody started or swapped by hand. Writes the
-    slot's `adopt` (unit, name, the models that answer) into the site config; a deployment Noctyx made before
-    becomes `previous`. Nothing on the slot is stopped or started."""
-    c = cfg()
-    s = recipe_slot(c, a.slot)
-    lv = recipe_live(c, a.slot, timeout=10)
-    if not lv.get("ok"):
-        sys.exit(f"{a.slot} does not answer on port {s['port']} ({lv.get('error') or lv.get('status')}): "
-                 "nothing to adopt")
-    cur, _, _ = slot_records(c, a.slot)
-    old = dict(s.get("adopt") or {})
-    if not a.unit and cur and not cur.get("adopted"):
-        sys.exit(f"{a.slot} runs Noctyx's own deployment {rec_label(cur)}: name the unit that serves now "
-                 "(--unit), or deploy again to put Noctyx's back")
-    unit = a.unit or old.get("unit")
-    if slot_deploys(s) and not unit:
-        sys.exit("name the unit that serves it (--unit NAME.service): Noctyx stops and starts a deployment "
-                 "through its unit")
-    if unit and not _UNIT.match(unit):
-        sys.exit(f"not a service unit name: {unit}")
-    if a.spark_dir and not re.match(r"^[A-Za-z0-9~/._-]{1,200}$", a.spark_dir):
-        sys.exit(f"not a directory path: {a.spark_dir}")
-    name = a.name or ", ".join(lv["models"])
-    new = {k: v for k, v in old.items() if k not in ("unit", "name", "models", "spark_dir", "adopted_ts")}
-    new.update(name=name, models=lv["models"],
-               adopted_ts=datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"))
-    if unit:
-        new["unit"] = unit
-        if unit == old.get("unit") and old.get("spark_dir") and not a.spark_dir:
-            new["spark_dir"] = old["spark_dir"]
-    if a.spark_dir:
-        new["spark_dir"] = a.spark_dir
-    print(f"{a.slot}: serving {', '.join(lv['models'])}")
-    print(f"  recorded now: {rec_label(cur)}" + (f" ({', '.join(cur['models'])})" if (cur or {}).get("models") else ""))
-    print(f"  to record   : {name}" + (f", unit {unit}" if unit else ", no unit (watch-only)"))
-    if unit and slot_deploys(s):
-        h = host_by_name(c, s["head"])
-        try:
-            r = ssh(c, h, f"systemctl show -p LoadState --value {shlex.quote(unit)}", timeout=20)
-            if (r.stdout or "").strip() != "loaded":
-                sys.exit(f"{unit} is not a unit on {s['head']}: Noctyx could not stop or start this deployment "
-                         "through it")
-        except subprocess.TimeoutExpired:
-            sys.exit(f"{s['head']} did not answer over ssh: the unit could not be checked")
-    if not a.yes:
-        print("\nnothing changed: add --yes to record it")
-        sys.exit(2)
-    r = dict(c.get("recipes") or {})
-    slots = dict(r.get("slots") or {})
-    slots[a.slot] = {**s, "adopt": new}
-    if unit and slot_deploys(s) and unit not in (s.get("conflicts") or []):
-        slots[a.slot]["conflicts"] = list(s.get("conflicts") or []) + [unit]   # a later deploy disables it
-    r["slots"] = slots
-    _write_block("recipes", r)
-    if cur and not cur.get("adopted"):         # Noctyx's own deployment was replaced by hand: keep it as previous
-        st = _recipe_state()
-        sl = st["slots"].setdefault(a.slot, {})
-        sl["previous"] = sl.pop("current")
-        _save_recipe_state(st)
-    _record(a.slot, event={"event": "adopt", "to": name, "from": rec_label(cur), "rc": 0})
-    audit("recipe-adopt", slot=a.slot, name=name, unit=unit, models=lv["models"], replaced=rec_label(cur))
-    print(f"✓ {a.slot}: {name} is the recorded deployment")
-
-
-def validate_catalog_entry(name, e, c):
-    errs = []
-    if not _RNAME.match(name or ""):
-        errs.append("name: lowercase letters, digits, '.' and '-' (max 48)")
-    if not isinstance(e, dict):
-        return ["entry must be an object"]
-    if not _REPO.match(str(e.get("repo", ""))):
-        errs.append("repo: an https:// or ssh:// git URL")
-    if e.get("kind") not in RECIPE_KINDS:
-        errs.append(f"kind: one of {', '.join(RECIPE_KINDS)}")
-    if not _REF.match(str(e.get("ref", "main"))):
-        errs.append("ref: a branch, tag or commit sha")
-    sl = e.get("slots")
-    known = recipes_cfg(c)["slots"]
-    if not isinstance(sl, list) or not sl or any(x not in known for x in sl):
-        errs.append(f"slots: one or more of {', '.join(known)}")
-    for k in ("env", "overrides"):
-        if k in e and not isinstance(e[k], dict):
-            errs.append(f"{k}: an object")
-    if any(not _ENVK.match(k) for k in (e.get("env") or {})):
-        errs.append("env: UPPER_CASE names")
-    return errs
-
-
-def cmd_recipe_catalog(a):
-    """Add, replace or remove one catalog entry (validated; the site config's recipes block rewritten in place)."""
-    c = cfg()
-    r = dict(c.get("recipes") or {})
-    cat = dict(r.get("catalog") or {})
-    if a.remove:
-        if a.name not in cat:
-            sys.exit(f"no recipe {a.name}")
-        using = [n for n, s in recipe_summary(c, live=False)["slots"].items() if (s["current"] or {}).get("recipe") == a.name]
-        if using:
-            sys.exit(f"{a.name} is deployed on {', '.join(using)}: deploy something else there first")
-        cat.pop(a.name)
-    else:
-        e = json.loads(a.json)
-        errs = validate_catalog_entry(a.name, e, c)
-        if errs:
-            sys.exit("invalid: " + "; ".join(errs))
-        cat[a.name] = {k: e[k] for k in ("repo", "ref", "kind", "slots", "env", "overrides") if k in e}
-    r["catalog"] = cat
-    _write_block("recipes", r)
-    audit("recipe-catalog", name=a.name, removed=bool(a.remove))
-    print(f"catalog: {'removed' if a.remove else 'saved'} {a.name}")
-
 
 # ── recipe discovery (noctyx.discover) keeps its last answer here; the slots' summary carries it ──
 DISCOVER_FILE = STATE_DIR / "recipe-discover.json"
@@ -3935,6 +2600,7 @@ def site_values(c):
     head = next((h for h in c.get("hosts", []) if h.get("address") == s.get("address")), {})
     return {"NX_PY": sys.executable, "NX_PKG_PARENT": str(NX_HOME.parent), "NX_CONFIG": CFG_PATH,
             "UI_PORT": str(s.get("ui_port", 20996)), "HF_STORE": hc["store"], "HF_PORT": str(hc["port"]),
+            "HF_WRITE_THROUGH": "1" if hc.get("write_through") else "0",
             "CONSOLE_AUTH": "0" if s.get("console_auth", True) is False else "1",
             "REPO_ROOT": s.get("repo_root") or "/", "HEAD_ADDR": s.get("address") or "",
             "HEAD_HOST": head.get("name") or "", "RESTIC_VERSION": str(c.get("restic_version") or "0.19.1"),
@@ -4104,6 +2770,7 @@ def main():
     rs.add_argument("--path", required=True); rs.add_argument("--to", choices=["staging", "host"], default="staging")
     rs.add_argument("--in-place", action="store_true"); rs.add_argument("--yes", action="store_true")
     cp = sub.add_parser("copy"); cp.add_argument("--host"); cp.add_argument("--dry-run", action="store_true")
+    cp.add_argument("--target", help="named secondary target from backup_targets (local, rest, s3, b2, sftp)")
     sub.add_parser("capacity")
     pp = sub.add_parser("probe"); pp.add_argument("--host")
     i = sub.add_parser("install-agent"); i.add_argument("--host"); i.add_argument("--profile", default="system")
@@ -4170,7 +2837,7 @@ def main():
     stp = sub.add_parser("setup", help="first-time setup of the head, step by step (no step: where the site is, and what is next)")
     stp.add_argument("step", nargs="?", default="status",
                      choices=["status", "all", "verify", "tools", "owner", "mount", "tls", "repos", "endpoint",
-                              "rest-server", "units", "metrics", "privacy", "escrow"])
+                              "rest-server", "units", "metrics", "alerting", "privacy", "escrow"])
     stp.add_argument("--force", action="store_true", help="tls: replace the CA too (every node must then be re-installed); "
                      "tools: download even if installed")
     stp.add_argument("--no-canary", action="store_true", help="verify: skip the backup+restore round trip")
@@ -4236,6 +2903,13 @@ def main():
     ih.add_argument("--apply", action="store_true")
     asg = sub.add_parser("assistant-set", help="set the UI assistant's LLM endpoint (JSON: enabled, url, model, timeout_seconds, fallback)")
     asg.add_argument("--json", required=True)
+    als = sub.add_parser("alerting-set", help="configure external alert channels (JSON: repeat_interval, channels)")
+    als.add_argument("--json", required=True)
+    sub.add_parser("alerting-apply", help="render alertmanager.yml and reload Alertmanager (Linux or macOS)")
+    sub.add_parser("alerting-test", help="send a synthetic test alert through Alertmanager")
+    sud = sub.add_parser("sudoers", help="print a scoped least-privilege /etc/sudoers.d/noctyx drop-in for a Linux node")
+    sud.add_argument("--host"); sud.add_argument("--user")
+    sud.add_argument("--allow-reboot", action="store_true"); sud.add_argument("--allow-recipes", action="store_true")
     f = sub.add_parser("follow", help="stream a detached job's log until it ends")
     f.add_argument("--unit", required=True); f.add_argument("--log", required=True)
     for sp in (b, v, pr, cp, rs, hy, rb, hfh, *rops):
@@ -4263,7 +2937,7 @@ def main():
                "changes": cmd_changes, "ssh-log": lambda a: __import__("noctyx.sshlog").sshlog.cmd(a), "revert": cmd_revert, "checkpoint": cmd_checkpoint, "checkpoints": cmd_checkpoints,
                "checkpoint-set": cmd_checkpoint_set, "config-history": cmd_config_history, "signals-set": cmd_signals_set,
                "config-restore": cmd_config_restore, "self-checkpoint": cmd_self_checkpoint,
-               "self-rollback": cmd_self_rollback}[a.cmd]
+               "self-rollback": cmd_self_rollback, "alerting-set": cmd_alerting_set, "alerting-apply": cmd_alerting_apply, "alerting-test": cmd_alerting_test, "sudoers": cmd_sudoers}[a.cmd]
     rc = 0
     try:
         handler(a)
@@ -4327,6 +3001,60 @@ def network_lines(n, probes, now=None):
         slow = ", ".join(sorted(h for h, v in fresh.items() if v < 0.5 * exp))
         out.append(f"            below half the expected speed: {slow}")
     return out
+
+
+
+def cmd_alerting_set(a):
+    """Set external alert routing channels (JSON: repeat_interval, channels) and validate."""
+    from noctyx import alerting
+    try:
+        raw = json.loads(a.json)
+    except ValueError as e:
+        sys.exit(f"invalid JSON: {e}")
+    clean, errs = alerting.validate_alerting(raw)
+    if errs:
+        sys.exit("invalid alerting config: " + "; ".join(errs))
+    _write_block("alerting", clean)
+    audit("alerting-set", channels=sorted((clean.get("channels") or {}).keys()))
+    print(f"alerting: saved ({len(clean.get('channels') or {})} channel(s))")
+
+
+def cmd_alerting_apply(a):
+    """Render alertmanager.yml from site.json and reload Alertmanager (Linux or macOS)."""
+    from noctyx import setup
+    c = cfg()
+    setup.setup_alertmanager(c, force=False)
+
+
+def cmd_alerting_test(a):
+    """Send a synthetic test alert through Alertmanager to verify external delivery."""
+    from noctyx import alerting
+    c = cfg()
+    host = c["server"].get("hostname") or "head"
+    try:
+        res = alerting.send_test_alert(host=host)
+    except Exception as e:
+        sys.exit(f"alerting-test failed: {e}")
+    audit("alerting-test", host=host, ok=res.get("ok"))
+    print(f"alerting-test: sent (HTTP {res.get('status')})")
+
+
+def cmd_sudoers(a):
+    """Print a least-privilege /etc/sudoers.d/noctyx file for a managed Linux node."""
+    from noctyx import sudoers
+    c = cfg()
+    user = a.user
+    if not user:
+        if a.host:
+            h = host_by_name(c, a.host)
+            user = h.get("ssh_user") or c["server"]["ssh"]["user"]
+        else:
+            user = c["server"]["ssh"]["user"]
+    txt = sudoers.render_sudoers(user, allow_reboot=a.allow_reboot, allow_recipes=a.allow_recipes)
+    ok, msg = sudoers.validate_sudoers_text(txt)
+    if not ok:
+        sys.exit(f"invalid sudoers generated: {msg}")
+    sys.stdout.write(txt)
 
 
 def cmd_status(a):

@@ -1,0 +1,18 @@
+[Unit]
+Description=Noctyx alerting: Alertmanager on 127.0.0.1:9093 (console webhook + external channels)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@REPO_OWNER@
+Group=@REPO_OWNER@
+ExecStart=/usr/local/bin/alertmanager --config.file=@AM_CONFIG@ --storage.path=@AM_DATA@ --web.listen-address=127.0.0.1:9093 --cluster.listen-address=
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=full
+ReadWritePaths=@AM_DATA@
+
+[Install]
+WantedBy=multi-user.target

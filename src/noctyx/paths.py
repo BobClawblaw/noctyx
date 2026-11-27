@@ -48,6 +48,8 @@ DEFAULTS = {
     "prom_job_nodes": "noctyx-nodes",                              # job scraping node_exporter
     "prom_config": "/etc/prometheus/prometheus.yml",               # the head's Prometheus (noctyx setup metrics)
     "prom_data": "/var/lib/noctyx/prometheus",                     # its TSDB (30 days)
+    "am_config": "/etc/prometheus/alertmanager.yml",               # Alertmanager config (Linux + macOS)
+    "am_data": "/var/lib/noctyx/alertmanager",                     # Alertmanager silences & nflog state
     "textfile_dir": "/var/lib/noctyx/textfile",                    # the head exporter's textfile collector dir
     "metric_prefix": "noctyx",                                     # <prefix>_gpu_power_watts … in every metric Noctyx makes
     "textfile_name": "noctyx.prom",                                # node_exporter textfile the collectors write

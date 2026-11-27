@@ -475,16 +475,25 @@ def setup_units(c):
         fail("not running: " + ", ".join(down) + "\n" + "\n".join(_service_log(_service(f"{n}.service")) for n in down))
 
 
-# ── metrics: Prometheus for the console's live numbers ──────────────────────
+# ── metrics: Prometheus + Alertmanager for the console's live numbers and alerting ──
 PROM = "http://127.0.0.1:9090"
-METRICS_UNITS = ("prometheus.service", "node-exporter.service", "textfile.service", "textfile.timer",
-                 "llm-discover.service", "llm-discover.timer")
+AM = "http://127.0.0.1:9093"
+METRICS_UNITS = ("prometheus.service", "alertmanager.service", "node-exporter.service",
+                 "textfile.service", "textfile.timer", "llm-discover.service", "llm-discover.timer")
 PROM_MARK = "# managed by noctyx setup metrics"
 
 
 def _prom_ready():
     try:
         with urllib.request.urlopen(f"{PROM}/-/ready", timeout=3) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
+def _am_ready():
+    try:
+        with urllib.request.urlopen(f"{AM}/-/ready", timeout=3) as r:
             return r.status == 200
     except Exception:
         return False
@@ -509,6 +518,10 @@ def prometheus_yml(c):
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ['127.0.0.1:9093']
 rule_files:
   - {d}/{P['unit_prefix']}-rules.yml
 scrape_configs:
@@ -562,10 +575,52 @@ def _write(path, text, mode, group=None):
         shutil.chown(path, "root", group)
 
 
+def setup_alertmanager(c, force=False):
+    """Alertmanager on 127.0.0.1:9093 (Linux systemd or macOS launchd): console webhook + configured channels."""
+    from . import alerting
+    if not owner_exists():
+        fail(f"no user {P['repo_owner']}: run `noctyx setup owner` first")
+    ours = hostos.service_installed(_service("alertmanager.service"), _label())
+    new_am = _install_release("alertmanager", ["alertmanager", "amtool"], force)
+    d = _prom_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    owner = P["repo_owner"]
+    am_data = pathlib.Path(P["am_data"])
+    am_data.mkdir(parents=True, exist_ok=True)
+    os.chmod(am_data, 0o750)
+    shutil.chown(am_data, owner, owner)
+    ca_copy = d / f"{P['unit_prefix']}-ca.crt"
+    if not ca_copy.exists() and pathlib.Path(c["server"]["tls"]["ca"]).exists():
+        _write(ca_copy, pathlib.Path(c["server"]["tls"]["ca"]).read_text(), 0o644)
+    am_cfg = pathlib.Path(P["am_config"])
+    am_cfg.parent.mkdir(parents=True, exist_ok=True)
+    _write(am_cfg, alerting.render_alertmanager_yml(c, ca_file=str(ca_copy)), 0o640, owner)
+    r = subprocess.run([str(BIN / "amtool"), "check-config", str(am_cfg)], capture_output=True, text=True)
+    if r.returncode:
+        fail(f"amtool rejects {am_cfg}: {(r.stdout + r.stderr).strip()[-600:]}")
+    done = hostos.install_services({_service("alertmanager.service"): cm.render_unit(c, "alertmanager.service")},
+                                   cm.UNIT, _label(), _log_dir())
+    print(f"  alertmanager installed: {', '.join(done)}")
+    if ours and new_am:
+        _restart_if_running("alertmanager.service")
+    elif ours:
+        try:
+            urllib.request.urlopen(urllib.request.Request(f"{AM}/-/reload", method="POST"), timeout=10)
+        except Exception:
+            _restart_if_running("alertmanager.service")
+    for _ in range(20):
+        if _am_ready():
+            break
+        time.sleep(1)
+    else:
+        fail(f"Alertmanager is not ready on {AM}\n{_service_log(_service('alertmanager.service'))}")
+    print(f"  alertmanager ready on {AM}")
+
+
 def setup_metrics(c, force=False):
-    """Prometheus on 127.0.0.1:9090 for the console's live numbers, the head's own node_exporter (loopback
-    only), the GPU/power collector and LLM discovery. A head that already runs a Prometheus keeps it: the
-    jobs to add to it are printed instead."""
+    """Prometheus on 127.0.0.1:9090 and Alertmanager on 127.0.0.1:9093 for the console's live numbers and alerts,
+    the head's own node_exporter (loopback only), the GPU/power collector and LLM discovery. A head that already
+    runs a Prometheus keeps it: the jobs to add to it are printed instead."""
     if not owner_exists():
         fail(f"no user {P['repo_owner']}: run `noctyx setup owner` first")
     ours = hostos.service_installed(_service("prometheus.service"), _label())
@@ -581,12 +636,13 @@ def setup_metrics(c, force=False):
         shutil.copy2(cfgf, keep)
         print(f"  {cfgf} is not Noctyx's: kept a copy at {keep}")
     new_prom = _install_release("prometheus", ["prometheus", "promtool"], force)
+    new_am = _install_release("alertmanager", ["alertmanager", "amtool"], force)
     new_exp = _install_release("node_exporter", ["node_exporter"], force)
     d = _prom_dir()
     d.mkdir(parents=True, exist_ok=True)
     os.chmod(d, 0o755)
     owner = P["repo_owner"]
-    for p, mode, who in ((P["prom_data"], 0o750, owner), (P["textfile_dir"], 0o755, "root")):
+    for p, mode, who in ((P["prom_data"], 0o750, owner), (P["am_data"], 0o750, owner), (P["textfile_dir"], 0o755, "root")):
         pathlib.Path(p).mkdir(parents=True, exist_ok=True)
         os.chmod(p, mode)
         shutil.chown(p, who, owner if who == owner else None)
@@ -602,15 +658,24 @@ def setup_metrics(c, force=False):
             _write(t, "[]\n", 0o644)
     _write(d / f"{P['unit_prefix']}-rules.yml", cm.render_site(c, (cm.NX_HOME / "metrics" / "rules.yml").read_text()), 0o644)
     _write(cfgf, prometheus_yml(c), 0o644)
+    from . import alerting
+    am_cfg = pathlib.Path(P["am_config"])
+    am_cfg.parent.mkdir(parents=True, exist_ok=True)
+    _write(am_cfg, alerting.render_alertmanager_yml(c, ca_file=str(d / f"{P['unit_prefix']}-ca.crt")), 0o640, owner)
     collector = "mac-textfile.sh" if hostos.IS_MAC else "node-textfile.sh"
     _write(BIN / P["textfile_unit"], cm.render_site(c, (cm.NX_HOME / "metrics" / collector).read_text()), 0o755)
     r = subprocess.run([str(BIN / "promtool"), "check", "config", str(cfgf)], capture_output=True, text=True)
     if r.returncode:
         fail(f"promtool rejects {cfgf}: {(r.stdout + r.stderr).strip()[-600:]}")
+    r_am = subprocess.run([str(BIN / "amtool"), "check-config", str(am_cfg)], capture_output=True, text=True)
+    if r_am.returncode:
+        fail(f"amtool rejects {am_cfg}: {(r_am.stdout + r_am.stderr).strip()[-600:]}")
     done = hostos.install_services({_service(n): cm.render_unit(c, n) for n in METRICS_UNITS}, cm.UNIT, _label(), _log_dir())
     print(f"  installed and started: {', '.join(done)}")
     if ours:                 # services that were already running keep the old binary until restarted
-        _restart_if_running(*(["prometheus.service"] if new_prom else []), *(["node-exporter.service"] if new_exp else []))
+        _restart_if_running(*(["prometheus.service"] if new_prom else []),
+                            *(["alertmanager.service"] if new_am else []),
+                            *(["node-exporter.service"] if new_exp else []))
     for _ in range(30):
         if _prom_ready():
             break
@@ -1052,7 +1117,8 @@ RUN = {"tools": lambda c, a: setup_tools(c, a.force), "owner": lambda c, a: setu
        "repos": lambda c, a: setup_repos(c), "endpoint": lambda c, a: setup_endpoint(c),
        "rest-server": lambda c, a: setup_endpoint(c), "units": lambda c, a: setup_units(c),
        "privacy": lambda c, a: setup_privacy(c), "escrow": lambda c, a: setup_escrow(c),
-       "metrics": lambda c, a: setup_metrics(c, a.force)}
+       "metrics": lambda c, a: setup_metrics(c, a.force),
+       "alerting": lambda c, a: setup_alertmanager(c, a.force)}
 
 
 def run_step(name, c, a):

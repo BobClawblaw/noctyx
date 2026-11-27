@@ -198,36 +198,46 @@ def recipe_discover(c, limit=80):
             continue
         br = it.get("default_branch") or "main"
         toml_ = _raw(full, br, "recipe.toml") or ""
-        cls, units = _hw_class(full.split("/", 1)[1])          # the repo's name says the most
-        c2, u2 = _hw_class(" ".join([full, it.get("description") or ""]))
-        if cls == "other":
-            cls, units = c2, u2
-        elif c2 == cls and units == 1:
-            units = u2                                       # "…-DGX-Spark" named, "four Sparks" described
-        if cls == "other" and toml_:
-            cls, units = _hw_class(toml_[:4000])
+        from noctyx import recipespec
+        spec, _spec_errs = recipespec.parse_deploy_toml(toml_) if toml_ else (None, [])
+        if spec and spec.get("hardware"):
+            cls, units = spec["hardware"], spec["nodes"]
+        else:
+            cls, units = _hw_class(full.split("/", 1)[1])          # the repo's name says the most
+            c2, u2 = _hw_class(" ".join([full, it.get("description") or ""]))
+            if cls == "other":
+                cls, units = c2, u2
+            elif c2 == cls and units == 1:
+                units = u2                                       # "…-DGX-Spark" named, "four Sparks" described
+            if cls == "other" and toml_:
+                cls, units = _hw_class(toml_[:4000])
         if cls == "other":
             continue
         here = cls in site_hw
         if not here and n_away >= limit // 4:      # other hardware: a few for context, never crowding this site's out
             continue
         n_here, n_away = n_here + here, n_away + (not here)
-        has_spark = bool(toml_) and _raw(full, br, "spark/__main__.py") is not None
-        has_sys = bool(toml_) and not has_spark and _raw(full, br, "setup.sh") is not None and _raw(full, br, "serve.sh") is not None
-        has_script = not (has_spark or has_sys) and _raw(full, br, "start.sh") is not None and _raw(full, br, "stop.sh") is not None
-        kind = "spark" if has_spark else "systemd" if has_sys else "script" if has_script else None
-        models = re.findall(r'^\s*(?:repo|converted_repo|published_repo)\s*=\s*"([\w.-]+/[\w.-]+)"', toml_, re.M)
+        if spec:
+            kind = "spec"
+        else:
+            has_spark = bool(toml_) and _raw(full, br, "spark/__main__.py") is not None
+            has_sys = bool(toml_) and not has_spark and _raw(full, br, "setup.sh") is not None and _raw(full, br, "serve.sh") is not None
+            has_script = not (has_spark or has_sys) and _raw(full, br, "start.sh") is not None and _raw(full, br, "stop.sh") is not None
+            kind = "spark" if has_spark else "systemd" if has_sys else "script" if has_script else None
+        models = [w["repo"] for w in (spec.get("weights") or [])] if spec else []
+        if not models:
+            models = re.findall(r'^\s*(?:repo|converted_repo|published_repo)\s*=\s*"([\w.-]+/[\w.-]+)"', toml_, re.M)
         fits, why = [], None
         same = {n: g for n, (k, g) in shw.items() if k == cls}       # this site's slots with that GPU
         lbl = GPU_LABEL.get(cls, cls)
         if kind is None:
-            why = "no spark/, setup.sh + serve.sh or start.sh + stop.sh: needs an adapter"
+            why = "no [deploy] spec, spark/, setup.sh + serve.sh or start.sh + stop.sh: needs an adapter"
         elif cls == "mac" and not same:
             why = "Apple silicon: recipes deploy as systemd units, so a macOS host can be monitored, not a slot"
         elif not same:
             why = f"no {lbl} slot on this site"
         else:
-            # setup.sh + serve.sh is one machine; spark and start.sh recipes span as many as they say
+            # setup.sh + serve.sh is one machine; spec, spark and start.sh recipes span as many as they say
             want = 1 if kind == "systemd" else units
             fits = sorted(n for n, g in same.items() if g == want)
             if not fits:
@@ -245,6 +255,7 @@ def recipe_discover(c, limit=80):
         items.append({"repo": full, "url": it.get("html_url"), "clone": it.get("clone_url"), "branch": br,
                       "description": (it.get("description") or "")[:200], "stars": it.get("stargazers_count", 0),
                       "pushed_at": it.get("pushed_at"), "fork": it.get("fork"), "hw": cls, "units": units, "kind": kind,
+                      "deployable": bool(fits), "spec": bool(spec),
                       "models": models[:3], "slots": fits, "why": why, "speed": best, "claimed_tps": claim,
                       "in_catalog": have.get(f"https://github.com/{full}".lower())})
     return {"ts": time.time(), "items": items, "queries": queries, "owners": owners,
