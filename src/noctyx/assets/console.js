@@ -1901,6 +1901,8 @@ function rConfig(d){
   <div class=setrow><label>Weekly</label><div><input id=cf-rw type=number min=0 max=999 value="${esc(R.weekly??'')}" oninput="cfgDirty()"></div><div class=hint>Then one a week for this many weeks.</div></div>
   <div class=setrow><label>Monthly</label><div><input id=cf-rm type=number min=0 max=999 value="${esc(R.monthly??'')}" oninput="cfgDirty()"></div><div class=hint>Then one a month for this many months. How often backups run: the <a class=lnk href="/#panel=schedule">Schedule panel</a>.</div></div></div>
  ${hfSection(d.hf||{})}
+ ${targetsSection(d.targets||{})}
+ ${alertSection(d.alerting||{})}
  ${asSection(d.assistant||{})}
  ${srSection(d.heal||{})}
  ${cpSection(d.checkpoints||{})}
@@ -1920,6 +1922,7 @@ function hfSection(F){
    <div id=hft>${hftBody()}</div></div>
   <div class=setrow><label>Endpoint</label><div><code>HF_ENDPOINT=${esc(F.endpoint||'')}</code></div><div class=hint>Per process: <code>export HF_ENDPOINT=…</code>; a container: <code>-e HF_ENDPOINT=…</code>. Recipe deploys use it by themselves.</div></div>
   <div class=setrow><label>Nightly harvest</label><div><input type=checkbox class=sw id=cf-hf${F.harvest?' checked':''} onchange="cfgDirty()"></div><div class=hint>After the backups: copies only files the store lacks, checks each against its hash, pauses in the backup window.</div></div>
+  <div class=setrow><label>Write-through cache</label><div><input type=checkbox class=sw id=cf-hfwt${F.write_through?' checked':''} onchange="cfgDirty()"></div><div class=hint>On a cache miss, stream weights to the node and atomically cache verified blobs into the mirror store immediately (restart <code>noctyx-hf-mirror</code> after changing).</div></div>
   <div class=setrow><label>Harvest from</label><div class=dbs>${hosts}</div><div class=hint>Untick a host to leave its caches out.</div></div>
   <div class=setrow><label>Bandwidth limit</label><div><input id=cf-hfbw type=number min=0 max=10000 value="${esc(F.bwlimit_mb??0)}" oninput="cfgDirty()"> MB/s</div><div class=hint>Per copy; 0 = no limit.</div></div></div>`}
 /* What the mirror holds, as a tree (cache/tree.py): kind › owner › repo › revision › folders › files, sizes at
@@ -1994,6 +1997,62 @@ function hftFiles(out,row,sk,s,depth){
   for(const f of n.files.sort((a,b)=>nat(a.name,b.name)))row(d,null,f.missing?`<span class=warn>${esc(f.name)}</span>`:esc(f.name),f.missing?null:f.size,null,
    f.missing?'<span class=warn title="the mirror fetches it from huggingface.co when asked; offline, it is not there">not on the NAS</span>':'',f.missing?'hftmiss':'')};
  walk(root,'',depth)}
+function targetsSection(TG){
+ const items=TG.items||{};
+ const rows=Object.entries(items).map(([n,t])=>`<tr><td><b>${esc(n)}</b></td><td><code>${esc(t.kind)}</code></td><td><code>${esc(t.uri||'')}</code></td>
+  <td>${t.ready?'<span class=ok>✓ ready</span>':`<span class=warn title="${esc(t.detail||'')}">⚠ ${esc(t.detail||'not ready')}</span>`}</td>
+  <td class=nowrap><button class=act onclick="cfgRun('copyTarget',{target:'${esc(n)}',dry_run:true},'dry-run copy to ${esc(n)}')">dry run</button>
+   <button class=act onclick="cfgRun('copyTarget',{target:'${esc(n)}'},'copy to ${esc(n)}')"${t.ready?'':' disabled'}>copy now</button></td></tr>`).join('');
+ return `<div class=cfgsec id=sec-targets><h4>Secondary backup targets (3-2-1 copy)</h4>
+  <p class=gnote>Copy primary restic snapshots off-site or to a second disk (<code>local</code>, <code>rest</code>, <code>s3</code>, <code>b2</code>, <code>sftp</code>). Secrets stay in root-only <code>&lt;etc&gt;/target-creds/&lt;name&gt;.env</code> files, never in <code>site.json</code>.</p>
+  ${rows?`<table class=cfgt><tr><th>target</th><th>kind</th><th>location</th><th>status</th><th></th></tr>${rows}</table>`
+   :'<div class=hint>No secondary targets configured yet. Add a <code>"backup_targets"</code> block to <code>site.json</code> and run <code>noctyx copy --target NAME</code>.</div>'}</div>`}
+let AL_DRAFT=null;
+function alState(){if(!AL_DRAFT){const d=(PANELS.find(x=>x.id=='config')||{})._data||{};const c=(d.alerting&&d.alerting.config)||{};
+  AL_DRAFT={repeat_interval:c.repeat_interval||'12h',channels:JSON.parse(JSON.stringify(c.channels||{}))}}return AL_DRAFT}
+function alertSection(AL){
+ const cfg=AL.config||{},chans=AL_DRAFT?AL_DRAFT.channels:(cfg.channels||{}),rep=AL_DRAFT?AL_DRAFT.repeat_interval:(cfg.repeat_interval||'12h');
+ const kinds=AL.channels||['ntfy','pushover','slack','telegram','webhook','email'];
+ const sevs=AL.severities||['all','warning','critical'];
+ const dest=c=>c.url||c.smarthost||c.webhook_url_file||c.user_key_file||(c.chat_id!=null?'chat '+c.chat_id:'');
+ const rows=Object.entries(chans).map(([n,c])=>`<tr><td><b>${esc(n)}</b></td><td><code>${esc(c.kind)}</code></td><td>${esc(c.min_severity||'warning')}</td>
+  <td><code>${esc(dest(c))}</code></td><td><button class=lnk onclick="alDel('${esc(n)}')">remove</button></td></tr>`).join('');
+ return `<div class=cfgsec id=sec-alerting><h4>External alert routing</h4>
+  <p class=gnote>Deliver firing alerts to phones, chat, or email alongside the Noctyx console webhook (Linux systemd or macOS launchd Alertmanager). Secrets are referenced by root-only file paths.</p>
+  <div class=setrow><label>Repeat interval</label><div><input id=al-rep value="${esc(rep)}" style="width:90px" placeholder="12h" oninput="alState().repeat_interval=this.value.trim();cfgDirty()"></div><div class=hint>How often still-firing alerts re-notify (e.g. <code>4h</code>, <code>12h</code>, <code>1d</code>).</div></div>
+  <div class=setrow><label>Channels</label><div>${rows?`<table class=cfgt><tr><th>name</th><th>kind</th><th>severity</th><th>destination / secret file</th><th></th></tr>${rows}</table>`:'<div class=mut>console webhook only — add a phone or chat channel below</div>'}</div></div>
+  <div class=setrow><label>Add channel</label><div class=hfline style="flex-wrap:wrap;gap:6px">
+   <input id=al-name placeholder="name (e.g. phone)" style="width:130px">
+   <select id=al-kind onchange="alKindUI()">${kinds.map(k=>`<option value="${esc(k)}">${esc(k)}</option>`).join('')}</select>
+   <select id=al-sev>${sevs.map(s=>`<option value="${esc(s)}"${s=='warning'?' selected':''}>${esc(s)}</option>`).join('')}</select>
+   <input id=al-a placeholder="https://ntfy.sh/topic" style="width:220px">
+   <input id=al-b placeholder="optional token file (/etc/noctyx/alert-keys/...)" style="width:240px">
+   <input id=al-c placeholder="" style="width:160px;display:none">
+   <button class=act onclick="alAdd()">add</button></div></div>
+  <div class=setrow><label></label><div class=hfline>
+   <button class=act onclick="alSave()">save alerting</button>
+   <button class=act onclick="cfgRun('applyAlerting',{},'apply alerting')" title="render alertmanager.yml and reload Alertmanager">apply &amp; reload</button>
+   <button class=act onclick="cfgRun('testAlerting',{},'test alert')" title="send a synthetic NoctyxTestAlert through Alertmanager">send test alert</button></div></div></div>`}
+function alKindUI(){const k=($('al-kind')||{}).value||'ntfy',a=$('al-a'),b=$('al-b'),c=$('al-c');if(!a||!b||!c)return;
+ c.style.display='none';
+ if(k=='ntfy'||k=='webhook'){a.placeholder=k=='ntfy'?'https://ntfy.sh/topic':'https://hooks.example/alert';b.placeholder='optional token file (/etc/noctyx/alert-keys/...)';}
+ else if(k=='pushover'){a.placeholder='user_key_file (/etc/noctyx/alert-keys/po.user)';b.placeholder='token_file (/etc/noctyx/alert-keys/po.tok)';}
+ else if(k=='slack'){a.placeholder='webhook_url_file (/etc/noctyx/alert-keys/slack.url)';b.placeholder='optional #channel';}
+ else if(k=='telegram'){a.placeholder='bot_token_file (/etc/noctyx/alert-keys/tg.tok)';b.placeholder='chat_id (integer)';}
+ else if(k=='email'){a.placeholder='smarthost (smtp.example.com:587)';b.placeholder='from@example.com';c.placeholder='to@example.com';c.style.display='';}}
+function alAdd(){const st=alState(),n=($('al-name').value||'').trim().toLowerCase(),k=$('al-kind').value,sev=$('al-sev').value,
+ a=($('al-a').value||'').trim(),b=($('al-b').value||'').trim(),c=($('al-c').value||'').trim();
+ if(!n||!a){alert('enter a channel name and destination/file');return}
+ const ent={kind:k,enabled:true,min_severity:sev,send_resolved:true};
+ if(k=='ntfy'||k=='webhook'){ent.url=a;if(b)ent.token_file=b;}
+ else if(k=='pushover'){ent.user_key_file=a;ent.token_file=b;}
+ else if(k=='slack'){ent.webhook_url_file=a;if(b)ent.channel=b;}
+ else if(k=='telegram'){ent.bot_token_file=a;ent.chat_id=Number(b);}
+ else if(k=='email'){ent.smarthost=a;ent.from=b;ent.to=c;}
+ st.channels[n]=ent;cfgDirty();const p=PANELS.find(x=>x.id=='config');if(p&&p._data)repaint('config',p._data)}
+function alDel(name){const st=alState();delete st.channels[name];cfgDirty();const p=PANELS.find(x=>x.id=='config');if(p&&p._data)repaint('config',p._data)}
+function alSave(){const st=alState();st.repeat_interval=($('al-rep')||{}).value?.trim()||st.repeat_interval||'12h';
+ cfgRun('setAlerting',{alerting:st},'save alerting').then(()=>{AL_DRAFT=null})}
 function asSection(A){
  const eps=(A.endpoints||[]).map((e,i)=>`<option value="${i}">${esc(e.host)} · ${esc(e.model||'?')} · ${esc(e.engine||'')} — ${esc(e.url)}</option>`).join('');
  return `<div class=cfgsec id=sec-assistant><h4>Assistant LLM</h4><p class=gnote>The model Noctyx asks to explain findings, triage alerts and write the morning brief. Text only: it never runs anything.</p>
@@ -2124,7 +2183,7 @@ function cfgCollect(){
  const num=id=>{const v=$(id).value.trim();return v===''?null:Number(v)};
  const ret={daily:num('cf-rd'),weekly:num('cf-rw'),monthly:num('cf-rm')};
  const F=d.hf||{},bw=Number(($('cf-hfbw')||{}).value||0);
- const hf=$('cf-hf')?{harvest:$('cf-hf').checked,bwlimit_mb:Number.isInteger(bw)?bw:0,
+ const hf=$('cf-hf')?{harvest:$('cf-hf').checked,write_through:!!($('cf-hfwt')&&$('cf-hfwt').checked),bwlimit_mb:Number.isInteger(bw)?bw:0,
   exclude_hosts:[...document.querySelectorAll('input[data-hfhost]')].filter(c=>!c.checked).map(c=>c.dataset.hfhost)}:undefined;
  return {policy:pol,retention:Object.values(ret).every(v=>Number.isInteger(v))?ret:null,hf_mirror:hf}}
 async function cfgSave(){
@@ -2145,7 +2204,7 @@ async function cfgRun(action,params,what){
   let s;try{s=await fetchJSON('/api/v1/job/'+j.id)}catch(e){continue}
   CFGJOB.text=`${what}${s.done?(s.rc===0?' — done':' — FAILED (rc='+s.rc+')'):' — running…'}\n${(s.output||'').trim()}`;
   const o=$('cf-out');if(o){o.textContent=CFGJOB.text;o.classList.toggle('bad',s.done&&s.rc!==0)}
-  if(s.done){if(s.rc===0&&(action=='setPolicy'||action=='setAssistant'||action=='setHeal'||action=='setCheckpoints'||action=='configRestore'))CFGDIRTY=false;
+  if(s.done){if(s.rc===0&&(action=='setPolicy'||action=='setAssistant'||action=='setAlerting'||action=='setHeal'||action=='setCheckpoints'||action=='configRestore'))CFGDIRTY=false;
    const p=PANELS.find(x=>x.id=='config');const data=await p.api().catch(()=>null);if(data){p._data=data;if(!CFGDIRTY)repaint('config',data)}
    return}}}
 /* ── recipes (/recipes): each GPU slot serves one recipe; deploy builds the next one while the

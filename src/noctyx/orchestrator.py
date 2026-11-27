@@ -1738,17 +1738,20 @@ def cmd_policy_set(a):
     if hf is not None:
         names = {h["name"] for h in c["hosts"]}
         if (not isinstance(hf, dict) or not isinstance(hf.get("harvest"), bool)
+                or ("write_through" in hf and not isinstance(hf.get("write_through"), bool))
                 or not isinstance(hf.get("exclude_hosts"), list) or any(x not in names for x in hf["exclude_hosts"])
                 or type(hf.get("bwlimit_mb")) is not int or not 0 <= hf["bwlimit_mb"] <= 10000):
-            errs.append("hf_mirror: harvest true/false, exclude_hosts known host names, bwlimit_mb 0..10000")
+            errs.append("hf_mirror: harvest/write_through true/false, exclude_hosts known host names, bwlimit_mb 0..10000")
     if errs:
         sys.exit("refused:\n  " + "\n  ".join(errs))
     if hf is not None:
-        new_hf = {**hf_cfg(c), **{k: hf[k] for k in ("harvest", "exclude_hosts", "bwlimit_mb")}}
+        keep_hf = {k: hf[k] for k in ("harvest", "write_through", "exclude_hosts", "bwlimit_mb") if k in hf}
+        new_hf = {**hf_cfg(c), **keep_hf}
         if new_hf != c.get("hf_mirror"):
             _write_block("hf_mirror", new_hf)
             audit("hf-mirror-changed", before=c.get("hf_mirror"), after=new_hf)
             print(f"hf_mirror saved: harvest {'on' if new_hf['harvest'] else 'off'}, "
+                  f"write_through {'on' if new_hf.get('write_through') else 'off'}, "
                   f"excluded {', '.join(new_hf['exclude_hosts']) or 'none'}, bwlimit {new_hf['bwlimit_mb'] or 'none'}")
     before = c.get("backup_policy")
     if pol != before:
@@ -2910,6 +2913,10 @@ def main():
     sud = sub.add_parser("sudoers", help="print a scoped least-privilege /etc/sudoers.d/noctyx drop-in for a Linux node")
     sud.add_argument("--host"); sud.add_argument("--user")
     sud.add_argument("--allow-reboot", action="store_true"); sud.add_argument("--allow-recipes", action="store_true")
+    deb = sub.add_parser("build-deb", help="build a Debian .deb package for the Linux node agent")
+    deb.add_argument("--out", help="output .deb file path (default: noctyx-agent_<ver>_all.deb)")
+    deb.add_argument("--scoped-sudo-user", help="also include /etc/sudoers.d/noctyx for this SSH user")
+    deb.add_argument("--allow-reboot", action="store_true"); deb.add_argument("--allow-recipes", action="store_true")
     f = sub.add_parser("follow", help="stream a detached job's log until it ends")
     f.add_argument("--unit", required=True); f.add_argument("--log", required=True)
     for sp in (b, v, pr, cp, rs, hy, rb, hfh, *rops):
@@ -2937,7 +2944,7 @@ def main():
                "changes": cmd_changes, "ssh-log": lambda a: __import__("noctyx.sshlog").sshlog.cmd(a), "revert": cmd_revert, "checkpoint": cmd_checkpoint, "checkpoints": cmd_checkpoints,
                "checkpoint-set": cmd_checkpoint_set, "config-history": cmd_config_history, "signals-set": cmd_signals_set,
                "config-restore": cmd_config_restore, "self-checkpoint": cmd_self_checkpoint,
-               "self-rollback": cmd_self_rollback, "alerting-set": cmd_alerting_set, "alerting-apply": cmd_alerting_apply, "alerting-test": cmd_alerting_test, "sudoers": cmd_sudoers}[a.cmd]
+               "self-rollback": cmd_self_rollback, "alerting-set": cmd_alerting_set, "alerting-apply": cmd_alerting_apply, "alerting-test": cmd_alerting_test, "sudoers": cmd_sudoers, "build-deb": cmd_build_deb}[a.cmd]
     rc = 0
     try:
         handler(a)
@@ -3055,6 +3062,17 @@ def cmd_sudoers(a):
     if not ok:
         sys.exit(f"invalid sudoers generated: {msg}")
     sys.stdout.write(txt)
+
+
+def cmd_build_deb(a):
+    """Build a Debian .deb package for the Linux node agent (pure stdlib, works on Linux & macOS)."""
+    from noctyx import __version__, debpkg
+    out = a.out or f"noctyx-agent_{__version__}_all.deb"
+    p = debpkg.build_agent_deb(
+        out, version=__version__, scoped_sudo_user=a.scoped_sudo_user,
+        allow_reboot=a.allow_reboot, allow_recipes=a.allow_recipes,
+    )
+    print(f"built {p} ({p.stat().st_size} bytes)")
 
 
 def cmd_status(a):

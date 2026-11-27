@@ -122,6 +122,7 @@ ACTIONS = {
     "backup":     lambda: [ORCH, "backup", "--profile", "system"],
     "verify":     lambda: [ORCH, "verify"],
     "copy":       lambda: [ORCH, "copy"],
+    "copyTarget": lambda p: [ORCH, "copy", "--target", p["target"]] + (["--dry-run"] if p.get("dry_run") else []),
     "prune":      lambda: [ORCH, "prune"],   # dry-run only; --apply is CLI-side by design
     "schedule":   lambda: [ORCH, "tick", "--dry-run"],   # read-only: what is due, and why
     "hygiene":    lambda: [ORCH, "hygiene"],             # report every host, fix nothing
@@ -194,10 +195,10 @@ VALID_PROFILES = set(CFG.get("profiles", {}).keys())
 # host-REQUIRED actions: their builders index p["host"] directly; missing would KeyError
 HOST_REQUIRED = {"backupHost", "verifyHost", "reboot", "rebootFinish"}
 RECIPE_ACTIONS = {"recipeDeploy", "recipeStop", "recipeStart", "recipeRollback", "recipeCatalog"}
-PARAM_ACTIONS = HOST_REQUIRED | RECIPE_ACTIONS | {"upgradeComponent", "upgradeEverywhere", "skipRelease", "pinRelease", "setAssistant", "setAlerting", "setHeal", "revertChange", "takeCheckpoint", "setCheckpoints", "configRestore", "setConsoleDefaults", "setSchedule", "restore", "hygieneFix", "setPolicy", "dumpsNow"}
+PARAM_ACTIONS = HOST_REQUIRED | RECIPE_ACTIONS | {"upgradeComponent", "upgradeEverywhere", "skipRelease", "pinRelease", "setAssistant", "setAlerting", "copyTarget", "setHeal", "revertChange", "takeCheckpoint", "setCheckpoints", "configRestore", "setConsoleDefaults", "setSchedule", "restore", "hygieneFix", "setPolicy", "dumpsNow"}
 # Only these wait for the one-long-job slot; everything else (status, schedule
 # edits, probes) runs at once instead of queueing silently behind a 3-hour seed.
-LONG_ACTIONS = {"backup", "verify", "copy", "prune", "backupHost", "verifyHost", "restore", "hygieneFix", "upgradeComponent",
+LONG_ACTIONS = {"backup", "verify", "copy", "copyTarget", "prune", "backupHost", "verifyHost", "restore", "hygieneFix", "upgradeComponent",
                 "upgradeEverywhere", "revertChange", "takeCheckpoint"}
 # how long a job may run before the console stops it (SIGTERM first: a change rolls itself back); default 3 days
 ACTION_TIMEOUT = {"upgradeComponent": 90 * 60, "upgradeEverywhere": 4 * 3600, "healNow": 90 * 60, "revertChange": 2 * 3600,
@@ -216,6 +217,12 @@ def policy_summary():
     base, site = NX_HOME / "agent", pathlib.Path(P["etc"])
     rd = lambda n: (base / n).read_text() if (base / n).exists() else ""   # noqa: E731
     extra = {f.name[len("exclusions-"):-len(".conf")]: f.read_text() for f in sorted(site.glob("exclusions-*.conf")) if f.name != "exclusions-common.conf"}
+    from noctyx import alerting as AL, targets as BT
+    ts = BT.configured_targets(c)
+    t_out = {}
+    for tn, tc in sorted(ts.items()):
+        ready, detail = BT.check_target_ready(tn, tc)
+        t_out[tn] = {**tc, "uri": BT.display_uri(tc, "<repo>"), "ready": ready, "detail": detail}
     return {"policy": pol, "stored": "backup_policy" in c, "hosts": names,
             "effective": {n: CM.effective_policy(c, n) for n in names},
             "profiles": {n: sorted(CM.effective_schedule(c, n)) for n in names},   # what actually runs
@@ -224,7 +231,10 @@ def policy_summary():
             "not_covered": [h["name"] for h in c["hosts"] if h.get("enabled", True) is not False
                             and h.get("address") and h["name"] not in names],
             "hf": hf_summary(c), "assistant": assistant_summary(), "heal": heal_config(c),
-            "checkpoints": checkpoint_config(c)}
+            "checkpoints": checkpoint_config(c),
+            "alerting": {"config": c.get("alerting") or {}, "channels": list(AL.CHANNELS),
+                         "severities": list(AL.SEVERITIES)},
+            "targets": {"items": t_out, "kinds": list(BT.TARGET_KINDS)}}
 
 
 def checkpoint_config(c):
@@ -449,6 +459,9 @@ def valid_params(name: str, p: dict) -> bool:
     if name == "setAlerting":
         from noctyx import alerting
         return not alerting.validate_alerting(p.get("alerting"))[1]
+    if name == "copyTarget":
+        from noctyx import targets as bt
+        return isinstance(p.get("target"), str) and p["target"] in bt.configured_targets(CM.cfg())
     if name == "setHeal":
         return not heal_errors(p.get("heal"))
     if name == "revertChange":

@@ -269,8 +269,9 @@ def copy_to_target(site_cfg: dict, target_name: str, target: dict, host: str | N
             continue
 
         base = {k: v for k, v in os.environ.items() if not k.startswith("RESTIC_")}
-        base.update(RESTIC_PASSWORD=pw, RESTIC_FROM_PASSWORD=pw, RESTIC_FROM_REPOSITORY=src)
+        base.update(RESTIC_PASSWORD=pw)
         _, extra, env = repo_spec(target_name, target, repo, base_env=base)
+        copy_env = {**env, "RESTIC_FROM_PASSWORD": pw, "RESTIC_FROM_REPOSITORY": src}
         disp = display_uri(target, repo)
 
         def _snap_ids(is_src: bool):
@@ -309,15 +310,16 @@ def copy_to_target(site_cfg: dict, target_name: str, target: dict, host: str | N
         if target["kind"] == "local":
             os.makedirs(os.path.dirname(env["RESTIC_REPOSITORY"]), exist_ok=True)
         if not dst_exists:
-            print(f"INIT {target_name} {disp} (same key as {repo})")
-            r0 = runner(["restic", *extra, "--no-cache", "init"], capture_output=True, text=True, env=env, timeout=300)
+            print(f"INIT {target_name} {disp} (same key + chunker params as {repo})")
+            r0 = runner(["restic", *extra, "--no-cache", "init", "--copy-chunker-params"],
+                        capture_output=True, text=True, env=copy_env, timeout=300)
             if r0.returncode != 0 and "already initialized" not in (r0.stderr or ""):
                 print(f"  init failed: {(r0.stderr or '')[-200:]}")
                 continue
         t0 = time.time()
         print(f"COPY {repo} ({len(pending)} snapshot(s)) -> {target_name} ({disp})")
         r = runner(["restic", *extra, "--no-cache", "copy"] + (["--host", host] if host else []),
-                   capture_output=True, text=True, env=env, timeout=3 * 86400)
+                   capture_output=True, text=True, env=copy_env, timeout=3 * 86400)
         dt = time.time() - t0
         if audit_fn:
             audit_fn("copy", target=target_name, kind=target["kind"], repo=repo,
