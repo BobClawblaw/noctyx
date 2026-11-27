@@ -503,9 +503,12 @@ def shared_modals_and_footer(base: str, version: str) -> str:
         <p style="margin:8px 0 0;font-size:0.88rem;color:var(--text-muted)">
           The night-shift operator for your AI cluster. Deploy, cache, protect, watch, and heal — pure Python stdlib on the head, bash + restic on the nodes.
         </p>
-        <div class="btc-box mono">
-          <span>BTC: bc1q9echf820hapc04y0f636uxdry2ahyx32tkleff</span>
-          <button class="copy-btn" type="button" data-copy-text="bc1q9echf820hapc04y0f636uxdry2ahyx32tkleff">Copy</button>
+        <div class="btc-box">
+          <div class="btc-head">
+            <span class="btc-label">₿ Bitcoin Donationware</span>
+            <button class="copy-btn" type="button" data-copy-text="bc1q9echf820hapc04y0f636uxdry2ahyx32tkleff">Copy</button>
+          </div>
+          <code class="btc-addr mono">bc1q9echf820hapc04y0f636uxdry2ahyx32tkleff</code>
         </div>
       </div>
       <div class="footer-col">

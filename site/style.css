@@ -1012,6 +1012,8 @@ img {
   color: #9beeff;
   font-size: 0.74rem;
   font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
   cursor: pointer;
 }
 .copy-btn:hover {
@@ -1319,7 +1321,7 @@ img {
 }
 .footer-grid {
   display: grid;
-  grid-template-columns: 1.5fr 1fr 1fr 1fr;
+  grid-template-columns: 1.85fr 1fr 1fr 1fr;
   gap: 32px;
 }
 .footer-col h4 {
@@ -1345,18 +1347,35 @@ img {
   color: var(--text);
 }
 .btc-box {
-  margin-top: 12px;
-  padding: 8px 10px;
-  border-radius: 8px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border-radius: 10px;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  font-size: 0.74rem;
-  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.btc-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  word-break: break-all;
+  gap: 10px;
+}
+.btc-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #f7931a;
+}
+.btc-addr {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  user-select: all;
 }
 .footer-bottom {
   margin-top: 32px;
