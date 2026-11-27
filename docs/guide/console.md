@@ -300,7 +300,7 @@ when the system asks for reduced motion.
 | `/api/v1/self-checkpoints` | the recorded states of Noctyx itself, and what `self-rollback` would do |
 | `/api/v1/alerting` | external Alertmanager receiver configuration (secrets redacted) and `setup alerting` status |
 | `/api/v1/targets` | configured secondary 3-2-1 backup targets (credentials redacted) |
-| `/api/v1/…` | the JSON the panels read. `POST /api/v1/action` runs actions ([accounts](accounts.md#api-token-for-scripts)) |
+| `/api/v1/…` | the JSON the panels read. `POST /api/v1/action` runs actions ([accounts](accounts.md#api-tokens-for-scripts)) |
 
 ## Prometheus `/metrics`
 

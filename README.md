@@ -11,6 +11,7 @@
   <img alt="head: Linux, macOS" src="https://img.shields.io/badge/head-Linux%20%C2%B7%20macOS-444?logo=apple&logoColor=white">
   <img alt="arch: x86_64, aarch64" src="https://img.shields.io/badge/arch-x86__64%20%C2%B7%20aarch64-555">
   <img alt="donate: bitcoin" src="https://img.shields.io/badge/donate-bitcoin-f7931a?logo=bitcoin&logoColor=white">
+  <a href="https://bobclawblaw.github.io/noctyx/"><img alt="website &amp; docs" src="https://img.shields.io/badge/docs-github%20pages-3ff0ff"></a>
 </p>
 
 # Noctyx
@@ -153,6 +154,8 @@ Regenerate them with `python3 tools/screenshots.py`.
 - Accounts with roles (password changes immediately invalidate old sessions), or open access on a LAN you trust. Themes. An audit log of every action.
 
 ## Documentation
+
+Browse the full searchable documentation, interactive screenshot tour, and architecture overview on the **[Noctyx GitHub Pages site](https://bobclawblaw.github.io/noctyx/)** (or read the guides directly below):
 
 | Guide | |
 |---|---|

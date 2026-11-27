@@ -8,3 +8,5 @@ site.toml
 *.local.toml
 # a maintainer's private strings for tools/privacy_check.py
 .privacy-patterns
+# local GitHub Pages build output
+_site/
