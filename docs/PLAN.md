@@ -2,7 +2,7 @@
 
 **Status:** pre-alpha. This tree is the clean home of the product; the code is being extracted from
 a private, single-site implementation that has run a real GPU cluster in production since 2026-09.
-**Date:** 2026-10-19 (status updated 2026-11-15)
+**Date:** 2026-10-19 (status updated 2026-11-27)
 
 ## Decisions taken
 
@@ -189,8 +189,15 @@ a working model cache and one deployed recipe, with zero edits to code.
 - *Tests:* the schedule, the tick, backup refusals and recipe deploys run against a simulated cluster in CI
   (stand-in nodes; not yet containers as nodes).
 
-Still open from these weeks: a second backup target, alerts routed to a phone, a slot actually deployed by Noctyx
-on the reference cluster (all three serve adopted, hand-started models), a bare-metal restore on real hardware.
+**Added 2026-11-27 (0.9.6):**
+- *Deploy:* implemented the open `[deploy]` `recipe.toml` spec v0 (`recipespec.py`, `kind: "spec"`) across prepare, systemd unit generation, switching, and `recipe-discover`.
+- *Cache:* opt-in atomic write-through caching in `cache/mirror.py` (`hf_mirror.write_through`, SHA-256 verified, Hub→CDN redirect support, Prometheus metrics, `/config` toggle).
+- *Protect:* pluggable secondary 3-2-1 backup targets (`targets.py`: `local`, `rest`, `s3`, `b2`, `sftp`) with root-only env credentials, `restic init --copy-chunker-params`, `noctyx copy --target`, and `/config` UI.
+- *Watch:* structured external phone/chat/email alert routing (`alerting.py`: `ntfy`, `pushover`, `slack`, `telegram`, `webhook`, `email`), Alertmanager on both Linux systemd and macOS launchd (`setup alerting`, `alertmanager.service`), and `/config` UI.
+- *Architecture & Hardening:* finished orchestrator split (`recipes.py`, `harvest.py`, `reboot.py`); split console UI into `console.html`, `console.css`, `theme.js`, and `console.js`; session revocation on password change (`session_epoch`), HTTP security headers, POST body cap, filename sanitization; scoped least-privilege sudoers generator (`noctyx sudoers`); pure-stdlib Debian `.deb` node agent packager (`noctyx build-deb`).
+- *Tests & CI:* added `bash -n`, `shellcheck`, and `node --check` in CI; simulated cluster harness (`tools/sim_cluster.py`) with stub OpenAI slot, fake Prometheus/Alertmanager, real `restic` target copy, and `dpkg-deb` verification (290 tests passing).
+
+Still open: `noctyx migrate`, a slot deployed end-to-end by Noctyx on the reference cluster, and a bare-metal restore drill on real hardware.
 
 **Phase 2 — Harden (3–4 weeks). Started 2026-10-19:** console accounts (scrypt passwords, viewer /
 operator / admin, signed HttpOnly SameSite=Strict session cookies, sign-in lockout, Origin check on every

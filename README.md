@@ -27,13 +27,15 @@ monitored (Time Machine backs it up).
 
 | | |
 |---|---|
-| **Deploy** | Build the next recipe while the current one serves; switch under the GPU lock; roll back automatically. Discover public recipes for your hardware, ranked by measured speed |
-| **Cache** | One copy of every Hugging Face model on the cluster, served back as `HF_ENDPOINT`; keeps working when the Hub does not |
-| **Protect** | Nightly snapshots of every Linux node, Docker volumes, consistent database dumps, bare-metal restore |
-| **Watch** | Live fleet console: every machine on one page (Machines), temperatures, power, tokens/s per model, alerts with LLM triage, a morning brief, and Ask Noctyx: questions answered from the cluster's own data |
+| **Deploy** | Build the next recipe while the current one serves; switch under the GPU lock; roll back automatically. Supports the open `recipe.toml` `[deploy]` spec and ranks public recipes by measured speed |
+| **Cache** | One copy of every Hugging Face model on the cluster, served back as `HF_ENDPOINT` with optional atomic write-through caching; keeps working when the Hub does not |
+| **Protect** | Nightly snapshots of every Linux node, Docker volumes, consistent database dumps, 3-2-1 copy to S3 / Backblaze B2 / REST / SFTP / local targets, bare-metal restore |
+| **Watch** | Live fleet console (15 themes, split CSS/JS), temperatures, power, tokens/s per model, alerts routed to phones/chat/email (Linux & macOS), LLM triage, morning brief, and Ask Noctyx |
 | **Heal** | Every upgrade checks itself and rolls back when it fails; a repair loop puts back what drifts and restarts what stops, and tells you what it did |
 
 <p align="center"><img src="docs/screenshots/phosphor-dashboard.png" alt="The Noctyx dashboard in the Phosphor theme: fleet throughput, GPU power, per-node LLM, CPU, memory and network, storage tiers" width="100%"></p>
+
+<p align="center"><img src="docs/assets/noctyx-architecture.svg" alt="Noctyx 0.9.6 architecture: head node, GPU slots and managed nodes, 3-2-1 backup targets and external alerting" width="100%"></p>
 
 ## Screenshots
 
@@ -66,15 +68,19 @@ Regenerate them with `python3 tools/screenshots.py`.
   records what serves now. A watch-only slot
   (`"deploy": false`) is reported and never switched.
 - Recipe discovery: public recipes on GitHub that fit your hardware, ranked by **measured** speed (your own
-  harness runs, tensorfold.dev) ahead of a README's claims.
+  harness runs, tensorfold.dev) ahead of a README's claims. Repos declaring the open [`[deploy]` spec](docs/spec/recipe-deploy.md)
+  in `recipe.toml` (`kind: "spec"`) are detected automatically and deployed with no adapter.
 
 **Cache**
 - A Hugging Face mirror on the head: every node's downloads are harvested into one store and served back
-  as `HF_ENDPOINT`, so a model is fetched from the Hub once and keeps loading when the Hub is down.
+  as `HF_ENDPOINT`, with optional atomic write-through caching (`hf_mirror.write_through`) that verifies
+  SHA-256 and caches weights on the first pull, so models keep loading when the Hub is down.
 
 **Protect**
 - restic snapshots of every Linux node to your NAS or a local disk, scheduled per profile, one writer per spindle, inside each profile's
   window, refusing to start over a link slower than a set floor.
+- Secondary 3-2-1 backup targets (`backup_targets`): copy primary snapshots incrementally (`--copy-chunker-params`)
+  to S3, Backblaze B2, a remote REST server, SFTP, or a second local disk (`noctyx copy --target NAME`, or from the Config page), with credentials in root-only env files.
 - Docker volumes, consistent database dumps (Postgres, MariaDB/MySQL, Redis/Valkey, SQLite) before each
   backup, retention, scheduled verification, capacity forecasts.
 - Restores are rehearsed: every node regularly restores a few files from its newest snapshot and compares them
@@ -85,7 +91,9 @@ Regenerate them with `python3 tools/screenshots.py`.
 **Watch**
 - A live fleet console: tokens/s, prefill and latency per model, GPU temperature and power, CPU, memory,
   network fabric, disks, uptime, containers.
-- Alerts with LLM triage, a morning brief, Prometheus metrics, a kiosk view.
+- Alerts with LLM triage, a morning brief, Prometheus metrics, a kiosk view, and external phone/chat/email
+  alert routing (`ntfy`, `Pushover`, `Slack`, `Telegram`, `webhook`, `email`) via Alertmanager on both Linux
+  and macOS heads (`noctyx alerting-set`, `noctyx setup alerting`, or **Configuration › External alert routing**).
 - Hygiene: old kernels, unused packages, journal and Docker leftovers per node, with the space each fix frees.
   The daily run fixes what cannot break anything, plus the space items a site hands to it (`noctyx hygiene-set`);
   exited containers and failed units always wait for a person.
@@ -128,11 +136,12 @@ Regenerate them with `python3 tools/screenshots.py`.
 
 **Run it your way**
 - Pure Python standard library on the head, on Linux (systemd) or macOS (launchd); bash and restic on the nodes.
-  No database, no containers needed.
+  No database, no containers needed. Build a Linux node `.deb` package anywhere with `noctyx build-deb`, and
+  generate scoped least-privilege `/etc/sudoers.d/noctyx` rules with `noctyx sudoers`.
 - First-time setup by questions (`noctyx init`), or in a browser (`noctyx init --web`, the assistant proposing
   each step), the site's LLM set up first so it can explain any step that fails, then `noctyx setup all` and an
   end-to-end `noctyx setup verify`.
-- Accounts with roles, or open access on a LAN you trust. Themes. An audit log of every action.
+- Accounts with roles (password changes immediately invalidate old sessions), or open access on a LAN you trust. Themes. An audit log of every action.
 
 ## Documentation
 

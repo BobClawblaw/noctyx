@@ -360,7 +360,7 @@ sudo noctyx signals-set --json '{"growth_gb_per_hour": 500}'
 | Key | Meaning | Default |
 |---|---|---|
 | `repo` | `https://` or `ssh://` git URL | **required** |
-| `kind` | `spark` (`python3 -m spark up/down`), `systemd` (`setup.sh` + `serve.sh`), `script` (`start.sh` + `stop.sh`) | **required** |
+| `kind` | `spec` (`recipe.toml` `[deploy]` spec v0), `spark` (`python3 -m spark up/down`), `systemd` (`setup.sh` + `serve.sh`), `script` (`start.sh` + `stop.sh`) | **required** |
 | `ref` | branch, tag or commit | `"main"` |
 | `slots` | slots it may run on | **required** |
 | `env` | `UPPER_CASE` environment | `{}` |
@@ -371,6 +371,36 @@ sudo noctyx recipe-catalog --name my-model --json '{"repo": "https://github.com/
 noctyx recipe-status
 sudo noctyx recipe-deploy --slot gpu --recipe my-model           # prints the plan; --yes does it
 ```
+
+## backup_targets
+
+Optional secondary 3-2-1 backup targets copied to by `noctyx copy --target NAME` (or from **Configuration › Secondary backup targets**):
+
+```json
+"backup_targets": {
+  "offsite-s3": {"kind": "s3", "endpoint": "https://s3.us-west-004.backblazeb2.com", "bucket": "my-cluster-backups", "region": "us-west-004", "prefix": "prod"},
+  "offsite-b2": {"kind": "b2", "bucket": "my-b2-bucket"},
+  "usb": {"kind": "local", "path": "/mnt/usb/noctyx", "mount": "/mnt/usb"}
+}
+```
+
+Supported kinds: `local`, `rest`, `s3`, `b2`, `sftp`. Keep credentials in root-only `<etc>/target-creds/<name>.env` files (or a custom `credentials_file` path), never in `site.json`.
+
+## alerting
+
+Optional external alert routing channels rendered into `alertmanager.yml` by `noctyx setup alerting` / `noctyx alerting-apply` (works on both Linux systemd and macOS launchd). Every alert still delivers to the local console webhook first (`continue: true`).
+
+```json
+"alerting": {
+  "repeat_interval": "6h",
+  "channels": {
+    "phone": {"kind": "ntfy", "url": "https://ntfy.sh/my-cluster", "token_file": "/etc/noctyx/alert-keys/ntfy.tok", "min_severity": "critical"},
+    "ops": {"kind": "slack", "webhook_url_file": "/etc/noctyx/alert-keys/slack.url", "channel": "#alerts", "min_severity": "warning"}
+  }
+}
+```
+
+Supported channel kinds: `ntfy`, `pushover`, `slack`, `telegram`, `webhook`, `email`. `min_severity` is `all`, `warning`, or `critical`.
 
 ## console
 
@@ -430,6 +460,7 @@ noctyx paths     # {"config": ..., every effective path}
 | `prom_job_console`, `prom_job_nodes` | `noctyx`, `noctyx-nodes` | Prometheus job names |
 | `prom_config` | `/etc/prometheus/prometheus.yml` | the head's Prometheus config (`noctyx setup metrics` writes it) |
 | `prom_data` | `/var/lib/noctyx/prometheus` | its data (30 days) |
+| `am_config`, `am_data` | `/etc/prometheus/alertmanager.yml`, `/var/lib/noctyx/alertmanager` | Alertmanager config and state (Linux + macOS) |
 | `textfile_dir` | `/var/lib/noctyx/textfile` | the head exporter's textfile collector directory |
 | `textfile_name`, `textfile_unit` | `noctyx.prom`, `noctyx-node-textfile` | node collector |
 | `metric_prefix` | `noctyx` | the start of every metric name Noctyx makes |

@@ -21,6 +21,7 @@ host.
 |---|---|---|
 | Port | `hf_mirror.port` (the unit sets `NOCTYX_HF_PORT`) | `20995` |
 | Store | `hf_mirror.store`. The mirror serves `<store>/hub` (the unit sets `NOCTYX_HF_STORE`). | `/srv/noctyx/hf-mirror` |
+| Write-through | `hf_mirror.write_through` (`NOCTYX_HF_WRITE_THROUGH=1`) caches verified blobs on miss | `false` |
 | Upstream | `NOCTYX_HF_UPSTREAM` | `huggingface.co` |
 | Request log | `NOCTYX_HF_DEBUG=1` prints every request to stderr | off |
 
@@ -49,10 +50,14 @@ huggingface.co.
 | `/api/{models,datasets,spaces}/{repo}`, `…/revision/{rev}`, `…/tree/{rev}[/path]` | Proxied. If huggingface.co is unreachable, returns a 5xx, or answers 401/403/404 (offline, gated without a token, deleted), and the store has the repo, the mirror answers from the store. |
 | Anything else | Streamed through to huggingface.co unchanged. Redirects to its CDN are passed on. |
 | `/` or `/cm-status` | JSON: store path, request counters, store totals, time of the last harvest |
-| `/metrics` | Prometheus: `noctyx_hfmirror_requests_total{result=hit\|miss\|fallback\|errors}`, `noctyx_hfmirror_bytes_total{result=hit\|miss}` (prefix: `paths.metric_prefix`) |
+| `/metrics` | Prometheus: `noctyx_hfmirror_requests_total{result=hit\|miss\|fallback\|errors\|write_through}`, `noctyx_hfmirror_bytes_total{result=hit\|miss\|write_through}` (prefix: `paths.metric_prefix`) |
 
-Every response carries an `X-CM-Mirror` header: `hit` (from the store), `miss` (passed through), `fallback`
+Every response carries an `X-CM-Mirror` header: `hit` (from the store), `write-through` (missed upstream, streamed to the client, verified, and atomically committed to the store), `miss` (passed through), `fallback`
 (answered from the store because upstream failed) or `none`.
+
+### Write-through caching (0.9.6+)
+
+When `hf_mirror.write_through` is enabled (in `site.json` or under **Configuration › Model mirror**, followed by `noctyx install-head --apply` and restarting `noctyx-hf-mirror`), a full GET cache miss on `/{repo}/resolve/{rev}/{path}` follows Hub→CDN redirects, streams bytes straight to the requesting node while writing a temp file, checks `Content-Length` and SHA-256 against the file's ETag, and atomically publishes the blob, snapshot symlink, and ref into `<store>/hub`. The second node pulling the same model immediately gets LAN-speed hits without waiting for the nightly `hf-harvest`. Range requests and HEAD requests continue to pass through without partial caching.
 
 The store is a plain Hugging Face hub cache (`models--org--name/{blobs,snapshots,refs}`). A host that mounts it can
 also use it read-only as `HF_HUB_CACHE`.

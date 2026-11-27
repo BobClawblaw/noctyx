@@ -259,11 +259,12 @@ sudo noctyx recipe-discover --sort newest      # or --sort stars
   each GitHub owner already in the catalog. `recipes.discover_queries` replaces the whole list. The searches are
   spaced 6.5 s apart to stay under GitHub's limit. No token is used. Archived repos are skipped. Up to 80 results
   for this site's hardware are kept, plus up to 20 for other hardware as context.
-- **Classify.** The hardware comes from the repo name, then its description, then `recipe.toml`: DGX Spark (`gb10`),
-  RTX PRO 6000, RTX 5090/5080/4090/3090, H200, H100, B200, A100, L40S or Apple silicon, with a count of units
-  (`2x`, `tp=2`, `dual`, …). Anything else is dropped. The kind comes from the files on the default branch:
-  `recipe.toml` with `spark/__main__.py` means `spark`, `recipe.toml` with `setup.sh` and `serve.sh` means
-  `systemd`, and `start.sh` with `stop.sh` means `script`.
+- **Classify.** The hardware comes from `[deploy].hardware` in `recipe.toml` when present, otherwise from the repo
+  name, its description, and `recipe.toml`: DGX Spark (`gb10`), RTX PRO 6000, RTX 5090/5080/4090/3090, H200, H100,
+  B200, A100, L40S or Apple silicon, with a count of units (`2x`, `tp=2`, `dual`, …). Anything else is dropped. The
+  kind comes from the files on the default branch: a valid `[deploy]` table in `recipe.toml` ([spec v0](../spec/recipe-deploy.md))
+  means `spec`, `recipe.toml` with `spark/__main__.py` means `spark`, `recipe.toml` with `setup.sh` and `serve.sh`
+  means `systemd`, and `start.sh` with `stop.sh` means `script`.
 - **Slot hardware.** Each slot's GPU is its `hw` key (e.g. `"hw": "rtx5090"`), or else what its head node's GPU
   reports (the console's facts), or else its name. Its size is `gpus`, or 2 for a slot with a `worker`, else 1.
 - **Fit.** A result fits every slot with the same GPU and the right size: a `systemd` recipe needs a one-GPU

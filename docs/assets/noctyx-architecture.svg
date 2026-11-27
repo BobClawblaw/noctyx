@@ -1,0 +1,161 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 594" width="1280" height="594">
+  <defs>
+    <radialGradient id="bg" cx=".5" cy=".15" r="1.05">
+      <stop offset="0" stop-color="#141840"/>
+      <stop offset=".55" stop-color="#090c20"/>
+      <stop offset="1" stop-color="#04050b"/>
+    </radialGradient>
+    <linearGradient id="headStroke" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3ff0ff"/>
+      <stop offset="1" stop-color="#5b8cff"/>
+    </linearGradient>
+    <linearGradient id="gpuStroke" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5b8cff"/>
+      <stop offset="1" stop-color="#b45cff"/>
+    </linearGradient>
+    <linearGradient id="storStroke" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8f6bff"/>
+      <stop offset="1" stop-color="#ff3fd2"/>
+    </linearGradient>
+    <marker id="arrCyan" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#3ff0ff"/>
+    </marker>
+    <marker id="arrBlue" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#5b8cff"/>
+    </marker>
+    <marker id="arrViolet" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#b45cff"/>
+    </marker>
+    <marker id="arrPink" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 1 L 10 5 L 0 9 z" fill="#ff3fd2"/>
+    </marker>
+  </defs>
+
+  <rect width="1280" height="594" rx="16" fill="url(#bg)"/>
+  <rect x="1" y="1" width="1278" height="592" rx="15" fill="none" stroke="#3ff0ff" stroke-opacity=".18" stroke-width="1.2"/>
+
+  <!-- Header -->
+  <text x="42" y="48" fill="#e6f0ff" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="20" font-weight="700" letter-spacing="3">NOCTYX 0.9.6 ARCHITECTURE</text>
+  <text x="42" y="70" fill="#89a0c8" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="12.5" letter-spacing="1.2">ZERO DEPENDENCIES (PYTHON STDLIB) · LINUX SYSTEMD &amp; MACOS LAUNCHD HEAD · RESTIC 3-2-1 · RECIPE.TOML [DEPLOY] SPEC</text>
+
+  <!-- Pillar legend -->
+  <g font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="11.5" letter-spacing="1.5" fill="#c9d6f0">
+    <circle cx="842" cy="44" r="4.5" fill="#3ff0ff"/><text x="853" y="48">DEPLOY</text>
+    <circle cx="928" cy="44" r="4.5" fill="#5b8cff"/><text x="939" y="48">CACHE</text>
+    <circle cx="1008" cy="44" r="4.5" fill="#8f6bff"/><text x="1019" y="48">PROTECT</text>
+    <circle cx="1102" cy="44" r="4.5" fill="#c25cff"/><text x="1113" y="48">WATCH</text>
+    <circle cx="1182" cy="44" r="4.5" fill="#ff3fd2"/><text x="1193" y="48">HEAL</text>
+  </g>
+
+  <!-- COLUMN 1: HEAD NODE -->
+  <g transform="translate(40 100)">
+    <rect width="380" height="420" rx="12" fill="#0a0f26" stroke="url(#headStroke)" stroke-width="1.6"/>
+    <rect x="0" y="0" width="380" height="38" rx="12" fill="#111a3e"/>
+    <rect x="0" y="24" width="380" height="14" fill="#111a3e"/>
+    <text x="18" y="24" fill="#3ff0ff" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="700" letter-spacing="1.8">HEAD NODE (LINUX / MACOS)</text>
+
+    <!-- Console box -->
+    <rect x="18" y="54" width="344" height="74" rx="8" fill="#060916" stroke="#3ff0ff" stroke-opacity=".35"/>
+    <text x="32" y="76" fill="#e6f0ff" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="700">Web Console (:20996 HTTPS)</text>
+    <text x="32" y="96" fill="#9fb3dc" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="11">15 Themes · Kiosk · Ask Noctyx LLM Drawer</text>
+    <text x="32" y="114" fill="#7d93bd" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">scrypt Auth · RBAC · Split CSS/JS · Audit Log</text>
+
+    <!-- Orchestrator box -->
+    <rect x="18" y="142" width="344" height="82" rx="8" fill="#060916" stroke="#5b8cff" stroke-opacity=".4"/>
+    <text x="32" y="164" fill="#e6f0ff" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="700">Orchestrator &amp; Self-Repair</text>
+    <text x="32" y="184" fill="#9fb3dc" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="11">recipes · harvest · reboot · targets · heal</text>
+    <text x="32" y="202" fill="#7d93bd" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">Per-spindle locks · Throughput floor · Rollback</text>
+    <text x="32" y="217" fill="#7d93bd" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">Checkpoints · Log Digest · Restore Rehearsals</text>
+
+    <!-- HF Mirror box -->
+    <rect x="18" y="238" width="344" height="74" rx="8" fill="#060916" stroke="#5b8cff" stroke-opacity=".4"/>
+    <text x="32" y="260" fill="#e6f0ff" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="700">HF Mirror (:20995 HF_ENDPOINT)</text>
+    <text x="32" y="280" fill="#9fb3dc" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="11">Deduplicated Hub Cache + Write-Through</text>
+    <text x="32" y="298" fill="#7d93bd" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">SHA-256 verified blobs · Offline fallback</text>
+
+    <!-- Prometheus + Alertmanager box -->
+    <rect x="18" y="326" width="344" height="78" rx="8" fill="#060916" stroke="#c25cff" stroke-opacity=".45"/>
+    <text x="32" y="348" fill="#e6f0ff" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="700">Prometheus + Alertmanager</text>
+    <text x="32" y="368" fill="#9fb3dc" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="11">Pinned binaries (Linux &amp; macOS launchd)</text>
+    <text x="32" y="386" fill="#7d93bd" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">Console hook + ntfy · Pushover · Slack · TG · Mail</text>
+  </g>
+
+  <!-- COLUMN 2: GPU FLEET & MACS -->
+  <g transform="translate(470 100)">
+    <rect width="380" height="420" rx="12" fill="#0a0f26" stroke="url(#gpuStroke)" stroke-width="1.6"/>
+    <rect x="0" y="0" width="380" height="38" rx="12" fill="#17143c"/>
+    <rect x="0" y="24" width="380" height="14" fill="#17143c"/>
+    <text x="18" y="24" fill="#b45cff" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="700" letter-spacing="1.8">GPU SLOTS &amp; MANAGED NODES</text>
+
+    <!-- GPU Slot 1 -->
+    <rect x="18" y="54" width="344" height="106" rx="8" fill="#060916" stroke="#3ff0ff" stroke-opacity=".35"/>
+    <text x="32" y="76" fill="#3ff0ff" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="700">DGX Spark TP Pairs / RTX Slots</text>
+    <text x="32" y="96" fill="#c9d6f0" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="11">recipe.toml [deploy] spec · spark · script</text>
+    <text x="32" y="114" fill="#9fb3dc" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">• Pre-build while serving · Switch under GPU lock</text>
+    <text x="32" y="130" fill="#9fb3dc" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">• Greedy fixed-prompt answer check (slot-check)</text>
+    <text x="32" y="146" fill="#9fb3dc" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">• Live GPU PIDs &amp; lock waiters · Auto rollback</text>
+
+    <!-- Node Agent -->
+    <rect x="18" y="174" width="344" height="114" rx="8" fill="#060916" stroke="#8f6bff" stroke-opacity=".4"/>
+    <text x="32" y="196" fill="#e6f0ff" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="700">Linux Node Agent (.deb / SSH)</text>
+    <text x="32" y="216" fill="#9fb3dc" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">• noctyx-agent (restic + fs-meta + hygiene)</text>
+    <text x="32" y="232" fill="#9fb3dc" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">• noctyx-dumps (Postgres, MySQL, Redis, SQLite)</text>
+    <text x="32" y="248" fill="#9fb3dc" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">• Scoped /etc/sudoers.d/noctyx (least privilege)</text>
+    <text x="32" y="264" fill="#9fb3dc" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">• node_exporter + GPU power/temp collectors</text>
+    <text x="32" y="280" fill="#7d93bd" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">• Built with pure-stdlib `noctyx build-deb`</text>
+
+    <!-- Apple Silicon Macs -->
+    <rect x="18" y="302" width="344" height="102" rx="8" fill="#060916" stroke="#c25cff" stroke-opacity=".4"/>
+    <text x="32" y="324" fill="#e6f0ff" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="700">Apple Silicon Macs (Monitored)</text>
+    <text x="32" y="344" fill="#9fb3dc" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">• mtplx / MLX LLM tok/s &amp; KV cache metrics</text>
+    <text x="32" y="360" fill="#9fb3dc" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">• GPU power &amp; thermals (macmon / powermetrics)</text>
+    <text x="32" y="376" fill="#9fb3dc" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">• Time Machine freshness &amp; wired IP pinning</text>
+    <text x="32" y="392" fill="#7d93bd" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">• Watch-only recipe slots (deploy: false)</text>
+  </g>
+
+  <!-- COLUMN 3: 3-2-1 STORAGE, RECOVERY & ALERTS -->
+  <g transform="translate(900 100)">
+    <rect width="340" height="420" rx="12" fill="#0a0f26" stroke="url(#storStroke)" stroke-width="1.6"/>
+    <rect x="0" y="0" width="340" height="38" rx="12" fill="#23123c"/>
+    <rect x="0" y="24" width="340" height="14" fill="#23123c"/>
+    <text x="18" y="24" fill="#ff3fd2" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="700" letter-spacing="1.8">3-2-1 PROTECT &amp; OUTREACH</text>
+
+    <!-- Primary NAS -->
+    <rect x="18" y="54" width="304" height="96" rx="8" fill="#060916" stroke="#8f6bff" stroke-opacity=".45"/>
+    <text x="32" y="76" fill="#e6f0ff" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="700">Primary NAS / Local Tier</text>
+    <text x="32" y="96" fill="#9fb3dc" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">rest-server (TLS + --append-only)</text>
+    <text x="32" y="114" fill="#9fb3dc" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">• Encrypted restic repos per host</text>
+    <text x="32" y="132" fill="#9fb3dc" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">• Shared HF model mirror store</text>
+
+    <!-- Secondary Targets -->
+    <rect x="18" y="164" width="304" height="92" rx="8" fill="#060916" stroke="#c25cff" stroke-opacity=".45"/>
+    <text x="32" y="186" fill="#e6f0ff" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="700">Secondary 3-2-1 Targets</text>
+    <text x="32" y="206" fill="#9fb3dc" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">S3 · Backblaze B2 · REST · SFTP · USB</text>
+    <text x="32" y="224" fill="#9fb3dc" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">• `noctyx copy --target NAME`</text>
+    <text x="32" y="242" fill="#9fb3dc" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">• --copy-chunker-params incremental copy</text>
+
+    <!-- Bare-metal Recovery -->
+    <rect x="18" y="270" width="304" height="62" rx="8" fill="#060916" stroke="#3ff0ff" stroke-opacity=".35"/>
+    <text x="32" y="292" fill="#e6f0ff" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="700">Bare-Metal Recovery Stick</text>
+    <text x="32" y="312" fill="#9fb3dc" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">Dual-arch x86_64 + arm64 UEFI boot ISO</text>
+
+    <!-- Phone & Chat Alerts -->
+    <rect x="18" y="346" width="304" height="58" rx="8" fill="#060916" stroke="#ff3fd2" stroke-opacity=".5"/>
+    <text x="32" y="368" fill="#ff3fd2" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="13" font-weight="700">Phones &amp; Ops Channels</text>
+    <text x="32" y="388" fill="#c9d6f0" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5">ntfy · Pushover · Slack · Telegram · SMTP</text>
+  </g>
+
+  <!-- ARROWS between columns -->
+  <!-- Head -> GPU Fleet (deploy & ssh) -->
+  <line x1="420" y1="204" x2="466" y2="204" stroke="#3ff0ff" stroke-width="2" marker-end="url(#arrCyan)"/>
+  <!-- Head HF Mirror <-> GPU Fleet -->
+  <line x1="420" y1="372" x2="466" y2="372" stroke="#5b8cff" stroke-width="2" marker-end="url(#arrBlue)" marker-start="url(#arrBlue)"/>
+  <!-- GPU Fleet -> Primary NAS -->
+  <line x1="850" y1="204" x2="896" y2="204" stroke="#b45cff" stroke-width="2" marker-end="url(#arrViolet)"/>
+  <!-- Primary NAS -> Secondary Targets -->
+  <line x1="1070" y1="250" x2="1070" y2="262" stroke="#c25cff" stroke-width="2" marker-end="url(#arrPink)"/>
+  <!-- Head Alertmanager -> Phones (routed cleanly below columns) -->
+  <path d="M 230 520 L 230 554 Q 230 564 240 564 L 1060 564 Q 1070 564 1070 554 L 1070 525" fill="none" stroke="#ff3fd2" stroke-width="2" stroke-dasharray="6 4" marker-end="url(#arrPink)"/>
+  <rect x="412" y="550" width="476" height="26" rx="13" fill="#090c20" stroke="#ff3fd2" stroke-opacity=".55" stroke-width="1.2"/>
+  <text x="650" y="567" text-anchor="middle" fill="#ff7ae0" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="10.5" font-weight="600" letter-spacing="1.2">ALERTMANAGER → NTFY · PUSHOVER · SLACK · TELEGRAM · EMAIL</text>
+</svg>

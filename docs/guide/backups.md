@@ -292,6 +292,36 @@ noctyx probe [--host gpu-01]                       # just the throughput measure
 `verify` takes its subset from `--subset`, else from `verification.read_data_subset` (default `2%`). `capacity` warns when the measured source size exceeds the free space on the
 NAS.
 
+## Secondary 3-2-1 backup targets (`copy --target`)
+
+To replicate primary snapshots off-site or onto a second disk, define named targets in `site.json["backup_targets"]`
+(kinds: `local`, `rest`, `s3`, `b2`, `sftp`):
+
+```json
+"backup_targets": {
+  "offsite-s3": {
+    "kind": "s3",
+    "endpoint": "https://s3.us-west-004.backblazeb2.com",
+    "bucket": "my-cluster-backups",
+    "region": "us-west-004",
+    "prefix": "prod"
+  },
+  "usb": { "kind": "local", "path": "/mnt/usb/noctyx", "mount": "/mnt/usb" }
+}
+```
+
+Put remote credentials in root-only `<etc>/target-creds/<name>.env` files (mode `0600`, e.g. `AWS_ACCESS_KEY_ID=...`,
+`AWS_SECRET_ACCESS_KEY=...`, `B2_ACCOUNT_ID=...`, `B2_ACCOUNT_KEY=...`, or `REST_USER`/`REST_PASSWORD`) — never in
+`site.json`. Noctyx passes credentials only via subprocess environment variables and initializes each destination repo
+with `restic init --copy-chunker-params` using the same per-repo key so copies stay incremental at the blob level:
+
+```bash
+sudo noctyx copy --target offsite-s3 --dry-run
+sudo noctyx copy --target offsite-s3 [--host gpu-01]
+```
+
+Secondary targets and one-click **dry run** / **copy now** controls also appear under **Configuration › Secondary backup targets**.
+
 ## `nightly`
 
 `noctyx-nightly.timer` (07:30 daily; on a macOS head the launchd daemon `dev.noctyx.nightly`) runs

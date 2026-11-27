@@ -460,6 +460,7 @@ curl --cacert /etc/noctyx/tls/ca.crt https://192.0.2.10:20999/health
 | 20995 TCP | the HF mirror (`hf_mirror.port`) |
 | 20994 TCP, loopback | the head's own node_exporter (`setup metrics`) |
 | 9090 TCP, loopback | Prometheus (`setup metrics`; `NOCTYX_PROM` points the console elsewhere) |
+| 9093 TCP, loopback | Alertmanager (`setup metrics` / `setup alerting` on Linux and macOS) |
 | 20993 TCP, loopback | the demo |
 | 20992 TCP | the setup page, only while `noctyx init --web` runs |
 
@@ -471,9 +472,26 @@ Each of these is a script rendered for your site and run as root with `noctyx to
 |---|---|---|
 | `install-node-metrics [--host NAME]` | node_exporter with TLS and basic auth on each Linux node, a GPU/Docker textfile collector, and Prometheus file_sd targets; with the Prometheus of `setup metrics` it only reloads it (the job is already there) | Linux nodes, from a Linux or macOS head |
 | `install-mac-metrics NAME` | a Mac (host with `os: macos`) on the dashboard: node_exporter and the powermetrics collector | a Mac monitored from another head (a Mac head's own numbers come from `setup metrics`) |
-| `install-alerting` | Alertmanager, Noctyx rules and the console webhook | Linux head |
+| `install-alerting` | Legacy Alertmanager setup script (prefer `noctyx setup alerting` + `noctyx alerting-set`, which works on both Linux and macOS) | Linux head |
 | `install-llm-monitoring` | the `llm-discover` timer and a Prometheus `llm` job | Linux head (`setup metrics` does both, on either platform) |
 | `build-stick`, `build-stick-single`, `make-restore-usb`, `vm-boot-test`, `rehearse-head` | recovery media and rehearsals | Linux |
+
+## Packaging & least-privilege nodes (0.9.6+)
+
+- **Debian `.deb` node agent package** (pure stdlib; builds on Linux or macOS):
+  ```bash
+  noctyx build-deb --out noctyx-agent.deb [--scoped-sudo-user ops] [--allow-reboot] [--allow-recipes]
+  ```
+- **Scoped `/etc/sudoers.d/noctyx`** (replaces blanket `NOPASSWD: ALL` for the head's SSH user on Linux nodes):
+  ```bash
+  noctyx sudoers --host gpu-01 [--allow-reboot] [--allow-recipes] | ssh gpu-01 'sudo install -m 0440 /dev/stdin /etc/sudoers.d/noctyx && sudo visudo -cf /etc/sudoers.d/noctyx'
+  ```
+- **External phone/chat alerting (Linux & macOS):**
+  ```bash
+  sudo noctyx alerting-set --json '{"repeat_interval":"6h","channels":{"phone":{"kind":"ntfy","url":"https://ntfy.sh/my-cluster","min_severity":"critical"}}}'
+  sudo noctyx setup alerting        # installs pinned Alertmanager + renders alertmanager.yml + starts systemd/launchd
+  sudo noctyx alerting-test         # fires a synthetic NoctyxTestAlert to confirm delivery
+  ```
 
 ## Demo mode
 

@@ -183,13 +183,15 @@ has an anchor that the Configure menu links to:
 |---|---|
 | `/config#sec-backups` | All hosts (Docker volumes, database dumps, extra excludes, extra SQLite files) and the per-host table |
 | `/config#sec-retention` | daily, weekly and monthly snapshots kept |
-| `/config#sec-mirror` | HF mirror status, `HF_ENDPOINT`, nightly harvest, hosts to harvest, bandwidth limit, **harvest now** |
+| `/config#sec-mirror` | HF mirror status, `HF_ENDPOINT`, atomic write-through toggle (`hf_mirror.write_through`), nightly harvest, hosts to harvest, bandwidth limit, **harvest now** |
+| `/config#sec-targets` | secondary 3-2-1 backup targets (S3, Backblaze B2, REST, SFTP, USB): add, edit, remove, **copy now** and **verify** (`target-set`, `copy --target`) |
+| `/config#sec-alerting` | external alert routing (ntfy, Pushover, Slack, Telegram, Email, generic webhook), **save & apply** (`alerting-set` + `setup alerting`) and **send test alert** (`alerting-test`) |
 | `/config#sec-assistant` | assistant endpoint, model, timeout, fallback, API key, **test**, **save assistant** |
 | `/config#sec-checkpoints` | checkpoints before changes and apt, how recent a snapshot counts, the waits, required or not, **save checkpoints**; the site config's history with what restoring each copy changes, and **restore** |
 | `/config#sec-heal` | self-repair: on or report only, repairs per hour, freeze, disk limit, each playbook's mode, units and model servers it may restart, automatic upgrades (off by default), **save self-repair** |
 
-Saving runs the same validated CLI commands (`policy-set`, `assistant-set`, `heal-set`, `checkpoint-set`,
-`config-restore`). See
+Saving runs the same validated CLI commands (`policy-set`, `target-set`, `alerting-set`, `assistant-set`, `heal-set`,
+`checkpoint-set`, `config-restore`). See
 [the site config](site-config.md#backup_policy). Saving needs the `admin` role in accounts mode.
 
 ## Kiosk (`/kiosk`)
@@ -296,6 +298,8 @@ when the system asks for reduced motion.
 | `/api/v1/checkpoints` | each machine's checkpoint snapshots (cached 5 min; `refresh=1`) |
 | `/api/v1/config-history` | the site config's kept copies; `diff=NAME` (admin): what restoring one would change |
 | `/api/v1/self-checkpoints` | the recorded states of Noctyx itself, and what `self-rollback` would do |
+| `/api/v1/alerting` | external Alertmanager receiver configuration (secrets redacted) and `setup alerting` status |
+| `/api/v1/targets` | configured secondary 3-2-1 backup targets (credentials redacted) |
 | `/api/v1/…` | the JSON the panels read. `POST /api/v1/action` runs actions ([accounts](accounts.md#api-token-for-scripts)) |
 
 ## Prometheus `/metrics`
@@ -334,10 +338,10 @@ mirror's, the node collectors' and the alert rules alike; a site that kept older
 
 `sudo noctyx setup metrics` writes this scrape job (named after `prom_job_console`, default `noctyx`, with the
 target port taken from `server.ui_port`) into the Prometheus config it manages, along with the head's own
-exporter, every node's exporter, the LLM servers and the alert rules. On a Linux head that already runs
-Prometheus, `setup metrics` prints the jobs instead, and `noctyx tool install-alerting` adds this job to
-`/etc/prometheus/prometheus.yml` along with the alert rules and Alertmanager (Linux only, with apt and systemd;
-a Mac head has no Alertmanager yet, so its rules evaluate in Prometheus but the Alerts panel stays empty):
+exporter, every node's exporter, the LLM servers and the alert rules. `sudo noctyx setup alerting` installs and
+configures Alertmanager on both Linux (systemd) and macOS (launchd) heads, routing alerts to the console webhook and
+any external receivers set in `alerting`. On a Linux head that already runs Prometheus, `setup metrics` prints the
+jobs instead, and `noctyx tool install-alerting` adds this job to `/etc/prometheus/prometheus.yml`:
 
 ```yaml
   - job_name: noctyx

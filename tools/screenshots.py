@@ -52,7 +52,12 @@ def free_port():
 
 
 def browser():
-    for b in ("chromium", "chromium-browser", "google-chrome", "google-chrome-stable"):
+    cands = ["chromium", "chromium-browser", "google-chrome", "google-chrome-stable",
+             "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+             "/Applications/Chromium.app/Contents/MacOS/Chromium"]
+    for b in cands:
+        if os.path.isabs(b) and os.path.isfile(b):
+            return b
         if shutil.which(b):
             return b
     sys.exit("needs chromium or google-chrome on PATH")

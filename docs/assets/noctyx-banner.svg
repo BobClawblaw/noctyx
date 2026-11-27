@@ -28,8 +28,9 @@
   <text x="402" y="262" fill="#9fb3dc" font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="21" letter-spacing="5.5">THE NIGHT-SHIFT OPERATOR FOR YOUR AI CLUSTER</text>
   <g font-family="JetBrains Mono, SFMono-Regular, Menlo, Consolas, monospace" font-size="16" letter-spacing="2" fill="#c9d6f0">
     <circle cx="408" cy="302" r="5" fill="#3ff0ff"/><text x="422" y="307">DEPLOY</text>
-    <circle cx="540" cy="302" r="5" fill="#5b8cff"/><text x="554" y="307">CACHE</text>
-    <circle cx="660" cy="302" r="5" fill="#8f6bff"/><text x="674" y="307">PROTECT</text>
-    <circle cx="800" cy="302" r="5" fill="#c25cff"/><text x="814" y="307">WATCH</text>
+    <circle cx="536" cy="302" r="5" fill="#5b8cff"/><text x="550" y="307">CACHE</text>
+    <circle cx="652" cy="302" r="5" fill="#8f6bff"/><text x="666" y="307">PROTECT</text>
+    <circle cx="790" cy="302" r="5" fill="#c25cff"/><text x="804" y="307">WATCH</text>
+    <circle cx="910" cy="302" r="5" fill="#ff3fd2"/><text x="924" y="307">HEAL</text>
   </g>
 </svg>

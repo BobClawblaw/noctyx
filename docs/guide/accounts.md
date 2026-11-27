@@ -34,8 +34,9 @@ and **sign out** when you are signed in.
 | `admin` | also change configuration and reboot hosts: the actions in `ADMIN_ACTIONS` below, plus setting or clearing the assistant's API key |
 
 Admin-only actions (`ADMIN_ACTIONS` in `console.py`): `setPolicy` (backup policy, retention, mirror settings),
-`setSchedule`, `setAssistant`, `setConsoleDefaults` (save as site default), `recipeCatalog`, `pinRelease`, `reboot`,
-`rebootFinish`, `nasRest`, `policyApply`. Every other action needs `operator`.
+`setSchedule`, `setAssistant`, `setAlerting`, `applyAlerting`, `setHeal`, `revertChange`, `setCheckpoints`,
+`configRestore`, `setConsoleDefaults` (save as site default), `recipeCatalog`, `upgradeComponent`,
+`upgradeEverywhere`, `pinRelease`, `reboot`, `rebootFinish`, `nasRest`, `policyApply`. Every other action needs `operator`.
 
 A denied request returns 401 (*sign in first*) or 403 (*viewer may not do this (needs operator)*).
 
@@ -77,8 +78,9 @@ the `user add` command.
   **30 days** when you tick *keep me signed in for 30 days*.
 - The cookie holds `<user>.<expiry>.<hmac>`: nothing secret. It is signed with `<etc>/session.key` (0600, created
   on first use).
-- A session ends when it expires, when you sign out, when its user is deleted, or when `session.key` is
-  replaced. To sign everyone out at once:
+- A session ends when it expires, when you sign out, when your password is changed (`noctyx user passwd` bumps the
+  user's `session_epoch`, immediately invalidating all existing cookies for that user), when its user is deleted, or
+  when `session.key` is replaced. To sign everyone out at once:
 
   ```bash
   sudo rm /etc/noctyx/session.key      # a new key is made on the next request
