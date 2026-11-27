@@ -218,7 +218,7 @@ nodes → alerts → backups every 20 seconds and always uses `shrink` — one s
 
 ![About](../screenshots/about.png)
 
-Shows the version, license (Apache 2.0), Python and restic versions, this site (head, hosts, slots, recipes,
+Shows the version, license (PolyForm Noncommercial 1.0.0), Python and restic versions, this site (head, hosts, slots, recipes,
 backup target, console build), the keyboard keys, documentation links and donation details.
 
 ## Sign-in (`/login`)

@@ -535,12 +535,12 @@ def shared_modals_and_footer(base: str, version: str) -> str:
           <li><a href="{REPO_URL}/releases" target="_blank" rel="noopener">Releases (v{html.escape(version)})</a></li>
           <li><a href="{base}/docs/plan.html">Architecture &amp; Roadmap</a></li>
           <li><a href="{base}/docs/troubleshooting.html">Troubleshooting</a></li>
-          <li><a href="{REPO_URL}/blob/main/LICENSE" target="_blank" rel="noopener">Apache 2.0 License</a></li>
+          <li><a href="{REPO_URL}/blob/main/LICENSE" target="_blank" rel="noopener">PolyForm Noncommercial 1.0.0</a></li>
         </ul>
       </div>
     </div>
     <div class="footer-bottom">
-      <span>Licensed under the Apache License, Version 2.0. Free and open source.</span>
+      <span>Licensed under PolyForm Noncommercial 1.0.0 — free donationware via Bitcoin. Selling Noctyx or paid support is not permitted.</span>
       <span>Built from repository docs with zero external dependencies.</span>
     </div>
   </div>
@@ -611,7 +611,7 @@ def render_landing(version: str) -> str:
     <div class="container">
       <div class="eyebrow">
         <span class="eyebrow-dot"></span>
-        <span>Open Source · Apache 2.0 · Zero Dependencies (Python Stdlib) · v{html.escape(version)}</span>
+        <span>Free Noncommercial Donationware · PolyForm NC 1.0 · Zero Dependencies · v{html.escape(version)}</span>
       </div>
       <h1>The <span class="gradient-text">night-shift operator</span> for your AI cluster.</h1>
       <p class="hero-sub">

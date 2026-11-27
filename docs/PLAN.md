@@ -9,8 +9,8 @@ a private, single-site implementation that has run a real GPU cluster in product
 | | |
 |---|---|
 | Name | **Noctyx** (replaces the working name "ClusterManager", which is descriptive and crowded: NVIDIA's Bright Cluster Manager / Base Command Manager, Adaptive Cluster Manager, IBM Platform Cluster Manager, Gluu Cluster Manager) |
-| License | **Apache License, Version 2.0** (since 2026-10-21; the tree launched under BSL 1.1) — free to use, modify and redistribute, commercial use included |
-| Who sells support | Anyone may sell Noctyx (Apache 2.0); we aim to be the default: the maintainer's hosting, the Fleet console and paid support remain the revenue lines |
+| License | **PolyForm Noncommercial License 1.0.0** (source-available, noncommercial) — 100% free for personal, hobbyist, educational, and public research use |
+| Commercial use & support | **No selling Noctyx or paid support.** Nobody is allowed to sell Noctyx, offer paid hosted/managed Noctyx, or sell paid support. Donationware via Bitcoin only |
 | Public repo | A fresh repository with no history from the private implementation and no site-specific information (see §9) |
 
 ## 1. What Noctyx is
@@ -33,54 +33,30 @@ crowd running community model recipes on DGX Sparks, RTX workstations and Macs. 
 almost all hand-run shell scripts with no deploy, rollback or health layer. Noctyx is that layer.
 Lead with Deploy; Protect is why people trust it with production.
 
-**Who it is for.** Home labs, hobbyists, students and non-profit research — the community that
-writes and benchmarks recipes, and Noctyx's distribution channel — and startups and companies
-running their own inference hardware (a few GPU nodes to a few racks), AI consultancies and
-integrators deploying for clients, labs inside companies. The software is free for all of them.
+**Who it is for.** Home labs, hobbyists, students, educators, and non-profit / public research — the community that
+writes and benchmarks recipes for DGX Sparks, RTX workstations, and Macs. The software is 100% free for all of them.
 
-## 2. Licensing and how the project makes money
+## 2. Licensing and donations
 
-**What Apache License 2.0 means** (changed from BSL 1.1 on 2026-10-21; the copyright stays with the
-contributors, §5 of the license carries their contributions under the same terms — no CLA needed):
+**What PolyForm Noncommercial License 1.0.0 means** (source-available, noncommercial):
 
-| Use | Allowed without paying? |
+| Use | Allowed? |
 |---|---|
-| Read, copy, modify, fork, redistribute the source | Yes (derivatives keep the Apache 2.0 notice obligations) |
-| Any use, personal or commercial, at any scale | Yes |
-| Offering Noctyx to third parties as a hosted or managed service | Yes |
-| Selling Noctyx itself, or a support contract for it | Yes — anyone may; we compete on being the maintainer |
+| Read, copy, modify, fork, redistribute the source for noncommercial purposes | Yes (must preserve `LICENSE` and `Required Notice:` lines) |
+| Personal, hobbyist, home-lab, educational, charitable, and public research use | Yes — 100% free |
+| Selling Noctyx, offering paid hosted/managed Noctyx, or selling paid support | **No** — strictly prohibited |
 
-It is true open source (OSI-approved); say "open source", not "source-available".
+**Donationware only.** There are no paid tiers, no enterprise editions, no paid onboarding, and no paid support
+contracts. Voluntary Bitcoin tips are welcome at `bc1q9echf820hapc04y0f636uxdry2ahyx32tkleff`.
 
-**Revenue lines**, in launch order:
-0. **Donations** — the README carries the bitcoin address `bc1q9echf820hapc04y0f636uxdry2ahyx32tkleff`,
-   Noctyx's own.
-1. **Support** — business-hours or 24×7 response on the open-source core; paid onboarding (we bring a
-   new site from zero to "every model deployable, every node restorable").
-2. **Noctyx Fleet** (later) — multi-site console, SSO/RBAC, audit export, alert routing to
-   PagerDuty/Slack/Teams, off-site replication policies, compliance reports. SaaS/subscription;
-   lives in a separate repository so the open-source core stays complete for single sites.
-3. **Hosted control plane** (later) — the console as a service, agents at the customer's site.
+**No enforcement.** The software asks nothing of users: no license keys, no DRM, no phone-home, no telemetry, no
+audit clause.
 
-**Pricing — hypotheses to validate in the beta, not decisions.** Anchor against "what an avoided
-outage or a re-downloaded 200 GB model costs" for support, and against self-hosting effort for Fleet
-and hosting.
-
-**No enforcement.** The license asks nothing of users: no license keys, no DRM, no phone-home, no
-audit clause. Money comes from convenience (support, hosting, Fleet), not from the code.
-
-**Legal setup — before the first public release** (needs a lawyer; this plan is not legal advice):
-- [ ] A company (e.g. an LLC) to own the project trademark and to sign customer contracts; assign
-      the copyright it holds to the company.
-- [ ] Trademark: clearance search for **NOCTYX** (software, class 9 and 42), then file. Register
-      the domains (noctyx.ai / .dev were unregistered at last check; .com was taken).
-- [ ] Support terms, privacy policy for the website.
-- [ ] Accounting for bitcoin income (donations may be taxed differently from service revenue); once
-      the company exists, decide whether service payments move to an address the company controls,
-      separate from the donation address.
-
-- [ ] Third-party notices: restic and rest-server (BSD-2-Clause), Prometheus / Alertmanager /
-      node_exporter (Apache-2.0), macmon and any bundled JS — keep `THIRD_PARTY.md` exact.
+**Notices & third-party licenses:**
+- Keep `THIRD_PARTY.md` / notices accurate for bundled and pinned third-party tools: restic and rest-server
+  (BSD-2-Clause), Prometheus / Alertmanager / node_exporter (Apache-2.0), bundled console fonts (SIL OFL), and the
+  open recipe deploy spec (`docs/spec/recipe-deploy.md`, CC-BY-4.0).
+- `"Noctyx"` and its logo remain trademarks of their owner; the license grants no rights in the name or logo.
 
 ## 3. Where the private implementation stands (measured 2026-10-19)
 
@@ -136,18 +112,16 @@ Today Noctyx needs an adapter per recipe layout. Publishing a small, open `[depl
 `recipe.toml` (draft: [spec/recipe-deploy.md](spec/recipe-deploy.md)) lets any recipe author make a
 repo one-click deployable: hardware, node count, prepare/start/stop/health commands, model pins, the
 settings a site must supply. The spec itself is published under **CC-BY-4.0** (anyone may implement
-it — adoption is the point; the implementation is Apache 2.0 too). Then:
+it — adoption is the point). Then:
 - discovery shows "deployable" for every spec'd recipe, with no guessing;
 - benchmark leaderboards can link speed results to recipes by repo and commit;
 - recipe authors get a reason to add the section: one-click installs for their users.
 
 ## 6. Phases
 
-**Phase 0 — Foundations (this week)**
+**Phase 0 — Foundations**
 - [x] Name, license, this plan, the tree
 - [x] Privacy check in CI (`tools/privacy_check.py`)
-- [ ] Legal setup started (§2 checklist): company, trademark search, lawyer for the grant text
-- [ ] Domains registered
 
 **Phase 1 — Extract (3–4 weeks). In progress — 2026-10-19:** orchestrator, console, directory service,
 HF mirror, node agent + dumps hook, metrics exporters and installers, head-node units and the CLI are
@@ -207,16 +181,14 @@ versions; CI with a simulated cluster (containers as nodes, a fake GPU exporter,
 OpenAI-compatible server for deploy tests); hardware-in-the-loop runs on the reference cluster before
 each release; user docs (install, concepts, recipes, restore drills).
 
-**Phase 3 — Private beta (4–6 weeks).** 3–5 outside sites (DGX Spark pairs, RTX workstations) from
+**Phase 3 — Community beta (4–6 weeks).** 3–5 outside sites (DGX Spark pairs, RTX workstations) from
 the recipe and benchmark community; `[deploy]` spec v0 with PRs to a few popular recipes; weekly
-releases; collect pricing evidence. Exit: two sites running unattended for two weeks; one recovered
+releases. Exit: two sites running unattended for two weeks; one recovered
 from a real failure with Noctyx.
 
-**Phase 4 — Launch (2–3 weeks).** Public repo, website, docs, support offerings, Fleet/hosting
-signups. Announce in the recipe community with real numbers.
+**Phase 4 — Public release.** Public repo, GitHub Pages site, complete guides, and community announcement with real numbers.
 
-**Phase 5 — Fleet and hosted (after revenue).** Multi-site console, SSO, alert routing, off-site
-replication, then the hosted control plane.
+**Phase 5 — Multi-site (later, still free).** Optional multi-site federation / read-only roll-up view for hobbyists running more than one cluster.
 
 ## 7. Moving the reference cluster onto Noctyx
 
@@ -229,18 +201,16 @@ bed for every release.
 
 | Risk | Mitigation |
 |---|---|
-| Apache 2.0 lets anyone sell or host it | Expected of open source; we compete on being the maintainer: fastest development, the recipe community channel, the Fleet and hosting products |
-| A big vendor ships the same layer | Speed: own the recipe spec and the community channel first; the brand is ours |
+| Unauthorized commercial resale or paid support | PolyForm Noncommercial 1.0.0 prohibits commercial use, resale, and paid support; `Required Notice:` states this explicitly |
 | Restore bugs lose someone's data | Restore drills in CI and on the reference cluster each release; "verify" on by default |
 | A deploy takes down production | Plans by default, confirm with impact, GPU locks, automatic rollback — already built; keep it the default |
-| Trademark conflict found late | Clearance search before any public launch |
 
 ## 9. Publication rules
 
 - The public repo starts fresh: no history from the private implementation.
 - No site information in anything public: no names or e-mail addresses of people, host names, LAN or
   VPN addresses, home-directory paths, NAS names, or other private projects. (The bitcoin address for
-  donations and service payments is deliberate.) Examples use generic
+  voluntary donations is deliberate.) Examples use generic
   names (`head`, `gpu-01`, `nas`) and documentation address ranges (192.0.2.0/24).
 - `tools/privacy_check.py` runs in CI on every change. It checks generic patterns (private address
   ranges, home paths, non-noreply e-mail addresses) and, on a maintainer's machine, extra patterns from
@@ -249,7 +219,5 @@ bed for every release.
 
 ## 10. Open decisions
 
-1. Support/Fleet/hosting pricing (per-node support price, Fleet tier) — after beta evidence.
-2. The company: jurisdiction and structure — with the lawyer.
-3. Whether the Mac becomes a deploy slot (MLX recipes) in 1.0 or later.
-4. A slot spanning both GB10 pairs (4-node recipes) — after the spec settles.
+1. Whether the Mac becomes a deploy slot (MLX recipes) in 1.0 or later.
+2. A slot spanning both GB10 pairs (4-node recipes) — after the spec settles.

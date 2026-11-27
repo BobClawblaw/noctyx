@@ -466,7 +466,7 @@ function rAbout(d){
  const pill=(k,v,c)=>`<span class="apill ${c||''}"><span>${esc(k)}</span><b>${esc(v)}</b></span>`;
  return `<div class=about>
   <img class=abanner src="/assets/banner.svg" alt="Noctyx — the night-shift operator for your AI cluster">
-  <div class=apills>${pill('version',d.version)}${pill('license','Apache 2.0')}${pill('python',d.python)}${pill('restic',d.restic)}${pill('status','alpha','warn')}</div>
+  <div class=apills>${pill('version',d.version)}${pill('license','PolyForm NC 1.0')}${pill('python',d.python)}${pill('restic',d.restic)}${pill('status','alpha','warn')}</div>
   <div class=acols>
    <div class=acard><h3>What Noctyx does</h3>
     <div class=afeat><b>Deploy</b><span>Model recipes onto GPU slots: built while the current model serves, switched under the slot's GPU lock, rolled back automatically. A model swapped by hand is noticed. Public recipes for your hardware, ranked by measured speed.</span></div>
@@ -488,12 +488,13 @@ function rAbout(d){
      <a href="${R}/blob/main/docs/guide/recipes.md" target=_blank rel=noopener>Deploy recipes</a><a href="${R}/blob/main/docs/guide/site-config.md" target=_blank rel=noopener>Site config reference</a>
      <a href="${R}/blob/main/docs/spec/recipe-deploy.md" target=_blank rel=noopener>Recipe deploy spec (draft)</a></div></div>
    <div class=acard><h3>License</h3>
-    <p>Licensed under the <b>Apache License, Version 2.0</b>.</p>
-    <p class=mut>Free to use, modify and redistribute. The bundled fonts stay under
-     the SIL Open Font License; the recipe deploy spec is CC-BY-4.0.</p>
+    <p>Licensed under the <b>PolyForm Noncommercial License 1.0.0</b>.</p>
+    <p class=mut>Free for personal, hobbyist, educational and noncommercial use. Nobody may sell Noctyx or
+     paid support for it — donationware via Bitcoin only. The bundled fonts stay under the SIL Open Font License;
+     the recipe deploy spec is CC-BY-4.0.</p>
     <div class=alinks><a href="${R}/blob/main/LICENSE" target=_blank rel=noopener>LICENSE</a><a href="/assets/fonts/LICENSES.txt">Font licenses</a></div></div>
    <div class=acard><h3>Support Noctyx</h3>
-    <p class=mut>Donations keep the project going.</p>
+    <p class=mut>100% free donationware — no paid tiers or paid support. Voluntary Bitcoin tips keep it going.</p>
     <div class=adonate><img src="/assets/donate-qr.png" alt="QR code: the bitcoin address" width=164 height=164>
      <div><div class=k>Bitcoin</div><button class=addr title="copy" onclick="copyAddr(this,'${esc(d.donate)}')">${esc(d.donate)}</button><div class="mut copied"></div></div></div></div>
   </div></div>`}

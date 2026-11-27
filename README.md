@@ -3,7 +3,7 @@
 <p align="center">
   <img alt="status: alpha" src="https://img.shields.io/badge/status-alpha-f5a524">
   <img alt="version 0.9.6" src="https://img.shields.io/badge/version-0.9.6-38e1ff">
-  <img alt="license: Apache 2.0" src="https://img.shields.io/badge/license-Apache%202.0-e16087">
+  <img alt="license: PolyForm Noncommercial 1.0" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0-e16087">
   <img alt="python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-3776ab?logo=python&logoColor=white">
   <img alt="no dependencies" src="https://img.shields.io/badge/dependencies-none%20(stdlib)-2ea043">
   <img alt="backups: restic" src="https://img.shields.io/badge/backups-restic-0f766e">
@@ -215,13 +215,18 @@ your name in the audit log.
 
 ## License
 
-Noctyx is licensed under the **Apache License, Version 2.0** — free to use, modify and
-redistribute. See [LICENSE](LICENSE).
+Noctyx is licensed under the **[PolyForm Noncommercial License 1.0.0](LICENSE)** (source-available, noncommercial).
+It is **100% free** for personal, hobbyist, educational, public research, charitable, and other noncommercial use —
+you may read, modify, and share it freely for noncommercial purposes.
+
+**Nobody is allowed to sell Noctyx, offer paid hosted/managed Noctyx, or sell paid support for it.**
 
 ## Donations
 
-Noctyx is free and open source, forever. If it saves you a night, a re-download or a dead node, tips keep it going:
+Noctyx is free donationware, forever — no paid tiers, no paid support, no subscriptions. If it saves you a night, a
+re-download, or a dead node, voluntary Bitcoin tips are always appreciated:
 
 **Bitcoin:** `bc1q9echf820hapc04y0f636uxdry2ahyx32tkleff`
 
-"Noctyx" is a trademark of its owner; the Apache 2.0 license grants no rights in the name or logo.
+"Noctyx" is a trademark of its owner; the license grants no rights in the name or logo. The bundled console fonts stay
+under the SIL Open Font License, and the recipe deploy spec (`docs/spec/recipe-deploy.md`) is CC-BY-4.0.
