@@ -10,6 +10,7 @@ import pathlib
 import re
 import shlex
 import shutil
+import ssl
 import subprocess
 import sys
 import time
@@ -97,8 +98,17 @@ def _hf_link(hub_repo, commit, rel, blob):
 
 
 def _hf_api(path):
-    with urllib.request.urlopen(HF_UPSTREAM + path, timeout=20) as r:
+    with urllib.request.urlopen(HF_UPSTREAM + path, timeout=20, context=_hf_ssl()) as r:
         return json.load(r)
+
+
+def _hf_ssl():
+    """Default-verify HF's TLS. macOS's urllib ignores the system keychain, so pin certifi's bundle when present."""
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return ssl.create_default_context()
 
 
 def _hf_local_repo(hub, d, memo):
@@ -175,7 +185,8 @@ def _hf_local_repo(hub, d, memo):
 def hf_harvest_host(c, h, a, hub):
     cm = _cm()
     hc = hf_cfg(c)
-    starts = "~" if h.get("os") == "macos" else " ".join(shlex.quote(r) for r in hf_cfg(c)["scan_roots"])
+    mroots = h.get("scan_roots") or hc.get("scan_roots")
+    starts = "~" if (h.get("os") == "macos" and not mroots) else " ".join(shlex.quote(r) for r in (mroots or hc["scan_roots"]))
     lst = (cm.NX_HOME / "cache" / "lister.py").read_text()
     skip = " ".join(shlex.quote(f"--skip={s}") for s in hf_skip(c))
     r = cm._run_on(c, h, f"python3 - {skip} {starts}", stdin=lst, timeout=900)
