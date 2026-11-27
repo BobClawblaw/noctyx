@@ -155,6 +155,17 @@ def set_password(name, pw):
         raise ValueError(f"password: at least {MIN_PASSWORD} characters")
     us[name]["hash"] = hash_password(pw)
     us[name]["changed"] = int(time.time())
+    us[name]["session_epoch"] = int(us[name].get("session_epoch") or 0) + 1
+    _save(us)
+
+
+@_mutates
+def revoke_sessions(name):
+    """Invalidate every active session cookie for name."""
+    us = users()
+    if name not in us:
+        raise ValueError(f"no user {name}")
+    us[name]["session_epoch"] = int(us[name].get("session_epoch") or 0) + 1
     _save(us)
 
 
@@ -238,27 +249,44 @@ def _key():
             return bytes.fromhex(k)
     except (OSError, ValueError):
         pass
-    k = secrets.token_hex(32)
-    _write_private(f, k + "\n")
-    return bytes.fromhex(k)
+    with _locked():
+        try:
+            k = f.read_text().strip()
+            if len(k) >= 64:
+                return bytes.fromhex(k)
+        except (OSError, ValueError):
+            pass
+        k = secrets.token_hex(32)
+        _write_private(f, k + "\n")
+        return bytes.fromhex(k)
+
+
+def _session_epoch(user_rec):
+    return int((user_rec or {}).get("session_epoch") or 0)
 
 
 def make_session(name, ttl=12 * 3600):
-    payload = f"{name}.{int(time.time()) + int(ttl)}"
-    return payload + "." + hmac.new(_key(), payload.encode(), hashlib.sha256).hexdigest()
+    exp = int(time.time()) + int(ttl)
+    ep = _session_epoch(users().get(name))
+    sig = hmac.new(_key(), f"{name}.{exp}.{ep}".encode(), hashlib.sha256).hexdigest()
+    return f"{name}.{exp}.{sig}"
 
 
 def check_session(value):
     """-> (name, role) for a valid, unexpired session of an existing user, else None."""
     try:
         name, exp, sig = (value or "").rsplit(".", 2)
-        want = hmac.new(_key(), f"{name}.{exp}".encode(), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(sig, want) or int(exp) < time.time():
-            return None
+        exp_i = int(exp)
     except (ValueError, TypeError):
         return None
     u = users().get(name)
-    return (name, u["role"]) if u else None
+    if not u:
+        return None
+    ep = _session_epoch(u)
+    want = hmac.new(_key(), f"{name}.{exp}.{ep}".encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, want) or exp_i < time.time():
+        return None
+    return (name, u["role"])
 
 
 def rank(role):
@@ -266,6 +294,8 @@ def rank(role):
 
 
 def get_settings(name):
+    if not _NAME.match(name or ""):
+        return {}
     try:
         return json.loads((_settings_dir() / f"{name}.json").read_text())
     except (OSError, ValueError):
@@ -273,4 +303,6 @@ def get_settings(name):
 
 
 def put_settings(name, s):
+    if not _NAME.match(name or ""):
+        raise ValueError(f"invalid user name: {name!r}")
     _write_private(_settings_dir() / f"{name}.json", json.dumps(s))
