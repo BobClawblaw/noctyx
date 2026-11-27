@@ -144,6 +144,9 @@ ACTIONS = {
                                                                        "hf_mirror": p.get("hf_mirror")})],
     "hfHarvest":  lambda: [ORCH, "hf-harvest"],
     "setAssistant": lambda p: [ORCH, "assistant-set", "--json", json.dumps(p["assistant"])],
+    "setAlerting": lambda p: [ORCH, "alerting-set", "--json", json.dumps(p["alerting"])],
+    "applyAlerting": lambda: [ORCH, "alerting-apply"],
+    "testAlerting": lambda: [ORCH, "alerting-test"],
     "setConsoleDefaults": lambda p: [ORCH, "console-set", "--json", json.dumps(p["settings"])],
     # recipe deployment (UI › /recipes): slot/recipe/ref validated against the site config here; the
     # orchestrator plans again, takes the slot + GPU locks, and switches back if the new one fails
@@ -191,7 +194,7 @@ VALID_PROFILES = set(CFG.get("profiles", {}).keys())
 # host-REQUIRED actions: their builders index p["host"] directly; missing would KeyError
 HOST_REQUIRED = {"backupHost", "verifyHost", "reboot", "rebootFinish"}
 RECIPE_ACTIONS = {"recipeDeploy", "recipeStop", "recipeStart", "recipeRollback", "recipeCatalog"}
-PARAM_ACTIONS = HOST_REQUIRED | RECIPE_ACTIONS | {"upgradeComponent", "upgradeEverywhere", "skipRelease", "pinRelease", "setAssistant", "setHeal", "revertChange", "takeCheckpoint", "setCheckpoints", "configRestore", "setConsoleDefaults", "setSchedule", "restore", "hygieneFix", "setPolicy", "dumpsNow"}
+PARAM_ACTIONS = HOST_REQUIRED | RECIPE_ACTIONS | {"upgradeComponent", "upgradeEverywhere", "skipRelease", "pinRelease", "setAssistant", "setAlerting", "setHeal", "revertChange", "takeCheckpoint", "setCheckpoints", "configRestore", "setConsoleDefaults", "setSchedule", "restore", "hygieneFix", "setPolicy", "dumpsNow"}
 # Only these wait for the one-long-job slot; everything else (status, schedule
 # edits, probes) runs at once instead of queueing silently behind a 3-hour seed.
 LONG_ACTIONS = {"backup", "verify", "copy", "prune", "backupHost", "verifyHost", "restore", "hygieneFix", "upgradeComponent",
@@ -289,8 +292,21 @@ def hygiene_report():
 _SNAP_RE = re.compile(r"^([0-9a-f]{8,64}|latest)$")
 
 
+MAX_BODY = 2 * 1024 * 1024
+
+
+class _BodyTooLarge(ValueError):
+    pass
+
+
 def _ok_path(v):
-    return isinstance(v, str) and v.startswith("/") and "\0" not in v and len(v) < 4096
+    return isinstance(v, str) and v.startswith("/") and len(v) < 4096 and not any(ord(c) < 32 or ord(c) == 127 for c in v)
+
+
+def _safe_filename(name):
+    """Sanitize a filename for Content-Disposition (no quotes, backslashes, or control chars)."""
+    s = "".join(c for c in (name or "") if 32 <= ord(c) < 127 and c not in '"\\/')
+    return s.strip() or "download"
 _EVERY_RE = re.compile(r"^\d{1,4}[mhdw]$")
 _WINDOW_RE = re.compile(r"^(([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d|any)$")
 
@@ -323,7 +339,8 @@ def console_mode():
 
 
 # what each action needs: everything else that changes something needs "operate"
-ADMIN_ACTIONS = {"setPolicy", "setSchedule", "setAssistant", "setHeal", "revertChange", "setCheckpoints", "configRestore",
+ADMIN_ACTIONS = {"setPolicy", "setSchedule", "setAssistant", "setAlerting", "applyAlerting",
+                 "setHeal", "revertChange", "setCheckpoints", "configRestore",
                  "setConsoleDefaults", "recipeCatalog", "upgradeComponent", "pinRelease",
                  "upgradeEverywhere",
                  "reboot", "rebootFinish", "nasRest", "policyApply"}
@@ -429,6 +446,9 @@ def valid_params(name: str, p: dict) -> bool:
         a = p.get("assistant")
         if not isinstance(a, dict) or "key_host" in a or CM.validate_assistant(a)[1]:
             return False
+    if name == "setAlerting":
+        from noctyx import alerting
+        return not alerting.validate_alerting(p.get("alerting"))[1]
     if name == "setHeal":
         return not heal_errors(p.get("heal"))
     if name == "revertChange":
@@ -1524,6 +1544,8 @@ def demo_answer(path):
 
 
 ASSETS = {"favicon.svg": "image/svg+xml", "banner.svg": "image/svg+xml", "donate-qr.png": "image/png",
+          "console.css": "text/css; charset=utf-8", "console.js": "application/javascript; charset=utf-8",
+          "theme.js": "application/javascript; charset=utf-8",
           "fonts/michroma.woff2": "font/woff2", "fonts/dseg7.woff2": "font/woff2", "fonts/LICENSES.txt": "text/plain; charset=utf-8"}
 DONATE = "bc1q9echf820hapc04y0f636uxdry2ahyx32tkleff"
 
@@ -2602,19 +2624,21 @@ def machine_view(name):
 # Favicon + brand mark: the watching eye (assets/favicon.svg, the source of truth), inlined so the
 # page stays one file.
 FAVICON = 'data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%20%3Cdefs%3E%20%3ClinearGradient%20id%3D%22tile%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%220%22%20y2%3D%221%22%3E%20%3Cstop%20offset%3D%220%22%20stop-color%3D%22%23151b3d%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%2305060d%22%2F%3E%20%3C%2FlinearGradient%3E%20%3ClinearGradient%20id%3D%22neon%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%20%3Cstop%20offset%3D%220%22%20stop-color%3D%22%233ff0ff%22%2F%3E%3Cstop%20offset%3D%22.55%22%20stop-color%3D%22%235b8cff%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%23b45cff%22%2F%3E%20%3C%2FlinearGradient%3E%20%3CradialGradient%20id%3D%22iris%22%20cx%3D%22.5%22%20cy%3D%22.42%22%20r%3D%22.62%22%3E%20%3Cstop%20offset%3D%220%22%20stop-color%3D%22%23f0feff%22%2F%3E%3Cstop%20offset%3D%22.3%22%20stop-color%3D%22%235ff3ff%22%2F%3E%3Cstop%20offset%3D%22.78%22%20stop-color%3D%22%235b6cff%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%237a3cff%22%2F%3E%20%3C%2FradialGradient%3E%20%3Cfilter%20id%3D%22glow%22%20x%3D%22-30%25%22%20y%3D%22-30%25%22%20width%3D%22160%25%22%20height%3D%22160%25%22%3E%20%3CfeGaussianBlur%20stdDeviation%3D%222%22%20result%3D%22b%22%2F%3E%3CfeMerge%3E%3CfeMergeNode%20in%3D%22b%22%2F%3E%3CfeMergeNode%20in%3D%22SourceGraphic%22%2F%3E%3C%2FfeMerge%3E%20%3C%2Ffilter%3E%20%3C%2Fdefs%3E%20%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2215%22%20fill%3D%22url%28%23tile%29%22%2F%3E%20%3Crect%20x%3D%22.75%22%20y%3D%22.75%22%20width%3D%2262.5%22%20height%3D%2262.5%22%20rx%3D%2214.25%22%20fill%3D%22none%22%20stroke%3D%22%233ff0ff%22%20stroke-opacity%3D%22.25%22%20stroke-width%3D%221.5%22%2F%3E%20%3Cg%20fill%3D%22%23d6ecff%22%3E%3Ccircle%20cx%3D%2212%22%20cy%3D%2212.5%22%20r%3D%221.1%22%2F%3E%3Ccircle%20cx%3D%2251.5%22%20cy%3D%2210%22%20r%3D%22.8%22%2F%3E%3Ccircle%20cx%3D%2254%22%20cy%3D%2252.5%22%20r%3D%221%22%2F%3E%3Ccircle%20cx%3D%229.5%22%20cy%3D%2250%22%20r%3D%22.7%22%2F%3E%3C%2Fg%3E%20%3Cg%20filter%3D%22url%28%23glow%29%22%3E%20%3Cpath%20d%3D%22M6.5%2032%20Q32%207%2057.5%2032%20Q32%2057%206.5%2032%20Z%22%20fill%3D%22none%22%20stroke%3D%22url%28%23neon%29%22%20stroke-width%3D%223.8%22%20stroke-linejoin%3D%22round%22%2F%3E%20%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2210.8%22%20fill%3D%22url%28%23iris%29%22%2F%3E%20%3C%2Fg%3E%20%3Cpath%20d%3D%22M32%2021.8%20Q35.6%2032%2032%2042.2%20Q28.4%2032%2032%2021.8%20Z%22%20fill%3D%22%2305060d%22%2F%3E%20%3Ccircle%20cx%3D%2228.2%22%20cy%3D%2227.9%22%20r%3D%222.1%22%20fill%3D%22%23fff%22%20fill-opacity%3D%22.92%22%2F%3E%20%3C%2Fsvg%3E'
-# The pages are files beside the code (assets/): the sign-in page, and the one page that is the whole console
-# (its CSS and JS inline, so the browser makes one request).
+# The pages and assets live beside the code (assets/): console.html links console.css, theme.js and console.js
+# with ?v=__BUILD__ cache-busting; login.html inlines theme.js so sign-in stays a single request.
 LOGIN_PAGE = (NX_HOME / "assets" / "login.html").read_text()
+THEME_JS = (NX_HOME / "assets" / "theme.js").read_text()
+CONSOLE_CSS = (NX_HOME / "assets" / "console.css").read_text()
+CONSOLE_JS = (NX_HOME / "assets" / "console.js").read_text()
 
 
 def login_page():
     """The sign-in page, drawn with the console's own theme script (the viewer's colours)."""
-    theme = PAGE[PAGE.index("<script>"):PAGE.index("</script>") + len("</script>")]
-    return LOGIN_PAGE.replace("__THEME_JS__", theme).encode()
+    return LOGIN_PAGE.replace("__THEME_JS__", f"<script>\n{THEME_JS}</script>").encode()
 
 
 def page(view=None):
-    """The one page, filled in for this site: brand mark, build stamp, the NAS's name, node paths."""
+    """The console shell, filled in for this site: brand mark, build stamp, the NAS's name, node paths."""
     out = (PAGE.replace("__FAVICON__", FAVICON).replace("__BUILD__", UI_BUILD)
            .replace("__NAS__", CM.nas_name(CM.cfg())).replace("__NODE_LIB__", P["node_lib"])
            .replace("__JOB_LOGS__", P["job_logs"]))
@@ -2623,8 +2647,11 @@ def page(view=None):
     return out.encode()
 
 
-# changes whenever this file or a page is edited and the UI restarted
-UI_BUILD = str(int(max(os.path.getmtime(f) for f in (__file__, NX_HOME / "assets" / "console.html", NX_HOME / "assets" / "login.html"))))
+# changes whenever this file or any console asset is edited and the UI restarted
+UI_BUILD = str(int(max(os.path.getmtime(f) for f in (
+    __file__, NX_HOME / "assets" / "console.html", NX_HOME / "assets" / "console.css",
+    NX_HOME / "assets" / "console.js", NX_HOME / "assets" / "theme.js", NX_HOME / "assets" / "login.html",
+))))
 PAGE = (NX_HOME / "assets" / "console.html").read_text()
 
 
@@ -2635,9 +2662,36 @@ class H(BaseHTTPRequestHandler):
         pass
 
     def _body(self):
-        """The request's JSON body ({} when there is none)."""
-        n = int(self.headers.get("Content-Length") or 0)
+        """The request's JSON body ({} when there is none), bounded by MAX_BODY."""
+        raw_len = self.headers.get("Content-Length") or "0"
+        n = int(raw_len)
+        if n < 0:
+            raise ValueError("negative Content-Length")
+        if n > MAX_BODY:
+            raise _BodyTooLarge(f"request body exceeds {MAX_BODY} bytes")
         return json.loads(self.rfile.read(n) if n > 0 else b"{}")
+
+    def _read_json(self):
+        """Read and parse JSON body; sends 413/400 on error and returns None."""
+        try:
+            b = self._body()
+            if not isinstance(b, dict):
+                self._json({"error": "json object expected"}, 400)
+                return None
+            return b
+        except _BodyTooLarge:
+            self._json({"error": "request body too large"}, 413)
+            return None
+        except Exception:
+            self._json({"error": "bad json"}, 400)
+            return None
+
+    def _security_headers(self):
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "no-referrer")
+        if not DEMO:
+            self.send_header("Strict-Transport-Security", "max-age=31536000")
 
     def _cookie(self, name):
         for part in (self.headers.get("Cookie") or "").split(";"):
@@ -2699,6 +2753,7 @@ class H(BaseHTTPRequestHandler):
         self.send_header("Location", where)
         if cookie is not None:
             self.send_header("Set-Cookie", cookie)
+        self._security_headers()
         self.send_header("Content-Length", "0")
         self.end_headers()
 
@@ -2707,6 +2762,7 @@ class H(BaseHTTPRequestHandler):
         if cookie is not None:
             self.send_header("Set-Cookie", cookie)
         self.send_header("Content-Type", ctype)
+        self._security_headers()
         self.send_header("X-CM-Build", UI_BUILD)   # the page reloads itself once when this changes
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
@@ -2739,7 +2795,8 @@ class H(BaseHTTPRequestHandler):
             return self._json({"error": (p.stderr.read().decode("utf-8", "replace") or "dump failed")[-200:]}, 502)
         self.send_response(200)
         self.send_header("Content-Type", "application/x-tar" if is_dir else "application/octet-stream")
-        self.send_header("Content-Disposition", f'attachment; filename="{name}"')
+        self.send_header("Content-Disposition", f'attachment; filename="{_safe_filename(name)}"')
+        self._security_headers()
         self.send_header("Cache-Control", "no-store")
         self.send_header("Connection", "close")
         self.end_headers()
@@ -2947,6 +3004,20 @@ class H(BaseHTTPRequestHandler):
                 return self._send(f"# metrics failed: {e}\n".encode(), "text/plain", 500)
         if p == "/api/v1/alerts":
             return self._json(alerts_view())
+        if p == "/api/v1/alerting":
+            from noctyx import alerting
+            c = CM.cfg()
+            return self._json({"alerting": c.get("alerting") or {}, "channels": list(alerting.CHANNELS),
+                               "severities": list(alerting.SEVERITIES)})
+        if p == "/api/v1/targets":
+            from noctyx import targets as bt
+            c = CM.cfg()
+            ts = bt.configured_targets(c)
+            out = {}
+            for tn, tc in sorted(ts.items()):
+                ready, detail = bt.check_target_ready(tn, tc)
+                out[tn] = {**tc, "ready": ready, "detail": detail}
+            return self._json({"targets": out, "kinds": list(bt.TARGET_KINDS)})
         if p == "/api/v1/hygiene":
             return self._json(hygiene_report())
         if p.startswith("/api/v1/reboot-plan/"):
@@ -3061,10 +3132,9 @@ class H(BaseHTTPRequestHandler):
         if self.path != "/api/v1/alert-hook" and not self._origin_ok():
             return self._json({"error": "cross-origin request refused"}, 403)
         if self.path in ("/api/v1/login", "/api/v1/logout", "/api/v1/settings/mine"):
-            try:
-                body = self._body()
-            except Exception:
-                return self._json({"error": "bad json"}, 400)
+            body = self._read_json()
+            if body is None:
+                return
             ip = self.client_address[0]
             if self.path.endswith("/logout"):
                 return self._send(b'{"ok": true}', cookie="nx_session=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0")
@@ -3096,10 +3166,9 @@ class H(BaseHTTPRequestHandler):
         if self.path == "/api/v1/download-ticket":
             if not self._allowed("operate"):
                 return self._deny("operate")
-            try:
-                b = self._body()
-            except Exception:
-                return self._json({"error": "bad json"}, 400)
+            b = self._read_json()
+            if b is None:
+                return
             h, s, path, d = str(b.get("host") or ""), str(b.get("snapshot") or ""), str(b.get("path") or ""), bool(b.get("dir"))
             if h not in VALID_HOSTS or not _SNAP_RE.match(s) or not _ok_path(path) or path == "/":
                 return self._json({"error": "bad request"}, 400)
@@ -3108,19 +3177,17 @@ class H(BaseHTTPRequestHandler):
             # Alertmanager on this host only; no token (it has none) — loopback is the auth
             if self.client_address[0] not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
                 return self._json({"error": "loopback only"}, 403)
-            try:
-                body = self._body()
-            except Exception:
-                return self._json({"error": "bad json"}, 400)
+            body = self._read_json()
+            if body is None:
+                return
             return self._json({"recorded": record_alerts(body)})
         if self.path == "/api/v1/explain":
             # explanations change nothing but cost GPU time: operator and up
             if not self._allowed("operate"):
                 return self._deny("operate")
-            try:
-                body = self._body()
-            except Exception:
-                return self._json({"error": "bad json"}, 400)
+            body = self._read_json()
+            if body is None:
+                return
             if body.get("kind") == "hygiene" and body.get("host") in VALID_HOSTS and isinstance(body.get("id"), str):
                 return self._json(explain_hygiene(body["host"], body["id"]))
             return self._json({"error": "unknown kind/host"}, 400)
@@ -3128,10 +3195,9 @@ class H(BaseHTTPRequestHandler):
             need = "admin"                # like setAssistant: it reaches out to a url the caller names
             if not self._allowed(need):
                 return self._deny(need)
-            try:
-                body = self._body()
-            except Exception:
-                return self._json({"error": "bad json"}, 400)
+            body = self._read_json()
+            if body is None:
+                return
             if self.path.endswith("-test"):
                 return self._json(assistant_test(body.get("url"), body.get("model"), body.get("timeout_seconds") or 60))
             key = body.get("key")
@@ -3142,10 +3208,9 @@ class H(BaseHTTPRequestHandler):
             who = self._ask_who()
             if not who:
                 return self._deny("view")
-            try:
-                body = self._body()
-            except Exception:
-                return self._json({"error": "bad json"}, 400)
+            body = self._read_json()
+            if body is None:
+                return
             text, tunit, tz = str(body.get("text") or "").strip(), body.get("tunit"), body.get("tz")
             if not text:
                 return self._json({"error": "ask something"}, 400)
@@ -3159,10 +3224,9 @@ class H(BaseHTTPRequestHandler):
             # a silence changes what the whole cluster alerts on: operator and up
             if not self._allowed("operate"):
                 return self._deny("operate")
-            try:
-                body = self._body()
-            except Exception:
-                return self._json({"error": "bad json"}, 400)
+            body = self._read_json()
+            if body is None:
+                return
             w = self._who()
             who = (w[0] if w else "") or "noctyx-console"
             try:
@@ -3193,16 +3257,20 @@ class H(BaseHTTPRequestHandler):
         # NOCTYX_CONSOLE_AUTH=0 disables the token gate (dev mode, systemd unit). The gate
         # stays in code — flip env back to 1 to restore. Whitelist + validation
         # apply either way: auth-off must not mean injection-on.
-        try:
-            body = self._body()
-            name, params = body.get("action"), body.get("params") or {}
-        except Exception:
-            return self._json({"error": "bad json"}, 400)
+        body = self._read_json()
+        if body is None:
+            return
+        name, params = body.get("action"), body.get("params") or {}
         need = "admin" if name in ADMIN_ACTIONS else "operate"
         if not self._allowed(need):
             return self._deny(need)
         if name == "setAssistant":
             errs = CM.validate_assistant(params.get("assistant"))[1]
+            if errs:
+                return self._json({"error": "; ".join(errs)}, 400)
+        if name == "setAlerting":
+            from noctyx import alerting
+            errs = alerting.validate_alerting(params.get("alerting"))[1]
             if errs:
                 return self._json({"error": "; ".join(errs)}, 400)
         if name == "setHeal":

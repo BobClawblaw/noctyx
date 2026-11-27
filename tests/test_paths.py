@@ -182,7 +182,7 @@ def test_phosphor_theme_is_a_valid_site_default_and_ships_its_fonts():
     assert o.validate_console({"fx": {"beam": "yes"}})[1] and o.validate_console({"fx": {"nope": "on"}})[1]
     for v in ("phosphor", "aurora", "outrun", "lcd", "p1green", "p3amber", "nixie", "synthwave", "arctic", "redops"):
         assert not o.validate_console({"theme": v, "mode": "dark"})[1]
-        assert f"{v}:" in console.PAGE
+        assert f"{v}:" in console.THEME_JS
     for f in ("michroma.woff2", "dseg7.woff2", "LICENSES.txt"):
         assert f"fonts/{f}" in console.ASSETS and (o.NX_HOME / "assets" / "fonts" / f).stat().st_size > 1000
-    assert "phosphor:{label:'Phosphor'" in console.PAGE and "html[data-style=phosphor]" in console.PAGE
+    assert "phosphor:{label:'Phosphor'" in console.THEME_JS and "html[data-style=phosphor]" in console.CONSOLE_CSS
